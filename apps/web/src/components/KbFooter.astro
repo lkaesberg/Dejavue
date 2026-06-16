@@ -1,0 +1,17 @@
+---
+import Echo from './Echo.astro';
+interface Props {
+  note?: string;
+  label?: string;
+}
+const { note = '', label = 'Knowledge base by' } = Astro.props;
+---
+
+<div style="border-top:1px solid #EDEDF2; padding:22px clamp(16px,4vw,40px); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+  <div style="display:flex; align-items:center; gap:8px;">
+    <Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" showEcho={false} size={16} />
+    <span style="font-size:12px; color:#9AA0C3;">{label}</span>
+    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; letter-spacing:-0.02em; color:#54586E;">dejavue</span>
+  </div>
+  {note && <span style="font-size:12px; color:#B5B8CB;">{note}</span>}
+</div>

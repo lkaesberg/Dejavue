@@ -63,30 +63,59 @@ export function findTagByName(forum: ForumChannel, name: string): string | undef
   return forum.availableTags.find((t) => t.name.toLowerCase() === name.toLowerCase())?.id;
 }
 
-/** Ensure "solved" + "unsolved" tags exist on the forum, creating any missing ones. */
+/**
+ * Our managed forum tags. Each carries an emoji and is `moderated: true`, so only
+ * members with Manage Threads — and the bot — can apply or remove them (regular
+ * posters can't flip their own thread to "solved").
+ */
+const MANAGED_TAGS: { name: string; emoji: string }[] = [
+  { name: 'solved', emoji: '✅' },
+  { name: 'unsolved', emoji: '❓' },
+  { name: 'duplicate', emoji: '🔁' },
+];
+
+/**
+ * Ensure the solved / unsolved / duplicate tags exist on the forum, each with its
+ * emoji + `moderated: true`. Reconciles existing tags too (re-running setup, or a
+ * bot restart, upgrades tags that predate the emoji / moderated flags). Writes to
+ * Discord only when something actually differs. Needs the Manage Channels permission.
+ */
 export async function ensureForumTags(
   forum: ForumChannel,
 ): Promise<{ solvedTagId: string; unsolvedTagId: string; duplicateTagId: string }> {
-  let { solvedTagId, unsolvedTagId } = findForumTags(forum);
-  let duplicateTagId = findTagByName(forum, 'duplicate');
-  if (solvedTagId && unsolvedTagId && duplicateTagId) {
-    return { solvedTagId, unsolvedTagId, duplicateTagId };
+  const specByName = new Map(MANAGED_TAGS.map((s) => [s.name, s]));
+
+  // Rebuild the full tag list, forcing our managed tags to the desired spec and
+  // leaving every other tag untouched.
+  const desired: GuildForumTagData[] = forum.availableTags.map((t) => {
+    const spec = specByName.get(t.name.toLowerCase());
+    if (spec) return { id: t.id, name: t.name, moderated: true, emoji: { id: null, name: spec.emoji } };
+    return {
+      id: t.id,
+      name: t.name,
+      moderated: t.moderated,
+      emoji: t.emoji ? { id: t.emoji.id, name: t.emoji.name } : null,
+    };
+  });
+
+  // Append any managed tag the forum doesn't have yet.
+  const present = new Set(forum.availableTags.map((t) => t.name.toLowerCase()));
+  for (const s of MANAGED_TAGS) {
+    if (!present.has(s.name)) desired.push({ name: s.name, moderated: true, emoji: { id: null, name: s.emoji } });
   }
 
-  const existing: GuildForumTagData[] = forum.availableTags.map((t) => ({
-    id: t.id,
-    name: t.name,
-    moderated: t.moderated,
-    emoji: t.emoji ? { id: t.emoji.id, name: t.emoji.name } : null,
-  }));
-  const additions: GuildForumTagData[] = [];
-  if (!solvedTagId) additions.push({ name: 'solved', moderated: false, emoji: null });
-  if (!unsolvedTagId) additions.push({ name: 'unsolved', moderated: false, emoji: null });
-  if (!duplicateTagId) additions.push({ name: 'duplicate', moderated: false, emoji: null });
+  // Only call the API when a managed tag is missing or out of spec.
+  const changed =
+    desired.length !== forum.availableTags.length ||
+    forum.availableTags.some((t) => {
+      const spec = specByName.get(t.name.toLowerCase());
+      return spec ? !t.moderated || t.emoji?.name !== spec.emoji : false;
+    });
 
-  const updated = await forum.setAvailableTags([...existing, ...additions]);
-  ({ solvedTagId, unsolvedTagId } = findForumTags(updated));
-  duplicateTagId = findTagByName(updated, 'duplicate');
+  const updated = changed ? await forum.setAvailableTags(desired) : forum;
+
+  const { solvedTagId, unsolvedTagId } = findForumTags(updated);
+  const duplicateTagId = findTagByName(updated, 'duplicate');
   if (!solvedTagId || !unsolvedTagId || !duplicateTagId) {
     throw new Error('failed to ensure forum tags');
   }

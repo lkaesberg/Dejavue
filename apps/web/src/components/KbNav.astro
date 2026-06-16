@@ -1,0 +1,50 @@
+---
+import Echo from './Echo.astro';
+interface Props {
+  slug: string;
+  compactSearch?: boolean;
+  query?: string;
+}
+const { slug, compactSearch = false, query = '' } = Astro.props;
+const letter = (slug?.[0] ?? 'D').toUpperCase();
+---
+
+<nav style="display:flex; align-items:center; gap:10px 16px; flex-wrap:wrap; padding:14px clamp(16px,4vw,40px); border-bottom:1px solid #EDEDF2;">
+  <a href="/" style="display:flex; align-items:center; gap:12px;">
+    <span
+      style="width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,#3B82F6,#2DD4BF); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#fff;"
+      >{letter}</span
+    >
+    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; color:#0E0F1C;"
+      >{slug}</span
+    >
+    <span style="font-size:13px; color:#9AA0C3;">Help Center</span>
+  </a>
+
+  {
+    compactSearch && (
+      <form
+        action="/search"
+        method="get"
+        role="search"
+        style="flex:1 1 220px; min-width:160px; display:flex; align-items:center; gap:9px; background:#F4F4F9; border:1px solid #E7E7EF; border-radius:10px; padding:8px 13px;"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9AA0C3" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+        <input
+          type="search"
+          name="q"
+          value={query}
+          placeholder="Search answers…"
+          aria-label="Search answers"
+          style="border:0; background:transparent; outline:none; font-size:13px; color:#1F2235; width:100%;"
+        />
+      </form>
+    )
+  }
+
+  <div style="margin-left:auto; display:flex; align-items:center; gap:7px; color:#9AA0C3;">
+    <Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" showEcho={false} size={15} />
+    <span style="font-size:12px;">powered by</span>
+    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; letter-spacing:-0.02em; color:#54586E;">dejavue</span>
+  </div>
+</nav>

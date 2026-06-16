@@ -1,5 +1,7 @@
 ---
 import { getDb, searchPublished } from '@dejavue/db';
+import KbFooter from '../components/KbFooter.astro';
+import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
 
 const { tenant, slug } = Astro.locals;
@@ -9,60 +11,83 @@ if (notFound) Astro.response.status = 404;
 const origin = new URL(Astro.request.url).origin;
 const query = (new URL(Astro.request.url).searchParams.get('q') ?? '').trim();
 
-let results: { threadId: string; title: string }[] = [];
+let results: Awaited<ReturnType<typeof searchPublished>> = [];
 if (tenant && query) {
-  results = await searchPublished(getDb(), tenant.guildId, query, 30);
+  // A public endpoint must never 500 on an odd query — fall back to no results.
+  try {
+    results = await searchPublished(getDb(), tenant.guildId, query, 30);
+  } catch {
+    results = [];
+  }
 }
 ---
 
 {
   tenant ? (
     <Base
-      title={query ? `Search: ${query} — ${tenant.slug}` : `Search — ${tenant.slug}`}
+      title={query ? `${query} — search · ${tenant.slug}` : `Search — ${tenant.slug}`}
       description={`Search the ${tenant.slug} knowledge base.`}
       canonical={`${origin}/search`}
       noindex
     >
-      <p class="muted">
-        <a href="/">← {tenant.slug} Knowledge Base</a>
-      </p>
-      <h1>Search</h1>
+      <div class="kb-page">
+        <KbNav slug={tenant.slug} />
 
-      <form class="search" action="/search" method="get" role="search">
-        <input
-          type="search"
-          name="q"
-          value={query}
-          placeholder="Search the knowledge base…"
-          aria-label="Search the knowledge base"
-        />
-        <button type="submit">Search</button>
-      </form>
+        {/* search field */}
+        <div class="kb-pad" style="padding-top:30px; padding-bottom:18px;">
+          <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:11px; background:#fff; border:1.5px solid #6D5FE8; border-radius:13px; padding:13px 18px; box-shadow:0 4px 16px rgba(109,95,232,0.1);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6D5FE8" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+            <input type="search" name="q" value={query} placeholder="Search the knowledge base…" aria-label="Search the knowledge base" autofocus style="border:0; outline:none; font-size:16px; color:#1F2235; flex:1;" />
+          </form>
+          {query !== '' && (
+            <div style="display:flex; align-items:center; gap:10px; margin-top:16px;">
+              <span style="font-size:13px; color:#6B6F86;">{results.length} {results.length === 1 ? 'result' : 'results'}</span>
+              <span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span>
+              <span style="display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#9AA0C3;"><span style="width:6px; height:6px; border-radius:50%; background:#7C3AED;"></span>Keyword search across published answers</span>
+            </div>
+          )}
+        </div>
 
-      {query === '' ? (
-        <p class="muted">Type a question above to search published answers.</p>
-      ) : results.length === 0 ? (
-        <p class="muted">No matches for “{query}”.</p>
-      ) : (
-        <section>
-          <p class="muted">
-            {results.length} {results.length === 1 ? 'result' : 'results'} for “{query}”
-          </p>
-          <ul class="list">
-            {results.map((r) => (
-              <li class="card">
-                <a href={`/t/${r.threadId}`}>{r.title}</a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      <footer>Powered by Dejavue</footer>
+        {/* results */}
+        <div class="kb-pad" style="padding-top:6px; padding-bottom:44px;">
+          {query === '' ? (
+            <p style="font-size:14px; color:#8A8EA6; padding:18px 2px;">Type a question above to search the knowledge base.</p>
+          ) : results.length === 0 ? (
+            <p style="font-size:14px; color:#8A8EA6; padding:18px 2px;">No matches for “{query}”.</p>
+          ) : (
+            results.map((r) => (
+              <a href={`/t/${r.threadId}`} class="kb-row" style="display:block; padding:18px 2px; border-bottom:1px solid #F1F1F6;">
+                <div style="display:flex; align-items:flex-start; gap:14px;">
+                  <span style="color:#2DD4BF; font-size:15px; margin-top:2px;">✓</span>
+                  <div style="flex:1;">
+                    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16.5px; letter-spacing:-0.01em; color:#3B36C9;">{r.title}</span>
+                    {r.snippet && (
+                      <div style="font-size:14px; color:#6B6F86; line-height:1.55; margin-top:6px;">{r.snippet}</div>
+                    )}
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:9px;">
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#9AA0C3;">{tenant.slug}.dejavue.app</span>
+                      {r.channel && (
+                        <span style="background:#EEF6FF; color:#2563EB; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px;">{r.channel}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </a>
+            ))
+          )}
+        </div>
+
+        <KbFooter label="Search by" note="Full-text search" />
+      </div>
     </Base>
   ) : (
     <Base title="Knowledge base not found" noindex>
-      <h1>Knowledge base not found</h1>
-      <p class="muted">This community hasn't set up a public knowledge base.</p>
+      <div class="kb-page">
+        <div style="padding:80px 40px; text-align:center;">
+          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.03em;">Knowledge base not found</h1>
+          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;">This community hasn't set up a public knowledge base.</p>
+        </div>
+      </div>
     </Base>
   )
 }

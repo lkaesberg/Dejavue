@@ -1,109 +1,423 @@
 ---
 import { getEnv } from '@dejavue/core';
-import { getDb, getFaqEntries, getPublishedThreads, type Thread } from '@dejavue/db';
+import { getDb, getPublishedThreads, type Thread } from '@dejavue/db';
+import Echo from '../components/Echo.astro';
+import KbFooter from '../components/KbFooter.astro';
+import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
 
 const { tenant, slug } = Astro.locals;
 const notFound = slug !== null && tenant === null;
 if (notFound) Astro.response.status = 404;
 
 const origin = new URL(Astro.request.url).origin;
+const env = getEnv();
 
+// ---- Tenant KB home data -------------------------------------------------
 let threads: Thread[] = [];
-let faqs: Awaited<ReturnType<typeof getFaqEntries>> = [];
-if (tenant) {
-  const db = getDb();
-  threads = await getPublishedThreads(db, tenant.guildId, 500);
-  faqs = await getFaqEntries(db, tenant.guildId);
-}
+if (tenant) threads = await getPublishedThreads(getDb(), tenant.guildId, 1000);
 
-// Group solved threads by their source forum channel — each channel is a category.
-const byChannel = new Map<string, { name: string; threads: Thread[] }>();
+const byChannel = new Map<string, { id: string; name: string; count: number }>();
 for (const t of threads) {
-  const entry = byChannel.get(t.channelId) ?? { name: t.channelName ?? 'General', threads: [] };
-  entry.threads.push(t);
+  const entry = byChannel.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+  entry.count += 1;
   byChannel.set(t.channelId, entry);
 }
-const channelGroups = [...byChannel.values()].sort((a, b) => a.name.localeCompare(b.name));
+const categories = [...byChannel.values()].sort((a, b) => b.count - a.count);
+const mostAsked = threads.slice(0, 6);
+const handle = (name: string): string => `#${name.toLowerCase().replace(/\s+/g, '-')}`;
 
-const faqJsonLd = faqs.length
-  ? {
-      '@context': 'https://schema.org',
-      '@type': 'FAQPage',
-      mainEntity: faqs.map((f) => ({
-        '@type': 'Question',
-        name: f.question,
-        acceptedAnswer: { '@type': 'Answer', text: f.answer },
-      })),
-    }
-  : null;
+// ---- Add-to-Discord install link (marketing) ------------------------------
+const PERMS = (
+  1024n /* View Channels */ +
+  16n /* Manage Channels */ +
+  2048n /* Send Messages */ +
+  16384n /* Embed Links */ +
+  65536n /* Read Message History */ +
+  17179869184n /* Manage Threads */ +
+  274877906944n /* Send Messages in Threads */
+).toString();
+const addUrl = env.DISCORD_CLIENT_ID
+  ? `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_CLIENT_ID}&scope=bot+applications.commands&permissions=${PERMS}`
+  : '#';
+
+// ---- Marketing static content --------------------------------------------
+const featBtn =
+  'background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; box-shadow:0 10px 24px rgba(124,58,237,0.35);';
+const ghostBtn = 'background:rgba(244,245,255,0.06); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF;';
+const steps = [
+  { num: '1', title: 'Someone posts', body: 'A new forum thread lands. Dejavue reads the question and checks for duplicates — keyword on Free, semantic on Plus+.' },
+  { num: '2', title: 'Matches surface', body: 'If it has seen it before, it replies with the closest solved threads — plus an AI-drafted answer on Pro & Max.' },
+  { num: '3', title: 'Mark as solved', body: 'OP, mod, or admin resolves it. The accepted answer and full transcript are captured and the tag flips to solved.' },
+  { num: '4', title: 'Archived & searchable', body: 'It is embedded for semantic search, summarized, and — if opted in — published to the public knowledge base.' },
+];
+const tiers = [
+  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (≤500)', 'Basic counts', '10 public KB pages'] },
+  { name: 'Plus', price: '$4.99', per: '/mo', tag: 'Semantic search and nudges for growing forums.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['3 forum channels', 'Semantic duplicate detection', 'Archive ≤1,500', 'Stale-question nudges', 'Full analytics · 100 KB pages', '“Powered by” removed'] },
+  { name: 'Pro', price: '$9.99', per: '/mo', tag: 'AI drafting, summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['5 forum channels', 'Semantic + AI-drafted answers', 'Archive ≤2,500', 'AI summaries · clustering · auto-FAQ', '~300 AI generations / mo', '500 AI-summarized KB pages'] },
+  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited forum channels', 'Unlimited archive & KB', '~1,500 AI generations / mo', 'MCP server for your KB', 'Everything in Pro'] },
+];
 ---
 
 {
   tenant ? (
     <Base
       title={`${tenant.slug} — Knowledge Base`}
-      description={`Answers to common questions for the ${tenant.slug} community.`}
+      description={`Answers from the ${tenant.slug} community, kept up to date.`}
       canonical={`${origin}/`}
     >
-      {faqJsonLd && (
-        <script type="application/ld+json" is:inline set:html={JSON.stringify(faqJsonLd)} slot="head" />
-      )}
-      <h1>{tenant.slug} Knowledge Base</h1>
-      <p class="muted">Solved community questions, kept current by Dejavue.</p>
+      <div class="kb-page">
+        <KbNav slug={tenant.slug} />
 
-      <form class="search" action="/search" method="get" role="search">
-        <input
-          type="search"
-          name="q"
-          placeholder="Search the knowledge base…"
-          aria-label="Search the knowledge base"
-        />
-        <button type="submit">Search</button>
-      </form>
+        {/* hero + search */}
+        <div class="kb-pad" style="padding-top:clamp(36px,6vw,54px); padding-bottom:44px; text-align:center; background:linear-gradient(180deg,#FBFBFE,#FFFFFF);">
+          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(27px,6vw,38px); letter-spacing:-0.03em; margin:0; line-height:1.1;">How can we help?</h1>
+          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;">Answers from the {tenant.slug} community, kept up to date.</p>
+          <form action="/search" method="get" role="search" style="max-width:560px; margin:28px auto 0; display:flex; align-items:center; gap:10px; background:#fff; border:1px solid #DADAE5; border-radius:13px; padding:13px 18px; box-shadow:0 4px 16px rgba(14,15,28,0.05);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9AA0C3" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+            <input type="search" name="q" placeholder={`Search ${threads.length} answers…`} aria-label="Search the knowledge base" style="border:0; outline:none; font-size:15px; color:#1F2235; width:100%;" />
+          </form>
+        </div>
 
-      {faqs.length > 0 && (
-        <section>
-          <h2>Frequently asked</h2>
-          {faqs.map((f) => (
-            <div class="card">
-              <div class="q">{f.question}</div>
-              <div class="answer">{f.answer}</div>
-            </div>
-          ))}
-        </section>
-      )}
-
-      {channelGroups.length === 0 ? (
-        <p class="muted">No published answers yet — check back soon.</p>
-      ) : (
-        channelGroups.map((ch) => (
-          <section>
-            <h2># {ch.name}</h2>
-            <ul class="list">
-              {ch.threads.map((t) => (
-                <li class="card">
-                  <a href={`/t/${t.threadId}`}>{t.title}</a>
-                </li>
+        {/* categories */}
+        <div class="kb-pad" style="padding-top:8px; padding-bottom:12px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600; margin-bottom:18px;">Browse by channel</div>
+          {categories.length === 0 ? (
+            <p style="font-size:14px; color:#8A8EA6;">No published answers yet — check back soon.</p>
+          ) : (
+            <div class="cat-grid">
+              {categories.map((c) => (
+                <a href={`/c/${c.id}`} class="kb-card-hover" style="border:1px solid #EAEAF1; border-radius:14px; padding:18px 20px; display:block;">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; letter-spacing:-0.01em; color:#1F2235;">{c.name}</span>
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#A2A6BE; background:#F4F4F9; padding:3px 9px; border-radius:999px;">{c.count}</span>
+                  </div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6D5FE8; margin-top:5px;">{handle(c.name)}</div>
+                </a>
               ))}
-            </ul>
-          </section>
-        ))
-      )}
-      <footer>Powered by Dejavue</footer>
+            </div>
+          )}
+          <div style="font-size:12.5px; color:#A2A6BE; margin-top:14px; line-height:1.5;">Each monitored Discord channel becomes a category.</div>
+        </div>
+
+        {/* most asked */}
+        {mostAsked.length > 0 && (
+          <div class="kb-pad" style="padding-top:30px; padding-bottom:44px;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600; margin-bottom:14px;">Recent answers</div>
+            <div style="border:1px solid #EAEAF1; border-radius:14px; overflow:hidden;">
+              {mostAsked.map((q) => (
+                <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; align-items:center; gap:14px; padding:15px 20px; border-bottom:1px solid #F1F1F6;">
+                  <span style="color:#2DD4BF; font-size:14px;">✓</span>
+                  <span style="font-size:14.5px; color:#2A2C3F; flex:1; font-weight:500;">{q.title}</span>
+                  {q.channelName && (
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#9AA0C3; background:#F4F4F9; padding:3px 9px; border-radius:999px; white-space:nowrap;">{q.channelName}</span>
+                  )}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <KbFooter note={`${threads.length} answers indexed`} />
+      </div>
     </Base>
   ) : notFound ? (
     <Base title="Knowledge base not found" noindex>
-      <h1>Knowledge base not found</h1>
-      <p class="muted">This community hasn't set up a public knowledge base.</p>
+      <div class="kb-page">
+        <div class="kb-pad" style="padding-top:80px; padding-bottom:80px; text-align:center;">
+          <Echo size={48} style="margin:0 auto;" />
+          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:28px; letter-spacing:-0.03em; margin:24px 0 0;">Knowledge base not found</h1>
+          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;">This community hasn't set up a public knowledge base.</p>
+        </div>
+      </div>
     </Base>
   ) : (
-    <Base title="Dejavue — Community Knowledge Bases">
-      <h1>Dejavue</h1>
-      <p>Each community's solved questions, turned into a fast, searchable, public knowledge base.</p>
-      <p class="muted">
-        Communities live at <code>{`{community}.${getEnv().KB_BASE_DOMAIN}`}</code>.
-      </p>
-    </Base>
+    <SiteLayout
+      title="Dejavue — never answer the same question twice"
+      description="A Discord bot that catches duplicate questions, drives a mark-solved workflow, and turns your forum into a searchable, SEO-ready knowledge base."
+      canonical={`${origin}/`}
+    >
+      {/* ===== NAV ===== */}
+      <nav style="position:sticky; top:0; z-index:50; backdrop-filter:blur(14px); background:rgba(10,11,20,0.72); border-bottom:1px solid rgba(244,245,255,0.07);">
+        <div style="max-width:1200px; margin:0 auto; padding:14px clamp(16px,4vw,32px); display:flex; align-items:center; justify-content:space-between; gap:16px;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <Echo tile="none" bubbleFill="#F4F5FF" checkFill="#2DD4BF" echoFill="#A78BFA" echoOpacity={0.6} size={32} />
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:21px; letter-spacing:-0.04em;">dejavue</span>
+          </div>
+          <div class="site-nav-links">
+            <a href="#how" style="font-size:14px; color:#9AA0C3;">How it works</a>
+            <a href="#features" style="font-size:14px; color:#9AA0C3;">Features</a>
+            <a href="#kb" style="font-size:14px; color:#9AA0C3;">Knowledge base</a>
+            <a href="#pricing" style="font-size:14px; color:#9AA0C3;">Pricing</a>
+            <a class="cta" href={addUrl} style="font-size:14px; font-weight:600; color:#F4F5FF; background:linear-gradient(135deg,#4F46E5,#7C3AED); padding:10px 18px; border-radius:10px; box-shadow:0 6px 18px rgba(124,58,237,0.35);">Add to Discord</a>
+          </div>
+        </div>
+      </nav>
+
+      {/* ===== HERO ===== */}
+      <header style="position:relative; padding:clamp(56px,9vw,96px) clamp(16px,4vw,32px) clamp(52px,8vw,88px);">
+        <div style="position:absolute; top:-160px; right:-80px; width:680px; height:680px; border-radius:50%; background:radial-gradient(circle, rgba(124,58,237,0.32), rgba(79,70,229,0.08) 42%, rgba(10,11,20,0) 70%); pointer-events:none;"></div>
+        <div style="position:absolute; top:120px; left:-180px; width:520px; height:520px; border-radius:50%; background:radial-gradient(circle, rgba(45,212,191,0.10), rgba(10,11,20,0) 68%); pointer-events:none;"></div>
+        <div class="hero-grid" style="position:relative; max-width:1200px; margin:0 auto;">
+          <div>
+            <div style="display:inline-flex; align-items:center; gap:8px; background:rgba(167,139,250,0.12); border:1px solid rgba(167,139,250,0.28); color:#C4B5FD; font-size:13px; font-weight:500; padding:7px 14px; border-radius:999px;">
+              <span style="width:6px; height:6px; border-radius:50%; background:#2DD4BF; box-shadow:0 0 0 4px rgba(45,212,191,0.18);"></span>
+              A Discord bot for help &amp; Q&amp;A forums
+            </div>
+            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(34px,8vw,62px); line-height:1.02; letter-spacing:-0.038em; margin:24px 0 0;">Never answer the same question twice.</h1>
+            <p style="font-size:clamp(16px,2.4vw,19px); line-height:1.55; color:#9AA0C3; margin:24px 0 0; max-width:520px;">Dejavue catches duplicate questions the moment they're posted, surfaces the answer from past solved threads, and turns your forum into a searchable, SEO-ready knowledge base.</p>
+            <div style="display:flex; gap:14px; margin-top:36px; flex-wrap:wrap;">
+              <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);">Add to Discord — free</a>
+              <a href="#how" style="display:inline-flex; align-items:center; gap:9px; background:rgba(244,245,255,0.05); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px;">See how it works</a>
+            </div>
+            <div style="display:flex; align-items:center; gap:22px; margin-top:30px; color:#6F7596; font-size:13px; flex-wrap:wrap;">
+              <span style="display:inline-flex; align-items:center; gap:7px;"><span style="color:#2DD4BF;">✓</span> Free tier, no card</span>
+              <span style="display:inline-flex; align-items:center; gap:7px;"><span style="color:#2DD4BF;">✓</span> Live in under a minute</span>
+            </div>
+          </div>
+
+          {/* discord mockup */}
+          <div style="position:relative;">
+            <div style="position:absolute; inset:-6% -4% -6% -4%; border-radius:50%; background:radial-gradient(circle, rgba(124,58,237,0.22), rgba(10,11,20,0) 70%);"></div>
+            <div style="position:relative; animation:dvFloat 7s ease-in-out infinite;">
+              <div style="background:#313338; border-radius:16px; overflow:hidden; box-shadow:0 30px 70px rgba(0,0,0,0.55); border:1px solid rgba(0,0,0,0.3);">
+                <div style="padding:16px 18px; border-bottom:1px solid rgba(0,0,0,0.25); display:flex; align-items:center; gap:10px;">
+                  <span style="color:#949BA4; font-size:18px;">#</span>
+                  <span style="font-weight:600; font-size:15px; color:#F2F3F5;">how do I rotate my API key?</span>
+                  <span style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; background:rgba(242,63,67,0.14); color:#F77; font-size:11px; font-weight:600; padding:4px 9px; border-radius:6px;"><span style="width:6px;height:6px;border-radius:50%;background:#F23F43;"></span>unsolved</span>
+                </div>
+                <div style="padding:16px 18px; display:flex; gap:12px;">
+                  <div style="width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg,#F0883E,#E0632C); flex-shrink:0;"></div>
+                  <div>
+                    <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-weight:600; font-size:14px; color:#F2A35E;">maya_dev</span><span style="font-size:11px; color:#949BA4;">Today at 14:02</span></div>
+                    <div style="font-size:14px; color:#DBDEE1; margin-top:3px; line-height:1.45;">Anyone know how to rotate the API key without downtime? Can't find it in settings.</div>
+                  </div>
+                </div>
+                <div style="padding:0 18px 18px;">
+                  <div style="display:flex; gap:12px;">
+                    <Echo tile="gradient" round={true} size={38} style="flex-shrink:0;" />
+                    <div style="flex:1; min-width:0;">
+                      <div style="display:flex; align-items:center; gap:7px;"><span style="font-weight:600; font-size:14px; color:#F4F5FF;">Dejavue</span><span style="background:#5865F2; color:#fff; font-size:9px; font-weight:600; padding:1px 5px; border-radius:4px; letter-spacing:0.02em;">APP</span><span style="font-size:11px; color:#949BA4;">14:02</span></div>
+                      <div style="margin-top:7px; background:#2B2D31; border-left:4px solid #7C3AED; border-radius:6px; padding:14px 16px;">
+                        <div style="display:flex; align-items:center; gap:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; color:#F4F5FF;">I&rsquo;ve seen this before</div>
+                        <div style="font-size:12.5px; color:#B5BAC1; margin-top:4px;">3 solved threads look like a match:</div>
+                        <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+                          <div style="display:flex; align-items:center; gap:10px; background:#1E1F22; border-radius:8px; padding:10px 12px;"><span style="color:#2DD4BF; font-size:13px;">✓</span><span style="font-size:13px; color:#DBDEE1; flex:1; min-width:0;">Rotating API keys with zero downtime</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; font-weight:600;">96%</span></div>
+                          <div style="display:flex; align-items:center; gap:10px; background:#1E1F22; border-radius:8px; padding:10px 12px;"><span style="color:#2DD4BF; font-size:13px;">✓</span><span style="font-size:13px; color:#DBDEE1; flex:1; min-width:0;">Where to find key management settings</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; font-weight:600;">89%</span></div>
+                          <div style="display:flex; align-items:center; gap:10px; background:#1E1F22; border-radius:8px; padding:10px 12px;"><span style="color:#2DD4BF; font-size:13px;">✓</span><span style="font-size:13px; color:#DBDEE1; flex:1; min-width:0;">API key best practices &amp; expiry</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; font-weight:600;">81%</span></div>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:13px; flex-wrap:wrap;">
+                          <span style="background:#248046; color:#fff; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:6px;">Use top answer &amp; close</span>
+                          <span style="background:#4E5058; color:#fff; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:6px;">Not a duplicate</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* ===== HOW IT WORKS ===== */}
+      <section id="how" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px); border-top:1px solid rgba(244,245,255,0.06);">
+        <div style="max-width:1200px; margin:0 auto;">
+          <div style="text-align:center; max-width:640px; margin:0 auto;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">The loop</div>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Detect → solve → archive → search</h2>
+            <p style="font-size:17px; line-height:1.55; color:#9AA0C3; margin:16px 0 0;">Every solved thread makes the next answer faster. Dejavue closes the loop automatically.</p>
+          </div>
+          <div class="steps-grid" style="margin-top:52px;">
+            {steps.map((s) => (
+              <div style="background:linear-gradient(180deg, rgba(27,29,51,0.9), rgba(20,21,38,0.6)); border:1px solid rgba(244,245,255,0.07); border-radius:18px; padding:26px 22px;">
+                <div style="display:flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:11px; background:rgba(124,58,237,0.16); border:1px solid rgba(167,139,250,0.25); font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; color:#C4B5FD;">{s.num}</div>
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; margin-top:18px; letter-spacing:-0.01em;">{s.title}</div>
+                <div style="font-size:14px; line-height:1.5; color:#9AA0C3; margin-top:8px;">{s.body}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ===== FEATURES BENTO ===== */}
+      <section id="features" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px);">
+        <div style="max-width:1200px; margin:0 auto;">
+          <div style="max-width:640px;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Features</div>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Built for forums that move fast</h2>
+          </div>
+          <div class="bento" style="margin-top:48px;">
+            <div class="bento-lg" style="background:linear-gradient(155deg, rgba(79,70,229,0.18), rgba(27,29,51,0.5)); border:1px solid rgba(167,139,250,0.18); border-radius:20px; padding:32px; display:flex; flex-direction:column;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Semantic search</div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:24px; letter-spacing:-0.02em; margin:10px 0 0;">Finds the answer, not the keyword</h3>
+              <p style="font-size:14.5px; line-height:1.55; color:#9AA0C3; margin:12px 0 0; max-width:380px;">pgvector embeddings match questions by meaning, so &ldquo;rotate my key&rdquo; finds &ldquo;cycle credentials&rdquo;. Keyword on Free, semantic from Plus up.</p>
+              <div style="margin-top:auto; padding-top:24px;">
+                <div style="background:#13141F; border:1px solid rgba(244,245,255,0.08); border-radius:12px; padding:12px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><span style="color:#6F7596;">/</span><span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#DBDEE1;">dejavue search</span><span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#A78BFA;">cycle credentials</span></div>
+              </div>
+            </div>
+            <div class="bento-3" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:28px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Mark-solved workflow</div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:21px; letter-spacing:-0.02em; margin:9px 0 12px;">One click flips the tag</h3>
+              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(242,63,67,0.14); color:#F77; font-size:12px; font-weight:600; padding:5px 11px; border-radius:7px;"><span style="width:6px;height:6px;border-radius:50%;background:#F23F43;"></span>unsolved</span>
+                <span style="color:#6F7596; font-size:18px;">&rarr;</span>
+                <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(35,165,90,0.16); color:#3BE08A; font-size:12px; font-weight:600; padding:5px 11px; border-radius:7px;"><span style="color:#2DD4BF;">✓</span>solved</span>
+              </div>
+              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:14px 0 0;">Button, modal, or right-click → Mark as Answer. The accepted answer and full transcript are captured every time.</p>
+            </div>
+            <div class="bento-3" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:28px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase; white-space:nowrap;">AI answers</div>
+                <span style="background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap;">PRO &amp; MAX</span>
+              </div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:21px; letter-spacing:-0.02em; margin:9px 0 12px;">Drafts answers from solved threads</h3>
+              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:0;">Generative drafting, clean KB summaries, knowledge-gap clustering, and auto-FAQ — metered by a monthly quota.</p>
+            </div>
+            <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Analytics</div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Resolution rate &amp; top helpers</h3>
+              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">Time-to-resolution and most-asked, surfaced in Discord.</p>
+            </div>
+            <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Nudges</div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Stale questions get a ping</h3>
+              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">Ping a helper role on a timer so nothing rots unanswered.</p>
+            </div>
+            <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Backfill</div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Import your whole history</h3>
+              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">A one-time pass embeds every past thread into the archive.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== KB SHOWCASE ===== */}
+      <section id="kb" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px);">
+        <div class="kb-grid" style="max-width:1200px; margin:0 auto;">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Public knowledge base</div>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,38px); letter-spacing:-0.03em; margin:14px 0 0;">Your answers, indexed by Google</h2>
+            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Every solved thread can publish to a fast, near-zero-JS page on your own <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">slug.dejavue.app</span> subdomain — or a custom domain. Each channel becomes a category; pages carry QA &amp; FAQ structured data so people find answers before they ask.</p>
+            <ul style="list-style:none; padding:0; margin:24px 0 0; display:flex; flex-direction:column; gap:12px;">
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> Per-guild subdomain or custom domain</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> Privacy-aliased speakers, opt-in per guild</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> JSON-LD + DB-driven sitemap, built for SEO</li>
+            </ul>
+          </div>
+          <div style="border-radius:16px; overflow:hidden; box-shadow:0 30px 70px rgba(0,0,0,0.5); border:1px solid rgba(244,245,255,0.1);">
+            <div style="background:#EFEFF4; height:40px; display:flex; align-items:center; padding:0 14px; gap:7px;">
+              <span style="width:11px; height:11px; border-radius:50%; background:#FF5F57;"></span>
+              <span style="width:11px; height:11px; border-radius:50%; background:#FEBC2E;"></span>
+              <span style="width:11px; height:11px; border-radius:50%; background:#28C840;"></span>
+              <div style="margin-left:12px; background:#fff; border-radius:7px; height:24px; flex:1; max-width:300px; display:flex; align-items:center; padding:0 12px; font-size:12px; color:#6B7280; font-family:'JetBrains Mono',monospace;">helio.dejavue.app</div>
+            </div>
+            <div style="background:#FFFFFF; padding:30px 32px; color:#0E0F1C; min-height:330px;">
+              <div style="display:flex; align-items:center; gap:9px; margin-bottom:22px;">
+                <Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" echoFill="#A78BFA" echoOpacity={0.6} size={26} />
+                <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:17px; letter-spacing:-0.03em; color:#0E0F1C;">Helio · Help Center</span>
+                <span style="margin-left:auto; font-size:12px; color:#9AA0C3;">42 answers</span>
+              </div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#7C3AED; letter-spacing:0.1em; text-transform:uppercase;">API · category</div>
+              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.02em; margin:10px 0 6px; color:#0E0F1C; line-height:1.2;">How do I rotate my API key without downtime?</h3>
+              <p style="font-size:14px; line-height:1.6; color:#54586E; margin:12px 0 0;">Generate a second key from <strong style="color:#0E0F1C;">Settings → API</strong>, roll it out to your services, then revoke the old one. Both keys stay valid during the overlap, so there's no downtime.</p>
+              <div style="display:flex; gap:8px; margin-top:20px; flex-wrap:wrap;">
+                <span style="background:#F1F0FB; color:#6D5FE8; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">api-keys</span>
+                <span style="background:#F1F0FB; color:#6D5FE8; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">security</span>
+                <span style="background:#E6FAF5; color:#0F9B82; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">✓ solved</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== MCP CALLOUT ===== */}
+      <section style="padding:clamp(36px,6vw,48px) clamp(16px,4vw,32px);">
+        <div style="max-width:1200px; margin:0 auto;">
+          <div class="mcp-grid" style="position:relative; overflow:hidden; border-radius:24px; border:1px solid rgba(167,139,250,0.22); background:linear-gradient(135deg, rgba(79,70,229,0.22), rgba(124,58,237,0.12)); padding:clamp(28px,5vw,48px) clamp(20px,4vw,52px);">
+            <div style="position:absolute; right:-60px; top:-60px; width:320px; height:320px; border-radius:50%; background:radial-gradient(circle, rgba(45,212,191,0.16), rgba(10,11,20,0) 70%);"></div>
+            <div style="position:relative;">
+              <span style="display:inline-block; background:#0A0B14; color:#2DD4BF; font-size:11px; font-weight:600; padding:4px 11px; border-radius:999px; letter-spacing:0.04em;">MAX TIER</span>
+              <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(26px,4.5vw,34px); letter-spacing:-0.03em; margin:16px 0 0;">Your community is an MCP server</h2>
+              <p style="font-size:16px; line-height:1.6; color:#CfCfE6; margin:14px 0 0; max-width:480px;">Each Max guild exposes its knowledge base as a Streamable HTTP MCP server. Point Claude or any MCP client at it and let your AI answer from the questions your community already solved.</p>
+            </div>
+            <div style="position:relative; background:#0A0B14; border:1px solid rgba(244,245,255,0.1); border-radius:14px; padding:20px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.7; overflow-x:auto;">
+              <div style="color:#6F7596;"># add to your MCP client</div>
+              <div style="color:#A78BFA; margin-top:6px;">helio.dejavue.app<span style="color:#F4F5FF;">/mcp</span></div>
+              <div style="color:#6F7596; margin-top:14px;"># exposes</div>
+              <div style="color:#2DD4BF; margin-top:6px;">search_knowledge_base<span style="color:#9AA0C3;">(query)</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== PRICING ===== */}
+      <section id="pricing" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px);">
+        <div style="max-width:1200px; margin:0 auto;">
+          <div style="text-align:center; max-width:600px; margin:0 auto;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Pricing</div>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Per server, billed in Discord</h2>
+            <p style="font-size:16px; line-height:1.55; color:#9AA0C3; margin:14px 0 0;">Keyword features are free forever. Semantic search anchors the middle; generative AI lives up top.</p>
+          </div>
+          <div class="pricing-grid" style="margin-top:48px;">
+            {tiers.map((t) => (
+              <div style={`position:relative; background:${t.bg}; border:1px solid ${t.border}; border-radius:20px; padding:28px 24px; display:flex; flex-direction:column;`}>
+                {t.featured && (
+                  <span style="position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:4px 12px; border-radius:999px; letter-spacing:0.04em; white-space:nowrap;">MOST POPULAR</span>
+                )}
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:20px; letter-spacing:-0.01em;">{t.name}</div>
+                <div style="display:flex; align-items:baseline; gap:4px; margin-top:10px;">
+                  <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:34px; letter-spacing:-0.03em;">{t.price}</span>
+                  <span style="font-size:13px; color:#9AA0C3;">{t.per}</span>
+                </div>
+                <div style="font-size:13px; color:#9AA0C3; margin-top:8px; min-height:36px;">{t.tag}</div>
+                <div style="height:1px; background:rgba(244,245,255,0.08); margin:18px 0;"></div>
+                <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:11px; flex:1;">
+                  {t.feats.map((f) => (
+                    <li style="display:flex; gap:9px; font-size:13.5px; color:#DBDEE1; line-height:1.45;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span><span>{f}</span></li>
+                  ))}
+                </ul>
+                <a href={addUrl} style={`display:block; text-align:center; margin-top:22px; padding:12px; border-radius:11px; font-size:14px; font-weight:600; ${t.btnStyle}`}>{t.cta}</a>
+              </div>
+            ))}
+          </div>
+          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">One-time add-ons on any tier — <span style="color:#9AA0C3;">Backfill</span>, <span style="color:#9AA0C3;">Custom domain</span>, <span style="color:#9AA0C3;">AI top-ups</span>. Prices are suggestions set per SKU.</p>
+        </div>
+      </section>
+
+      {/* ===== CTA ===== */}
+      <section style="padding:clamp(24px,5vw,40px) clamp(16px,4vw,32px) clamp(56px,9vw,88px);">
+        <div style="max-width:1000px; margin:0 auto; text-align:center; position:relative;">
+          <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:560px; height:360px; max-width:100%; background:radial-gradient(circle, rgba(124,58,237,0.22), rgba(10,11,20,0) 70%); pointer-events:none;"></div>
+          <div style="position:relative;">
+            <Echo tile="gradient" round={false} size={64} style="margin:0 auto; border-radius:16px; box-shadow:0 14px 36px rgba(124,58,237,0.4);" />
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(30px,6vw,44px); letter-spacing:-0.03em; margin:26px 0 0; line-height:1.05;">Stop answering the same question twice.</h2>
+            <div style="display:flex; gap:14px; justify-content:center; margin-top:32px; flex-wrap:wrap;">
+              <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:16px 30px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);">Add to Discord — free</a>
+              <a href="https://github.com" style="display:inline-flex; align-items:center; gap:9px; background:rgba(244,245,255,0.05); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF; font-size:15px; font-weight:600; padding:16px 30px; border-radius:12px;">Read the docs</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== FOOTER ===== */}
+      <footer style="border-top:1px solid rgba(244,245,255,0.07); padding:40px clamp(16px,4vw,32px);">
+        <div style="max-width:1200px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:24px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <Echo tile="none" bubbleFill="#F4F5FF" checkFill="#2DD4BF" showEcho={false} size={22} />
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:16px; letter-spacing:-0.03em;">dejavue</span>
+            <span style="font-size:13px; color:#6F7596; margin-left:8px;">Déjà vu, handled.</span>
+          </div>
+          <div style="display:flex; gap:24px; font-size:13px; color:#9AA0C3; flex-wrap:wrap;">
+            <a href="https://github.com" style="color:#9AA0C3;">Docs</a>
+            <a href="https://github.com" style="color:#9AA0C3;">GitHub</a>
+            <a href="#" style="color:#9AA0C3;">Privacy</a>
+            <a href="#" style="color:#9AA0C3;">Status</a>
+          </div>
+        </div>
+      </footer>
+    </SiteLayout>
   )
 }

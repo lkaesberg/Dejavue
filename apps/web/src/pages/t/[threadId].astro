@@ -1,39 +1,52 @@
 ---
 import { getEnv, tierLimits } from '@dejavue/core';
-import { getDb, getDuplicatesOf, getPublishedThread, resolveGuildTier } from '@dejavue/db';
+import {
+  getDb,
+  getDuplicatesOf,
+  getPublishedThread,
+  getPublishedThreads,
+  resolveGuildTier,
+  type Thread,
+} from '@dejavue/db';
 import { enqueueSummarize } from '@dejavue/queue';
+import KbFooter from '../../components/KbFooter.astro';
+import KbNav from '../../components/KbNav.astro';
 import Base from '../../layouts/Base.astro';
 
 const { tenant } = Astro.locals;
 const { threadId } = Astro.params;
 const origin = new URL(Astro.request.url).origin;
 
-let thread: Awaited<ReturnType<typeof getPublishedThread>> = undefined;
+let thread: Thread | undefined;
 let duplicates: { threadId: string; title: string }[] = [];
+let related: Thread[] = [];
 if (tenant && threadId) {
-  thread = await getPublishedThread(getDb(), tenant.guildId, threadId);
-  if (thread) duplicates = await getDuplicatesOf(getDb(), tenant.guildId, thread.threadId);
+  const db = getDb();
+  thread = await getPublishedThread(db, tenant.guildId, threadId);
+  if (thread) {
+    duplicates = await getDuplicatesOf(db, tenant.guildId, thread.threadId);
+    const siblings = await getPublishedThreads(db, tenant.guildId, 1000);
+    related = siblings
+      .filter((t) => t.channelId === thread!.channelId && t.threadId !== thread!.threadId)
+      .slice(0, 5);
+  }
 }
 if (!thread) Astro.response.status = 404;
 
 const summary = thread?.canonicalSummary ?? '';
 const acceptedAnswer = thread?.acceptedAnswerText ?? '';
 const transcript = thread?.transcript ?? [];
+const channelName = thread?.channelName ?? '';
 const hasContent = !!(acceptedAnswer || thread?.questionBody);
 
-// Lazy AI summary: generate only when a page is actually opened, on a generative
-// tier, when one doesn't exist yet. The worker fills it in; the client polls and
-// streams it in. We never pay to summarize threads nobody reads.
+// Lazy AI summary: enqueue on first view (generative tier, none yet); the worker
+// fills it in and the client polls + streams it into the card.
 let summaryPending = false;
 if (thread && tenant && !summary && hasContent) {
   const env = getEnv();
   const tier =
     env.DEV_FORCE_TIER ??
-    (await resolveGuildTier(getDb(), tenant.guildId, {
-      plus: env.SKU_PLUS,
-      pro: env.SKU_PRO,
-      max: env.SKU_MAX,
-    }));
+    (await resolveGuildTier(getDb(), tenant.guildId, { plus: env.SKU_PLUS, pro: env.SKU_PRO, max: env.SKU_MAX }));
   if (tierLimits(tier).generative) {
     summaryPending = true;
     await enqueueSummarize({
@@ -45,20 +58,32 @@ if (thread && tenant && !summary && hasContent) {
   }
 }
 
-// Structured-data answer prefers the full accepted answer; the on-page summary
-// is just a short recap shown above the discussion log.
+const cardBody = summary || acceptedAnswer;
+const cardLabel = summary || summaryPending ? 'Summary' : 'Accepted answer';
+const showCard = !!cardBody || summaryPending;
 const bestAnswer = acceptedAnswer || summary || (thread?.questionBody ?? '');
+const isSolved = thread?.status === 'solved';
+// Always link the KB page back to its source Discord thread.
+const discordUrl =
+  thread && tenant ? `https://discord.com/channels/${tenant.guildId}/${thread.threadId}` : '#';
 
-// Privacy-preserving speaker labels: the OP is "Original poster", others are
-// "Helper 1", "Helper 2", … — no usernames are exposed.
-const speakerLabels = new Map<string, string>();
+// Privacy-preserving speaker aliases.
+const labels = new Map<string, string>();
 let helperCount = 0;
 for (const m of transcript) {
-  if (speakerLabels.has(m.authorId)) continue;
-  if (thread && m.authorId === thread.opUserId) speakerLabels.set(m.authorId, 'Original poster');
-  else speakerLabels.set(m.authorId, `Helper ${++helperCount}`);
+  if (labels.has(m.authorId)) continue;
+  if (thread && m.authorId === thread.opUserId) labels.set(m.authorId, 'Original poster');
+  else labels.set(m.authorId, `Helper ${++helperCount}`);
 }
-const speakerOf = (id: string): string => speakerLabels.get(id) ?? 'Member';
+const aliasOf = (id: string): string => labels.get(id) ?? 'Member';
+const avatarOf = (id: string): { initial: string; bg: string } =>
+  thread && id === thread.opUserId
+    ? { initial: 'O', bg: 'linear-gradient(135deg,#F0883E,#E0632C)' }
+    : { initial: 'H', bg: 'linear-gradient(135deg,#4F46E5,#7C3AED)' };
+const fmtTime = (d: string): string =>
+  new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDate = (d: Date | string | null | undefined): string =>
+  d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
 
 const jsonLd = thread
   ? {
@@ -83,58 +108,121 @@ const jsonLd = thread
       canonical={`${origin}/t/${thread.threadId}`}
     >
       <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
-      <p class="muted">
-        <a href="/">← {tenant?.slug} Knowledge Base</a>
-      </p>
-      <h1>{thread.title}</h1>
+      <div class="kb-page">
+        <KbNav slug={tenant!.slug} compactSearch />
 
-      {duplicates.length > 0 && (
-        <section>
-          <h2>Also asked as</h2>
-          <ul class="dups">
-            {duplicates.map((d) => (
-              <li class="muted">{d.title}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {(summary || summaryPending) && (
-        <section>
-          <h2>Summary</h2>
-          <p class="muted">How this was solved — the full discussion is below.</p>
-          <div class="card answer" id="kb-summary" data-thread={thread.threadId} data-pending={summaryPending ? 'true' : 'false'}>
-            {summary || 'Generating a summary…'}
-          </div>
-        </section>
-      )}
-
-      {transcript.length > 0 ? (
-        <section>
-          <h2>Discussion</h2>
-          {transcript.map((m) => (
-            <div class="card">
-              <div class="q">{speakerOf(m.authorId)}</div>
-              <div class="answer">{m.content}</div>
+        <div class="kb-twocol">
+          {/* main column */}
+          <div class="kb-main kb-pad" style="padding-top:36px; padding-bottom:44px;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:#9AA0C3;">
+              <a href="/" class="kb-link">Help Center</a>
+              {channelName && (<><span style="color:#CDD0DE;">/</span><a href={`/c/${thread.channelId}`} class="kb-link">{channelName}</a></>)}
+              <span style="color:#CDD0DE;">/</span><span style="color:#6B6F86;">{thread.title}</span>
             </div>
-          ))}
-        </section>
-      ) : (
-        <>
-          {thread.questionBody && (
-            <section>
-              <h2>Question</h2>
-              <div class="card answer">{thread.questionBody}</div>
-            </section>
-          )}
-          {acceptedAnswer && (
-            <section>
-              <h2>Answer</h2>
-              <div class="card answer">{acceptedAnswer}</div>
-            </section>
-          )}
-        </>
-      )}
+
+            <div style="display:flex; align-items:center; gap:8px; margin-top:22px; flex-wrap:wrap;">
+              {channelName && (
+                <span style="background:#EEF6FF; color:#2563EB; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">{channelName}</span>
+              )}
+              {isSolved && (
+                <span style="display:inline-flex; align-items:center; gap:6px; background:#E6FAF5; color:#0F9B82; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">✓ Solved</span>
+              )}
+            </div>
+
+            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(24px,5vw,32px); letter-spacing:-0.025em; line-height:1.18; margin:16px 0 0;">{thread.title}</h1>
+            <div style="display:flex; align-items:center; gap:16px; margin-top:14px; font-size:13px; color:#9AA0C3; flex-wrap:wrap;">
+              <span>Asked by <span style="color:#6B6F86;">Original poster</span></span>
+              {thread.solvedAt && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>Resolved {fmtDate(thread.solvedAt)}</span></>)}
+              {transcript.length > 0 && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>{transcript.length} messages</span></>)}
+              <span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span>
+              <a class="kb-link" href={discordUrl} target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:5px; color:#6D5FE8; font-weight:500;">View on Discord <span style="color:#A2A6BE;">↗</span></a>
+            </div>
+
+            {showCard && (
+              <div style="margin-top:28px; border:1px solid #B7EFE2; background:#F4FDFA; border-radius:16px; padding:24px 26px;">
+                <div style="display:flex; align-items:center; gap:9px;">
+                  <span style="display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#2DD4BF; color:#fff; font-size:13px; font-weight:700;">✓</span>
+                  <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; color:#0F9B82; letter-spacing:0.01em;">{cardLabel}</span>
+                </div>
+                <p
+                  id="kb-summary"
+                  data-thread={thread.threadId}
+                  data-pending={summaryPending ? 'true' : 'false'}
+                  style="font-size:15.5px; line-height:1.65; color:#1F2235; margin:16px 0 0; white-space:pre-wrap;"
+                >{cardBody || 'Generating a summary…'}</p>
+              </div>
+            )}
+
+            {transcript.length > 0 && (
+              <div style="margin-top:34px;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">Full discussion</div>
+                <div style="display:flex; flex-direction:column; gap:18px; margin-top:18px;">
+                  {transcript.map((m) => (
+                    <div style="display:flex; gap:13px;">
+                      <div style={`width:34px; height:34px; border-radius:50%; background:${avatarOf(m.authorId).bg}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>{avatarOf(m.authorId).initial}</div>
+                      <div style="flex:1;">
+                        <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-weight:600; font-size:14px; color:#2A2C3F; white-space:nowrap;">{aliasOf(m.authorId)}</span><span style="font-size:12px; color:#A2A6BE; white-space:nowrap;">{fmtTime(m.createdAt)}</span></div>
+                        <div style="font-size:14px; line-height:1.6; color:#444862; margin-top:4px; white-space:pre-wrap;">{m.content}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {transcript.length === 0 && thread.questionBody && (
+              <div style="margin-top:30px;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">{acceptedAnswer ? 'Question' : 'Details'}</div>
+                <div style="font-size:15px; line-height:1.65; color:#444862; margin-top:12px; white-space:pre-wrap;">{thread.questionBody}</div>
+              </div>
+            )}
+
+            {channelName && (
+              <div style="display:flex; gap:8px; margin-top:32px; padding-top:24px; border-top:1px solid #EDEDF2; flex-wrap:wrap;">
+                <a href={`/c/${thread.channelId}`} style="background:#F4F4F9; color:#6D5FE8; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
+              </div>
+            )}
+          </div>
+
+          {/* sidebar */}
+          <aside class="kb-aside" style="padding:36px 26px;">
+            {related.length > 0 && (
+              <>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">Related</div>
+                <div style="display:flex; flex-direction:column; gap:4px; margin-top:14px;">
+                  {related.map((r) => (
+                    <a href={`/t/${r.threadId}`} class="kb-row" style="display:flex; gap:9px; padding:11px 12px; border-radius:10px; align-items:flex-start;">
+                      <span style="color:#2DD4BF; font-size:13px; margin-top:1px;">✓</span>
+                      <span style="font-size:13.5px; line-height:1.4; color:#3A3D52;">{r.title}</span>
+                    </a>
+                  ))}
+                </div>
+              </>
+            )}
+            {duplicates.length > 0 && (
+              <div style={related.length > 0 ? 'margin-top:28px;' : ''}>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">Also asked as</div>
+                <div style="display:flex; flex-direction:column; gap:9px; margin-top:14px;">
+                  {duplicates.map((d) => (
+                    <a
+                      class="kb-link"
+                      href={`https://discord.com/channels/${tenant!.guildId}/${d.threadId}`}
+                      target="_blank"
+                      rel="noopener"
+                      style="display:flex; gap:7px; font-size:13px; line-height:1.4; color:#6D5FE8;"
+                    >
+                      <span>{d.title}</span>
+                      <span style="color:#A2A6BE; flex-shrink:0;">↗</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+
+        <KbFooter note={channelName ? `in ${channelName}` : ''} />
+      </div>
 
       {summaryPending && (
         <script is:inline>
@@ -159,16 +247,15 @@ const jsonLd = thread
           })();`}
         </script>
       )}
-
-      <p class="muted">Shared from the community help forum.</p>
-      <footer>Powered by Dejavue</footer>
     </Base>
   ) : (
     <Base title="Answer not found" noindex>
-      <h1>Answer not found</h1>
-      <p class="muted">
-        <a href="/">Back to the knowledge base</a>
-      </p>
+      <div class="kb-page">
+        <div style="padding:80px 40px; text-align:center;">
+          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.03em;">Answer not found</h1>
+          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;"><a href="/" class="kb-link" style="color:#6D5FE8;">Back to the knowledge base</a></p>
+        </div>
+      </div>
     </Base>
   )
 }

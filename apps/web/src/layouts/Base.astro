@@ -1,4 +1,5 @@
 ---
+// Light theme for the public knowledge base (Dejavue brand design).
 interface Props {
   title: string;
   description?: string;
@@ -19,38 +20,40 @@ const { title, description, canonical, noindex } = Astro.props;
     {noindex && <meta name="robots" content="noindex" />}
     <meta property="og:title" content={title} />
     <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <slot name="head" />
     <style is:global>
-      :root {
-        color-scheme: light dark;
-        --fg: #1a1a2e; --muted: #6b6b80; --accent: #5865f2; --bg: #fff; --card: #f5f6fb;
+      *, *::before, *::after { box-sizing: border-box; }
+      /* Scoped to .kb-theme so the marketing (dark) layout's global body rule,
+         which is bundled into the same page, can't leak in and override colors. */
+      body.kb-theme { margin: 0; font-family: 'Inter', system-ui, sans-serif; color: #0E0F1C; background: #FFFFFF; }
+      body.kb-theme a { color: inherit; text-decoration: none; }
+      input { font-family: inherit; }
+      /* Centered page — comfortably wide, not edge-to-edge. */
+      .kb-page { max-width: 1280px; margin: 0 auto; background: #FFFFFF; min-height: 100vh; color: #0E0F1C; }
+      .kb-link:hover { text-decoration: underline; }
+      .kb-row:hover { background: #FBFBFE; }
+      .kb-card-hover:hover { border-color: #C9C4F2 !important; background: #FBFBFE; }
+      /* Responsive horizontal padding shared by every KB section. */
+      .kb-pad { padding-left: clamp(16px, 4vw, 44px); padding-right: clamp(16px, 4vw, 44px); }
+      /* Category cards: auto-fill so columns adapt from 1 (mobile) to many (wide). */
+      .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+      /* Article: main + related sidebar on desktop, stacked on mobile. */
+      .kb-twocol { display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+      .kb-main { border-right: 1px solid #EDEDF2; min-width: 0; }
+      @media (max-width: 860px) {
+        .kb-twocol { grid-template-columns: 1fr; }
+        .kb-main { border-right: 0; }
+        .kb-aside { border-top: 1px solid #EDEDF2; }
       }
-      @media (prefers-color-scheme: dark) {
-        :root { --fg: #e7e7ef; --muted: #9a9aae; --bg: #0f1015; --card: #191a23; }
-      }
-      * { box-sizing: border-box; }
-      body { margin: 0; font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: var(--bg); }
-      main { max-width: 760px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
-      a { color: var(--accent); text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      h1 { font-size: 1.9rem; margin: 0 0 .35rem; line-height: 1.2; }
-      h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
-      code { background: var(--card); padding: .1rem .35rem; border-radius: 5px; }
-      .muted { color: var(--muted); }
-      .card { background: var(--card); border-radius: 12px; padding: 1rem 1.2rem; margin: .6rem 0; }
-      .list { list-style: none; padding: 0; margin: 1rem 0; }
-      .q { font-weight: 600; margin-bottom: .35rem; }
-      .answer { white-space: pre-wrap; }
-      .search { display: flex; gap: .5rem; margin: 1.25rem 0 1.75rem; }
-      .search input { flex: 1; padding: .65rem .9rem; font-size: 1rem; color: var(--fg); background: var(--card); border: 1px solid transparent; border-radius: 10px; }
-      .search input:focus { outline: none; border-color: var(--accent); }
-      .search button { padding: .65rem 1.1rem; font-size: 1rem; color: #fff; background: var(--accent); border: 0; border-radius: 10px; cursor: pointer; }
-      .dups { list-style: none; padding: 0; margin: .5rem 0 0; }
-      .dups li { margin: .25rem 0; font-size: .95rem; }
-      footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
     </style>
   </head>
-  <body>
-    <main><slot /></main>
+  <body class="kb-theme">
+    <slot />
   </body>
 </html>

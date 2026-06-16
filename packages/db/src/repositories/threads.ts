@@ -194,6 +194,74 @@ export async function getThreadsMissingEmbeddingInChannel(
     .limit(limit);
 }
 
+// ---------------------------------------------------------------------------
+// Deletion / reconciliation — keep the index in sync with Discord reality.
+// Embeddings cascade (FK onDelete: cascade); generation_event / cluster medoid
+// FKs are set null, so deleting a thread never orphans or errors.
+// ---------------------------------------------------------------------------
+
+/** Delete a thread (and its embeddings) by discord thread id. Returns rows removed. */
+export async function deleteThreadByDiscordId(
+  db: Database,
+  guildId: string,
+  discordThreadId: string,
+): Promise<number> {
+  const rows = await db
+    .delete(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)))
+    .returning({ id: thread.id });
+  return rows.length;
+}
+
+/** Delete every thread (and embeddings) belonging to a forum channel. Returns rows removed. */
+export async function deleteThreadsByChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+): Promise<number> {
+  const rows = await db
+    .delete(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)))
+    .returning({ id: thread.id });
+  return rows.length;
+}
+
+/** Delete a set of threads by discord thread id (bulk prune). Returns rows removed. */
+export async function deleteThreadsByDiscordIds(
+  db: Database,
+  guildId: string,
+  discordThreadIds: string[],
+): Promise<number> {
+  if (discordThreadIds.length === 0) return 0;
+  const rows = await db
+    .delete(thread)
+    .where(and(eq(thread.guildId, guildId), inArray(thread.threadId, discordThreadIds)))
+    .returning({ id: thread.id });
+  return rows.length;
+}
+
+/** All discord thread ids we have indexed for a channel (to diff against Discord). */
+export async function listThreadIdsByChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ threadId: thread.threadId })
+    .from(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)));
+  return rows.map((r) => r.threadId);
+}
+
+/** Distinct forum channel ids we have threads for (to catch orphaned channels). */
+export async function listChannelIdsForGuild(db: Database, guildId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ channelId: thread.channelId })
+    .from(thread)
+    .where(eq(thread.guildId, guildId));
+  return rows.map((r) => r.channelId);
+}
+
 /** Store the full human transcript of a thread (for the public KB). */
 export async function setTranscript(
   db: Database,

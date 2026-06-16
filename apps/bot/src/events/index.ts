@@ -2,12 +2,16 @@ import { type Client, Events } from 'discord.js';
 import { logger } from '@dejavue/core';
 import { kbStartupReconcile } from '../lib/kbReconcile';
 import { reconcileAllEntitlements } from '../lib/reconcile';
+import { reconcileDeletions } from '../lib/threadReconcile';
+import { onChannelDelete } from './channelDelete';
 import { onEntitlementCreate, onEntitlementDelete, onEntitlementUpdate } from './entitlements';
 import { onInteraction } from './interactionCreate';
 import { onMessageCreate } from './messageCreate';
 import { onThreadCreate } from './threadCreate';
+import { onThreadDelete } from './threadDelete';
 
 const RECONCILE_INTERVAL_MS = 60 * 60 * 1000;
+const DELETION_RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export function registerEvents(client: Client): void {
   client.once(Events.ClientReady, (c) => {
@@ -15,12 +19,20 @@ export function registerEvents(client: Client): void {
     // Heal any entitlement drift on startup, then hourly.
     void reconcileAllEntitlements(c);
     setInterval(() => void reconcileAllEntitlements(c), RECONCILE_INTERVAL_MS).unref();
-    // Auto-fill the KB on startup: publish missed solves + backfill embeddings.
-    void kbStartupReconcile(c);
+    // Heal deletions that happened while we were offline, THEN fill the KB — so we
+    // don't re-publish/re-embed ghosts. Periodic sweep backstops missed events.
+    void reconcileDeletions(c).then(() => kbStartupReconcile(c));
+    setInterval(() => void reconcileDeletions(c), DELETION_RECONCILE_INTERVAL_MS).unref();
   });
 
   client.on(Events.ThreadCreate, (thread, newlyCreated) => {
     void onThreadCreate(thread, newlyCreated);
+  });
+  client.on(Events.ThreadDelete, (thread) => {
+    void onThreadDelete(thread);
+  });
+  client.on(Events.ChannelDelete, (channel) => {
+    void onChannelDelete(channel);
   });
   client.on(Events.MessageCreate, (message) => {
     void onMessageCreate(message);

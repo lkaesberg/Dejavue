@@ -112,12 +112,33 @@ export async function searchPublished(
   guildId: string,
   query: string,
   limit = 20,
-): Promise<{ threadId: string; title: string }[]> {
-  const document = sql`to_tsvector('english', ${thread.title} || ' ' || ${thread.questionBody} || ' ' || coalesce(${thread.acceptedAnswerText}, '') || ' ' || coalesce(${thread.canonicalSummary}, ''))`;
+): Promise<
+  { threadId: string; title: string; channel: string | null; snippet: string }[]
+> {
+  // Full text over EVERY text field on the thread — including each reply in the
+  // discussion transcript — so an answer is findable by anything said in it.
+  // (jsonb_typeof guards against null / non-array transcripts.)
+  const transcriptText = sql`coalesce(case when jsonb_typeof(${thread.transcript}) = 'array'
+    then (select string_agg(msg->>'content', ' ') from jsonb_array_elements(${thread.transcript}) as msg)
+    else '' end, '')`;
+  const document = sql`to_tsvector('english',
+    ${thread.title} || ' ' ||
+    ${thread.questionBody} || ' ' ||
+    coalesce(${thread.acceptedAnswerText}, '') || ' ' ||
+    coalesce(${thread.canonicalSummary}, '') || ' ' ||
+    coalesce(${thread.channelName}, '') || ' ' ||
+    ${transcriptText})`;
   const tsquery = sql`websearch_to_tsquery('english', ${query})`;
   const rank = sql<number>`ts_rank(${document}, ${tsquery})`;
-  return db
-    .select({ threadId: thread.threadId, title: thread.title })
+  const rows = await db
+    .select({
+      threadId: thread.threadId,
+      title: thread.title,
+      channel: thread.channelName,
+      summary: thread.canonicalSummary,
+      answer: thread.acceptedAnswerText,
+      question: thread.questionBody,
+    })
     .from(thread)
     .where(
       and(
@@ -130,6 +151,16 @@ export async function searchPublished(
     )
     .orderBy(sql`${rank} desc`)
     .limit(limit);
+
+  return rows.map((r) => {
+    const body = (r.summary || r.answer || r.question || '').replace(/\s+/g, ' ').trim();
+    return {
+      threadId: r.threadId,
+      title: r.title,
+      channel: r.channel,
+      snippet: body.length > 180 ? `${body.slice(0, 180)}…` : body,
+    };
+  });
 }
 
 /**

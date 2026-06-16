@@ -1,0 +1,67 @@
+---
+// Dark theme for the marketing site (apex / www).
+interface Props {
+  title: string;
+  description?: string;
+  canonical?: string;
+}
+const { title, description, canonical } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    <meta property="og:title" content={title} />
+    {description && <meta property="og:description" content={description} />}
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <slot name="head" />
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; }
+      /* Scoped to .site-theme so it can't leak into the KB (light) layout, whose
+         global body rule is bundled into the same page. */
+      body.site-theme { margin: 0; background: #0A0B14; font-family: 'Inter', system-ui, sans-serif; color: #F4F5FF; overflow-x: hidden; }
+      body.site-theme a { text-decoration: none; }
+      @keyframes dvFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+      ::selection { background: rgba(124,58,237,0.4); color: #fff; }
+
+      /* ---- Responsive marketing grids ---- */
+      .site-nav-links { display: flex; align-items: center; gap: 30px; }
+      .hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 60px; align-items: center; }
+      .kb-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 56px; align-items: center; }
+      .mcp-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; align-items: center; }
+      .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px; }
+      .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
+      .bento { display: grid; grid-template-columns: repeat(6, 1fr); grid-auto-rows: minmax(180px, auto); gap: 18px; }
+      .bento-lg { grid-column: span 3; grid-row: span 2; }
+      .bento-3 { grid-column: span 3; }
+      .bento-2 { grid-column: span 2; }
+
+      @media (max-width: 900px) {
+        .hero-grid, .kb-grid { grid-template-columns: 1fr; gap: 40px; }
+        .bento { grid-template-columns: 1fr 1fr; }
+        .bento-lg, .bento-3, .bento-2 { grid-column: auto; grid-row: auto; }
+      }
+      @media (max-width: 760px) {
+        .site-nav-links a:not(.cta) { display: none; }
+        .mcp-grid { grid-template-columns: 1fr; gap: 28px; }
+      }
+      @media (max-width: 560px) {
+        .bento { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body class="site-theme">
+    <slot />
+  </body>
+</html>

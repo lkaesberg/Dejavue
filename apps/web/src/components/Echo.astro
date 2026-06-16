@@ -1,0 +1,77 @@
+---
+// The Dejavue "Echo" mark — a speech bubble with a check, ported from the brand
+// design. Defaults render the dejavue gradient tile + echo halo.
+interface Props {
+  tile?: 'gradient' | 'indigo' | 'violet' | 'ink' | 'slate' | 'cloud' | 'none';
+  round?: boolean;
+  showEcho?: boolean;
+  bubbleFill?: string;
+  checkFill?: string;
+  echoFill?: string;
+  echoOpacity?: number;
+  size?: number;
+  class?: string;
+  style?: string;
+}
+const {
+  tile = 'gradient',
+  round = false,
+  showEcho = true,
+  bubbleFill = '#F4F5FF',
+  checkFill = '#2DD4BF',
+  echoFill = '#FFFFFF',
+  echoOpacity = 0.26,
+  size,
+  class: className,
+  style,
+} = Astro.props;
+
+const uid = 'e' + Math.random().toString(36).slice(2, 8);
+const tileMap: Record<string, string> = {
+  gradient: `url(#grad-${uid})`,
+  indigo: '#4F46E5',
+  violet: '#7C3AED',
+  ink: '#0E0F1C',
+  slate: '#1B1D33',
+  cloud: '#F4F5FF',
+  none: 'none',
+};
+const showTile = tile !== 'none';
+const tileFill = tileMap[tile] ?? tile;
+const tileRadius = round ? 512 : 232;
+const dims = size ? `width:${size}px;height:${size}px;` : '';
+---
+
+<svg
+  viewBox="0 0 1024 1024"
+  xmlns="http://www.w3.org/2000/svg"
+  class={className}
+  style={`display:block;${dims}${style ?? ''}`}
+  aria-hidden="true"
+>
+  <defs>
+    <linearGradient id={`grad-${uid}`} x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"></stop>
+      <stop offset="100%" stop-color="#7C3AED"></stop>
+    </linearGradient>
+  </defs>
+  {showTile && <rect x="0" y="0" width="1024" height="1024" rx={tileRadius} fill={tileFill}></rect>}
+  {
+    showEcho && (
+      <g opacity={echoOpacity} transform="translate(-76 -76)">
+        <rect x="344" y="320" width="448" height="348" rx="82" fill={echoFill} />
+      </g>
+    )
+  }
+  <g>
+    <rect x="344" y="320" width="448" height="348" rx="82" fill={bubbleFill}></rect>
+    <path d="M430 660 L452 762 L528 660 Z" fill={bubbleFill}></path>
+    <path
+      d="M476 492 L540 558 L676 414"
+      fill="none"
+      stroke={checkFill}
+      stroke-width="60"
+      stroke-linecap="round"
+      stroke-linejoin="round"></path>
+  </g>
+</svg>
