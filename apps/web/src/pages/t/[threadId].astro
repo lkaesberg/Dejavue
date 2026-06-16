@@ -1,0 +1,94 @@
+---
+import { getDb, getPublishedThread } from '@dejavue/db';
+import Base from '../../layouts/Base.astro';
+
+const { tenant } = Astro.locals;
+const { threadId } = Astro.params;
+const origin = new URL(Astro.request.url).origin;
+
+let thread: Awaited<ReturnType<typeof getPublishedThread>> = undefined;
+if (tenant && threadId) {
+  thread = await getPublishedThread(getDb(), tenant.guildId, threadId);
+}
+if (!thread) Astro.response.status = 404;
+
+const answer = thread?.canonicalSummary || thread?.acceptedAnswerText || '';
+const transcript = thread?.transcript ?? [];
+
+// Privacy-preserving speaker labels: the OP is "Original poster", others are
+// "Helper 1", "Helper 2", … — no usernames are exposed.
+const speakerLabels = new Map<string, string>();
+let helperCount = 0;
+for (const m of transcript) {
+  if (speakerLabels.has(m.authorId)) continue;
+  if (thread && m.authorId === thread.opUserId) speakerLabels.set(m.authorId, 'Original poster');
+  else speakerLabels.set(m.authorId, `Helper ${++helperCount}`);
+}
+const speakerOf = (id: string): string => speakerLabels.get(id) ?? 'Member';
+
+const jsonLd = thread
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'QAPage',
+      mainEntity: {
+        '@type': 'Question',
+        name: thread.title,
+        text: thread.questionBody || thread.title,
+        answerCount: answer ? 1 : 0,
+        ...(answer ? { acceptedAnswer: { '@type': 'Answer', text: answer } } : {}),
+      },
+    }
+  : null;
+---
+
+{
+  thread ? (
+    <Base
+      title={`${thread.title} — ${tenant?.slug ?? 'Dejavue'}`}
+      description={(thread.questionBody || thread.title).slice(0, 160)}
+      canonical={`${origin}/t/${thread.threadId}`}
+    >
+      <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
+      <p class="muted">
+        <a href="/">← {tenant?.slug} Knowledge Base</a>
+      </p>
+      <h1>{thread.title}</h1>
+
+      <h2>Answer</h2>
+      {answer ? (
+        <div class="card answer">{answer}</div>
+      ) : (
+        <p class="muted">No canonical answer recorded.</p>
+      )}
+
+      {transcript.length > 0 ? (
+        <section>
+          <h2>Full discussion</h2>
+          {transcript.map((m) => (
+            <div class="card">
+              <div class="q">{speakerOf(m.authorId)}</div>
+              <div class="answer">{m.content}</div>
+            </div>
+          ))}
+        </section>
+      ) : (
+        thread.questionBody && (
+          <section>
+            <h2>Question</h2>
+            <div class="card answer">{thread.questionBody}</div>
+          </section>
+        )
+      )}
+
+      <p class="muted">Shared from the community help forum.</p>
+      <footer>Powered by Dejavue</footer>
+    </Base>
+  ) : (
+    <Base title="Answer not found" noindex>
+      <h1>Answer not found</h1>
+      <p class="muted">
+        <a href="/">Back to the knowledge base</a>
+      </p>
+    </Base>
+  )
+}

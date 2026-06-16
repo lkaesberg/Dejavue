@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Native deps (e.g. onnxruntime-node pulled in by @huggingface/transformers)
+# need their install scripts allowed under pnpm v10+. Harmless on v9.
+onlyBuiltDependencies:
+  - "@huggingface/transformers"
+  - onnxruntime-node
+  - sharp
+  - esbuild

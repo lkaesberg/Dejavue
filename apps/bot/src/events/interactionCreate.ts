@@ -1,0 +1,146 @@
+import {
+  type ButtonInteraction,
+  type Interaction,
+  MessageFlags,
+  type ModalSubmitInteraction,
+  type ThreadChannel,
+} from 'discord.js';
+import { childLogger } from '@dejavue/core';
+import { getDb, getThreadByDiscordId } from '@dejavue/db';
+import {
+  ACCEPT_BUTTON_PREFIX,
+  buildSolveModal,
+  DISMISS_BUTTON_ID,
+  duplicateAcceptedNotice,
+  duplicateResolvedNotice,
+  SOLVE_BUTTON_ID,
+  SOLVE_MODAL_PREFIX,
+  solvedNotice,
+  solvedWithAnswerNotice,
+  threadUrl,
+} from '../lib/embeds';
+import { applyTag, findTagByName, forumParent } from '../lib/forum';
+import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
+import { eph, safeReply } from '../lib/reply';
+import { solveThread } from '../lib/solve';
+import { getGuildTier, limitsFor } from '../lib/tier';
+import { contextByName, slashByName } from '../commands/registry';
+
+const log = childLogger({ mod: 'event:interaction' });
+
+async function showBrandingFor(guildId: string): Promise<boolean> {
+  return !limitsFor(await getGuildTier(guildId)).removeBranding;
+}
+
+/** Borrow a previous solved post's answer into this thread and mark it solved + duplicate. */
+async function acceptDuplicate(
+  channel: ThreadChannel,
+  originalThreadId: string,
+  solverId: string,
+): Promise<void> {
+  const db = getDb();
+  const original = await getThreadByDiscordId(db, channel.guildId, originalThreadId);
+  const url = threadUrl(channel.guildId, originalThreadId);
+  const answerText = original?.canonicalSummary || original?.acceptedAnswerText || '';
+  const showBranding = await showBrandingFor(channel.guildId);
+
+  await channel.send(duplicateAcceptedNotice(answerText, url, showBranding)).catch(() => undefined);
+
+  const forum = forumParent(channel);
+  if (forum) {
+    const dupTag = findTagByName(forum, 'duplicate');
+    if (dupTag) await applyTag(channel, dupTag).catch(() => undefined);
+  }
+
+  await solveThread(channel, {
+    answerText: answerText || `Duplicate of ${url}`,
+    answerAuthorId: solverId,
+    solverId,
+  });
+}
+
+async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (interaction.customId === DISMISS_BUTTON_ID) {
+    await interaction.message.delete().catch(() => undefined);
+    return;
+  }
+
+  const channel = interaction.channel;
+  if (!channel || !channel.isThread() || !forumParent(channel)) {
+    await interaction.reply(eph('Use this inside a forum post.'));
+    return;
+  }
+  const isOp = channel.ownerId === interaction.user.id;
+  if (!canResolveThread(interaction.memberPermissions, isOp)) {
+    await interaction.reply(eph(NO_PERMISSION_MESSAGE));
+    return;
+  }
+
+  if (interaction.customId === SOLVE_BUTTON_ID) {
+    // Force an answer rather than an empty solve.
+    await interaction.showModal(buildSolveModal(interaction.message.id));
+    return;
+  }
+
+  if (interaction.customId.startsWith(ACCEPT_BUTTON_PREFIX)) {
+    const originalThreadId = interaction.customId.slice(ACCEPT_BUTTON_PREFIX.length);
+    await interaction.deferUpdate();
+    await acceptDuplicate(channel, originalThreadId, interaction.user.id);
+    await interaction
+      .editReply(duplicateResolvedNotice(channel.guildId, originalThreadId, await showBrandingFor(channel.guildId)))
+      .catch(() => undefined);
+  }
+}
+
+async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!interaction.customId.startsWith(SOLVE_MODAL_PREFIX)) return;
+  const channel = interaction.channel;
+  if (!channel || !channel.isThread() || !forumParent(channel)) {
+    await interaction.reply(eph('Use this inside a forum post.'));
+    return;
+  }
+  const isOp = channel.ownerId === interaction.user.id;
+  if (!canResolveThread(interaction.memberPermissions, isOp)) {
+    await interaction.reply(eph(NO_PERMISSION_MESSAGE));
+    return;
+  }
+
+  const answer = interaction.fields.getTextInputValue('answer').trim();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await solveThread(channel, {
+    answerText: answer,
+    answerAuthorId: interaction.user.id,
+    solverId: interaction.user.id,
+  });
+
+  const showBranding = await showBrandingFor(channel.guildId);
+  await channel.send(solvedWithAnswerNotice(answer, interaction.user.id, showBranding)).catch(() => undefined);
+
+  // Update the originating control message (id encoded in the modal customId) to "solved".
+  const controlMessageId = interaction.customId.slice(SOLVE_MODAL_PREFIX.length).replace(/^:/, '');
+  if (controlMessageId) {
+    const msg = await channel.messages.fetch(controlMessageId).catch(() => null);
+    await msg
+      ?.edit(solvedNotice({ showBranding, solverId: interaction.user.id, answerAuthorId: interaction.user.id }))
+      .catch(() => undefined);
+  }
+
+  await interaction.editReply('✅ Marked solved and archived.');
+}
+
+export async function onInteraction(interaction: Interaction): Promise<void> {
+  try {
+    if (interaction.isChatInputCommand()) {
+      await slashByName.get(interaction.commandName)?.execute(interaction);
+    } else if (interaction.isMessageContextMenuCommand()) {
+      await contextByName.get(interaction.commandName)?.execute(interaction);
+    } else if (interaction.isButton()) {
+      await handleButton(interaction);
+    } else if (interaction.isModalSubmit()) {
+      await handleModal(interaction);
+    }
+  } catch (err) {
+    log.error({ err }, 'interaction handler failed');
+    await safeReply(interaction, 'Something went wrong handling that.');
+  }
+}

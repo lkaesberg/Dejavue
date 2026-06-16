@@ -1,0 +1,88 @@
+# Full local stack: Postgres + migrate (one-shot) + bot + worker + web.
+#   docker compose up --build
+# Reads Discord/OpenRouter credentials from .env (env_file); DATABASE_URL is
+# overridden to point at the `postgres` service.
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: dejavue-local:latest
+  env_file: .env
+  environment:
+    DATABASE_URL: postgres://dejavue:dejavue@postgres:5432/dejavue
+    NODE_ENV: production
+  restart: unless-stopped
+
+services:
+  postgres:
+    # Pinned Postgres major + pgvector build (don't use `latest`).
+    image: pgvector/pgvector:pg16
+    container_name: dejavue-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dejavue
+      POSTGRES_PASSWORD: dejavue
+      POSTGRES_DB: dejavue
+    ports:
+      - "5432:5432"
+    volumes:
+      - dejavue_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dejavue -d dejavue"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Runs migrations once, then exits; the apps wait for it to succeed.
+  migrate:
+    <<: *app
+    command: ["pnpm", "--filter", "@dejavue/db", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    <<: *app
+    command: ["pnpm", "--filter", "@dejavue/bot", "start"]
+    # Persist the downloaded CPU embedding model across restarts.
+    volumes:
+      - dejavue_models:/app/.models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ["pnpm", "--filter", "@dejavue/worker", "start"]
+    volumes:
+      - dejavue_models:/app/.models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    <<: *app
+    command: ["pnpm", "--filter", "@dejavue/web", "start"]
+    # Service `environment` replaces the anchor's, so repeat what's needed.
+    environment:
+      DATABASE_URL: postgres://dejavue:dejavue@postgres:5432/dejavue
+      NODE_ENV: production
+      HOST: "0.0.0.0"
+      PORT: "4321"
+    ports:
+      - "4321:4321"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  dejavue_pgdata:
+  dejavue_models:

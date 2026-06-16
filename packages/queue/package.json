@@ -1,0 +1,16 @@
+{
+  "name": "@dejavue/queue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dejavue/core": "workspace:*",
+    "pg-boss": "^12.19.1"
+  }
+}

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.astro/
+.turbo/
+coverage/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# local model cache (Transformers.js downloads ONNX models here)
+.cache/
+.models/
+
+# os
+.DS_Store

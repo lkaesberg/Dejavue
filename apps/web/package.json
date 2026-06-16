@@ -1,0 +1,22 @@
+{
+  "name": "@dejavue/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "start": "node ./dist/server/entry.mjs",
+    "typecheck": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/node": "^10.1.4",
+    "@dejavue/ai": "workspace:*",
+    "@dejavue/core": "workspace:*",
+    "@dejavue/db": "workspace:*",
+    "astro": "^6.4.7"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4"
+  }
+}

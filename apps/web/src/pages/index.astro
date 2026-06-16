@@ -1,0 +1,99 @@
+---
+import { getEnv } from '@dejavue/core';
+import { getDb, getFaqEntries, getPublishedThreads, type Thread } from '@dejavue/db';
+import Base from '../layouts/Base.astro';
+
+const { tenant, slug } = Astro.locals;
+const notFound = slug !== null && tenant === null;
+if (notFound) Astro.response.status = 404;
+
+const origin = new URL(Astro.request.url).origin;
+
+let threads: Thread[] = [];
+let faqs: Awaited<ReturnType<typeof getFaqEntries>> = [];
+if (tenant) {
+  const db = getDb();
+  threads = await getPublishedThreads(db, tenant.guildId, 500);
+  faqs = await getFaqEntries(db, tenant.guildId);
+}
+
+// Group solved threads by their source forum channel — each channel is a category.
+const byChannel = new Map<string, { name: string; threads: Thread[] }>();
+for (const t of threads) {
+  const entry = byChannel.get(t.channelId) ?? { name: t.channelName ?? 'General', threads: [] };
+  entry.threads.push(t);
+  byChannel.set(t.channelId, entry);
+}
+const channelGroups = [...byChannel.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+const faqJsonLd = faqs.length
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: faqs.map((f) => ({
+        '@type': 'Question',
+        name: f.question,
+        acceptedAnswer: { '@type': 'Answer', text: f.answer },
+      })),
+    }
+  : null;
+---
+
+{
+  tenant ? (
+    <Base
+      title={`${tenant.slug} — Knowledge Base`}
+      description={`Answers to common questions for the ${tenant.slug} community.`}
+      canonical={`${origin}/`}
+    >
+      {faqJsonLd && (
+        <script type="application/ld+json" is:inline set:html={JSON.stringify(faqJsonLd)} slot="head" />
+      )}
+      <h1>{tenant.slug} Knowledge Base</h1>
+      <p class="muted">Solved community questions, kept current by Dejavue.</p>
+
+      {faqs.length > 0 && (
+        <section>
+          <h2>Frequently asked</h2>
+          {faqs.map((f) => (
+            <div class="card">
+              <div class="q">{f.question}</div>
+              <div class="answer">{f.answer}</div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {channelGroups.length === 0 ? (
+        <p class="muted">No published answers yet — check back soon.</p>
+      ) : (
+        channelGroups.map((ch) => (
+          <section>
+            <h2># {ch.name}</h2>
+            <ul class="list">
+              {ch.threads.map((t) => (
+                <li class="card">
+                  <a href={`/t/${t.threadId}`}>{t.title}</a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      )}
+      <footer>Powered by Dejavue</footer>
+    </Base>
+  ) : notFound ? (
+    <Base title="Knowledge base not found" noindex>
+      <h1>Knowledge base not found</h1>
+      <p class="muted">This community hasn't set up a public knowledge base.</p>
+    </Base>
+  ) : (
+    <Base title="Dejavue — Community Knowledge Bases">
+      <h1>Dejavue</h1>
+      <p>Each community's solved questions, turned into a fast, searchable, public knowledge base.</p>
+      <p class="muted">
+        Communities live at <code>{`{community}.${getEnv().KB_BASE_DOMAIN}`}</code>.
+      </p>
+    </Base>
+  )
+}

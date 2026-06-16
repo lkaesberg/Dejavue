@@ -1,0 +1,1 @@
+ALTER TABLE "thread" ADD COLUMN "channel_name" text;

@@ -1,0 +1,1 @@
+ALTER TABLE "thread" ADD COLUMN "transcript" jsonb;

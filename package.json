@@ -1,0 +1,28 @@
+{
+  "name": "dejavue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --no-bail typecheck",
+    "test": "vitest run",
+    "db:generate": "pnpm --filter @dejavue/db generate",
+    "db:migrate": "pnpm --filter @dejavue/db migrate",
+    "db:verify": "pnpm --filter @dejavue/db verify",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "dev:bot": "pnpm --filter @dejavue/bot dev",
+    "dev:worker": "pnpm --filter @dejavue/worker dev",
+    "dev:web": "pnpm --filter @dejavue/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
