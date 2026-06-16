@@ -1,6 +1,10 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { type GuildConfig, guildConfig, type Thread, thread } from '../schema';
+
+export async function listGuildsWithKb(db: Database): Promise<GuildConfig[]> {
+  return db.select().from(guildConfig).where(eq(guildConfig.kbPublishOptIn, true));
+}
 
 /** Resolve a guild by its KB subdomain slug (only if publishing is opted in). */
 export async function getGuildBySlug(db: Database, slug: string): Promise<GuildConfig | undefined> {
@@ -38,6 +42,7 @@ export async function getPublishedThreads(
         eq(thread.guildId, guildId),
         eq(thread.publishedToKb, true),
         eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId), // duplicates are folded under their canonical thread
       ),
     )
     .orderBy(sql`${thread.solvedAt} desc nulls last`)
@@ -86,6 +91,87 @@ export async function getKbAnswersByRowIds(
     title: r.title,
     answer: r.canonical || r.accepted || '',
   }));
+}
+
+/** Duplicate threads folded under a canonical thread (shown as "also asked as"). */
+export async function getDuplicatesOf(
+  db: Database,
+  guildId: string,
+  originalThreadId: string,
+): Promise<{ threadId: string; title: string }[]> {
+  return db
+    .select({ threadId: thread.threadId, title: thread.title })
+    .from(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.duplicateOfThreadId, originalThreadId)))
+    .limit(50);
+}
+
+/** Keyword (full-text) search over a tenant's published, non-duplicate KB threads. */
+export async function searchPublished(
+  db: Database,
+  guildId: string,
+  query: string,
+  limit = 20,
+): Promise<{ threadId: string; title: string }[]> {
+  const document = sql`to_tsvector('english', ${thread.title} || ' ' || ${thread.questionBody} || ' ' || coalesce(${thread.acceptedAnswerText}, '') || ' ' || coalesce(${thread.canonicalSummary}, ''))`;
+  const tsquery = sql`websearch_to_tsquery('english', ${query})`;
+  const rank = sql<number>`ts_rank(${document}, ${tsquery})`;
+  return db
+    .select({ threadId: thread.threadId, title: thread.title })
+    .from(thread)
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        eq(thread.publishedToKb, true),
+        eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId),
+        sql`${document} @@ ${tsquery}`,
+      ),
+    )
+    .orderBy(sql`${rank} desc`)
+    .limit(limit);
+}
+
+/**
+ * Publish all not-yet-published threads in a (knowledge) channel regardless of
+ * solved status — newest first, up to the tier's page cap. Returns count added.
+ */
+export async function publishExistingInChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  cap: number,
+): Promise<number> {
+  const alreadyPublished = await countPublished(db, guildId);
+  if (Number.isFinite(cap) && alreadyPublished >= cap) return 0;
+  const remaining = Number.isFinite(cap) ? cap - alreadyPublished : null;
+
+  const rows = await db
+    .select({ id: thread.id })
+    .from(thread)
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        eq(thread.channelId, channelId),
+        eq(thread.publishedToKb, false),
+        eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId),
+      ),
+    )
+    .orderBy(sql`${thread.createdAt} desc nulls last`)
+    .limit(remaining ?? 1_000_000);
+
+  if (rows.length === 0) return 0;
+  await db
+    .update(thread)
+    .set({ publishedToKb: true, updatedAt: new Date() })
+    .where(
+      inArray(
+        thread.id,
+        rows.map((r) => r.id),
+      ),
+    );
+  return rows.length;
 }
 
 export async function countPublished(db: Database, guildId: string): Promise<number> {

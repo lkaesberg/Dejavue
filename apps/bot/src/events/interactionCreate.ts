@@ -6,7 +6,7 @@ import {
   type ThreadChannel,
 } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { getDb, getThreadByDiscordId } from '@dejavue/db';
+import { getDb, getThreadByDiscordId, setDuplicateOf } from '@dejavue/db';
 import {
   ACCEPT_BUTTON_PREFIX,
   buildSolveModal,
@@ -19,10 +19,10 @@ import {
   solvedWithAnswerNotice,
   threadUrl,
 } from '../lib/embeds';
-import { applyTag, findTagByName, forumParent } from '../lib/forum';
+import { applyTag, ensureForumTags, findTagByName, forumParent } from '../lib/forum';
 import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph, safeReply } from '../lib/reply';
-import { solveThread } from '../lib/solve';
+import { closeThread, solveThread } from '../lib/solve';
 import { getGuildTier, limitsFor } from '../lib/tier';
 import { contextByName, slashByName } from '../commands/registry';
 
@@ -39,6 +39,8 @@ async function acceptDuplicate(
   solverId: string,
 ): Promise<void> {
   const db = getDb();
+  // Mark as a duplicate first so solveThread won't publish it as its own KB page.
+  await setDuplicateOf(db, channel.guildId, channel.id, originalThreadId);
   const original = await getThreadByDiscordId(db, channel.guildId, originalThreadId);
   const url = threadUrl(channel.guildId, originalThreadId);
   const answerText = original?.canonicalSummary || original?.acceptedAnswerText || '';
@@ -48,7 +50,13 @@ async function acceptDuplicate(
 
   const forum = forumParent(channel);
   if (forum) {
-    const dupTag = findTagByName(forum, 'duplicate');
+    // Create the "duplicate" tag on demand if the forum predates this feature.
+    let dupTag = findTagByName(forum, 'duplicate');
+    if (!dupTag) {
+      dupTag = await ensureForumTags(forum)
+        .then((t) => t.duplicateTagId)
+        .catch(() => undefined);
+    }
     if (dupTag) await applyTag(channel, dupTag).catch(() => undefined);
   }
 
@@ -57,6 +65,7 @@ async function acceptDuplicate(
     answerAuthorId: solverId,
     solverId,
   });
+  await closeThread(channel);
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
@@ -125,6 +134,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
       .catch(() => undefined);
   }
 
+  await closeThread(channel);
   await interaction.editReply('✅ Marked solved and archived.');
 }
 

@@ -1,5 +1,7 @@
 ---
-import { getDb, getPublishedThread } from '@dejavue/db';
+import { getEnv, tierLimits } from '@dejavue/core';
+import { getDb, getDuplicatesOf, getPublishedThread, resolveGuildTier } from '@dejavue/db';
+import { enqueueSummarize } from '@dejavue/queue';
 import Base from '../../layouts/Base.astro';
 
 const { tenant } = Astro.locals;
@@ -7,13 +9,45 @@ const { threadId } = Astro.params;
 const origin = new URL(Astro.request.url).origin;
 
 let thread: Awaited<ReturnType<typeof getPublishedThread>> = undefined;
+let duplicates: { threadId: string; title: string }[] = [];
 if (tenant && threadId) {
   thread = await getPublishedThread(getDb(), tenant.guildId, threadId);
+  if (thread) duplicates = await getDuplicatesOf(getDb(), tenant.guildId, thread.threadId);
 }
 if (!thread) Astro.response.status = 404;
 
-const answer = thread?.canonicalSummary || thread?.acceptedAnswerText || '';
+const summary = thread?.canonicalSummary ?? '';
+const acceptedAnswer = thread?.acceptedAnswerText ?? '';
 const transcript = thread?.transcript ?? [];
+const hasContent = !!(acceptedAnswer || thread?.questionBody);
+
+// Lazy AI summary: generate only when a page is actually opened, on a generative
+// tier, when one doesn't exist yet. The worker fills it in; the client polls and
+// streams it in. We never pay to summarize threads nobody reads.
+let summaryPending = false;
+if (thread && tenant && !summary && hasContent) {
+  const env = getEnv();
+  const tier =
+    env.DEV_FORCE_TIER ??
+    (await resolveGuildTier(getDb(), tenant.guildId, {
+      plus: env.SKU_PLUS,
+      pro: env.SKU_PRO,
+      max: env.SKU_MAX,
+    }));
+  if (tierLimits(tier).generative) {
+    summaryPending = true;
+    await enqueueSummarize({
+      threadRowId: thread.id,
+      guildId: tenant.guildId,
+      question: thread.title,
+      answer: acceptedAnswer || thread.questionBody || thread.title,
+    }).catch(() => undefined);
+  }
+}
+
+// Structured-data answer prefers the full accepted answer; the on-page summary
+// is just a short recap shown above the discussion log.
+const bestAnswer = acceptedAnswer || summary || (thread?.questionBody ?? '');
 
 // Privacy-preserving speaker labels: the OP is "Original poster", others are
 // "Helper 1", "Helper 2", … — no usernames are exposed.
@@ -34,8 +68,8 @@ const jsonLd = thread
         '@type': 'Question',
         name: thread.title,
         text: thread.questionBody || thread.title,
-        answerCount: answer ? 1 : 0,
-        ...(answer ? { acceptedAnswer: { '@type': 'Answer', text: answer } } : {}),
+        answerCount: bestAnswer ? 1 : 0,
+        ...(bestAnswer ? { acceptedAnswer: { '@type': 'Answer', text: bestAnswer } } : {}),
       },
     }
   : null;
@@ -54,16 +88,30 @@ const jsonLd = thread
       </p>
       <h1>{thread.title}</h1>
 
-      <h2>Answer</h2>
-      {answer ? (
-        <div class="card answer">{answer}</div>
-      ) : (
-        <p class="muted">No canonical answer recorded.</p>
+      {duplicates.length > 0 && (
+        <section>
+          <h2>Also asked as</h2>
+          <ul class="dups">
+            {duplicates.map((d) => (
+              <li class="muted">{d.title}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(summary || summaryPending) && (
+        <section>
+          <h2>Summary</h2>
+          <p class="muted">How this was solved — the full discussion is below.</p>
+          <div class="card answer" id="kb-summary" data-thread={thread.threadId} data-pending={summaryPending ? 'true' : 'false'}>
+            {summary || 'Generating a summary…'}
+          </div>
+        </section>
       )}
 
       {transcript.length > 0 ? (
         <section>
-          <h2>Full discussion</h2>
+          <h2>Discussion</h2>
           {transcript.map((m) => (
             <div class="card">
               <div class="q">{speakerOf(m.authorId)}</div>
@@ -72,12 +120,44 @@ const jsonLd = thread
           ))}
         </section>
       ) : (
-        thread.questionBody && (
-          <section>
-            <h2>Question</h2>
-            <div class="card answer">{thread.questionBody}</div>
-          </section>
-        )
+        <>
+          {thread.questionBody && (
+            <section>
+              <h2>Question</h2>
+              <div class="card answer">{thread.questionBody}</div>
+            </section>
+          )}
+          {acceptedAnswer && (
+            <section>
+              <h2>Answer</h2>
+              <div class="card answer">{acceptedAnswer}</div>
+            </section>
+          )}
+        </>
+      )}
+
+      {summaryPending && (
+        <script is:inline>
+          {`(function () {
+            var el = document.getElementById('kb-summary');
+            if (!el || el.getAttribute('data-pending') !== 'true') return;
+            var id = el.getAttribute('data-thread');
+            var tries = 0;
+            var iv = setInterval(function () {
+              if (++tries > 24) { clearInterval(iv); return; }
+              fetch('/api/summary/' + encodeURIComponent(id) + '.json')
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                  if (d && d.ready && d.summary) {
+                    el.textContent = d.summary;
+                    el.removeAttribute('data-pending');
+                    clearInterval(iv);
+                  }
+                })
+                .catch(function () {});
+            }, 2500);
+          })();`}
+        </script>
       )}
 
       <p class="muted">Shared from the community help forum.</p>

@@ -14,8 +14,12 @@ export interface EmbeddingPoint {
 export async function getGuildEmbeddingPoints(
   db: Database,
   guildId: string,
+  modelId?: string,
   limit = 2000,
 ): Promise<EmbeddingPoint[]> {
+  const conditions = [eq(embedding.guildId, guildId), eq(embedding.source, 'question')];
+  // Only one model's vectors at a time — never cluster across incompatible geometries.
+  if (modelId) conditions.push(eq(embedding.modelId, modelId));
   const rows = await db
     .select({
       threadRowId: embedding.threadId,
@@ -26,7 +30,7 @@ export async function getGuildEmbeddingPoints(
     })
     .from(embedding)
     .innerJoin(thread, eq(embedding.threadId, thread.id))
-    .where(and(eq(embedding.guildId, guildId), eq(embedding.source, 'question')))
+    .where(and(...conditions))
     .limit(limit);
 
   return rows.map((r) => ({

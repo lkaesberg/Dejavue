@@ -1,0 +1,68 @@
+---
+import { getDb, searchPublished } from '@dejavue/db';
+import Base from '../layouts/Base.astro';
+
+const { tenant, slug } = Astro.locals;
+const notFound = slug !== null && tenant === null;
+if (notFound) Astro.response.status = 404;
+
+const origin = new URL(Astro.request.url).origin;
+const query = (new URL(Astro.request.url).searchParams.get('q') ?? '').trim();
+
+let results: { threadId: string; title: string }[] = [];
+if (tenant && query) {
+  results = await searchPublished(getDb(), tenant.guildId, query, 30);
+}
+---
+
+{
+  tenant ? (
+    <Base
+      title={query ? `Search: ${query} — ${tenant.slug}` : `Search — ${tenant.slug}`}
+      description={`Search the ${tenant.slug} knowledge base.`}
+      canonical={`${origin}/search`}
+      noindex
+    >
+      <p class="muted">
+        <a href="/">← {tenant.slug} Knowledge Base</a>
+      </p>
+      <h1>Search</h1>
+
+      <form class="search" action="/search" method="get" role="search">
+        <input
+          type="search"
+          name="q"
+          value={query}
+          placeholder="Search the knowledge base…"
+          aria-label="Search the knowledge base"
+        />
+        <button type="submit">Search</button>
+      </form>
+
+      {query === '' ? (
+        <p class="muted">Type a question above to search published answers.</p>
+      ) : results.length === 0 ? (
+        <p class="muted">No matches for “{query}”.</p>
+      ) : (
+        <section>
+          <p class="muted">
+            {results.length} {results.length === 1 ? 'result' : 'results'} for “{query}”
+          </p>
+          <ul class="list">
+            {results.map((r) => (
+              <li class="card">
+                <a href={`/t/${r.threadId}`}>{r.title}</a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <footer>Powered by Dejavue</footer>
+    </Base>
+  ) : (
+    <Base title="Knowledge base not found" noindex>
+      <h1>Knowledge base not found</h1>
+      <p class="muted">This community hasn't set up a public knowledge base.</p>
+    </Base>
+  )
+}

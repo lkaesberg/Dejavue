@@ -36,6 +36,20 @@
       "when": 1781631710147,
       "tag": "0004_custom_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781635446157,
+      "tag": "0005_duplicate_of",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781637229935,
+      "tag": "0006_naive_warstar",
+      "breakpoints": true
     }
   ]
 }

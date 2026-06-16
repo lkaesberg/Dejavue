@@ -9,6 +9,7 @@ import {
   upsertGeneratedFaq,
 } from '@dejavue/db';
 import type { RegenFaqJob } from '@dejavue/queue';
+import { guildGenerationQuota } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:regen-faq' });
 const MAX_FAQ = 10;
@@ -21,11 +22,12 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
     return;
   }
   const db = getDb();
+  const baseQuota = await guildGenerationQuota(job.guildId);
   const clusters = await getTopClusters(db, job.guildId, MAX_FAQ);
 
   for (const cluster of clusters) {
     if (!cluster.medoidThreadId) continue;
-    const quota = await checkQuota(db, job.guildId, env.PRO_MONTHLY_QUOTA);
+    const quota = await checkQuota(db, job.guildId, baseQuota);
     if (!quota.allowed) {
       log.info({ guildId: job.guildId }, 'quota exhausted; stopping FAQ regen');
       break;
@@ -53,7 +55,7 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
       promptTokens: res.promptTokens,
       completionTokens: res.completionTokens,
       usedBefore: quota.used,
-      baseQuota: env.PRO_MONTHLY_QUOTA,
+      baseQuota,
     });
   }
   log.info({ guildId: job.guildId, clusters: clusters.length }, 'regenerated FAQ');

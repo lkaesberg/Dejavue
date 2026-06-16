@@ -1,0 +1,1 @@
+ALTER TABLE "thread" ADD COLUMN "duplicate_of_thread_id" text;

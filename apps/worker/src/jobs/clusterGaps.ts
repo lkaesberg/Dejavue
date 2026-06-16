@@ -1,4 +1,4 @@
-import { clusterLabel } from '@dejavue/ai';
+import { clusterLabel, embeddingModelId } from '@dejavue/ai';
 import { childLogger, getEnv, greedyCluster } from '@dejavue/core';
 import {
   checkQuota,
@@ -9,6 +9,7 @@ import {
   replaceClusters,
 } from '@dejavue/db';
 import type { ClusterGapsJob } from '@dejavue/queue';
+import { guildGenerationQuota } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:cluster-gaps' });
 const SIM_THRESHOLD = 0.82;
@@ -18,7 +19,8 @@ const LABEL_TOP_N = 5;
 export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
   const db = getDb();
   const env = getEnv();
-  const points = await getGuildEmbeddingPoints(db, job.guildId);
+  const baseQuota = await guildGenerationQuota(job.guildId);
+  const points = await getGuildEmbeddingPoints(db, job.guildId, embeddingModelId());
   if (points.length < 4) {
     await replaceClusters(db, job.guildId, []);
     log.info({ guildId: job.guildId, points: points.length }, 'too few points to cluster');
@@ -42,7 +44,7 @@ export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
     let label: string | null = medoid?.title ?? null;
 
     if (i < LABEL_TOP_N && env.OPENROUTER_API_KEY) {
-      const quota = await checkQuota(db, job.guildId, env.PRO_MONTHLY_QUOTA);
+      const quota = await checkQuota(db, job.guildId, baseQuota);
       if (quota.allowed) {
         try {
           const reps = c.memberIds
@@ -58,7 +60,7 @@ export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
             promptTokens: res.promptTokens,
             completionTokens: res.completionTokens,
             usedBefore: quota.used,
-            baseQuota: env.PRO_MONTHLY_QUOTA,
+            baseQuota,
           });
         } catch (err) {
           log.warn({ err }, 'cluster label failed');

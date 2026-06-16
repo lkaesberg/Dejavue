@@ -1,0 +1,1 @@
+ALTER TABLE "guild_config" ADD COLUMN "channel_modes" jsonb DEFAULT '{}'::jsonb NOT NULL;

@@ -2,6 +2,7 @@ import { summarizeThread } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
 import { checkQuota, commitGeneration, getDb, setCanonicalSummary } from '@dejavue/db';
 import type { SummarizeThreadJob } from '@dejavue/queue';
+import { guildGenerationQuota } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:summarize-thread' });
 
@@ -13,7 +14,8 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
     return;
   }
   const db = getDb();
-  const quota = await checkQuota(db, job.guildId, env.PRO_MONTHLY_QUOTA);
+  const baseQuota = await guildGenerationQuota(job.guildId);
+  const quota = await checkQuota(db, job.guildId, baseQuota);
   if (!quota.allowed) {
     log.info({ guildId: job.guildId, used: quota.used, limit: quota.limit }, 'quota exhausted; skipping summary');
     return;
@@ -32,7 +34,7 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
     completionTokens: result.completionTokens,
     threadId: job.threadRowId,
     usedBefore: quota.used,
-    baseQuota: env.PRO_MONTHLY_QUOTA,
+    baseQuota,
   });
   log.info({ threadRowId: job.threadRowId }, 'summarized thread');
 }

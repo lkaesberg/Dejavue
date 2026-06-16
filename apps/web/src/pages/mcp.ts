@@ -53,9 +53,15 @@ async function search(
   if (!query) return 'No query provided.';
 
   const db = getDb();
-  const { embedOne } = await import('@dejavue/ai');
+  const { embedOne, embeddingModelId } = await import('@dejavue/ai');
   const vector = await embedOne(query, { mode: 'query', model });
-  const matches = await semanticSearch(db, { guildId, queryVector: vector, limit, minSimilarity: 0.3 });
+  const matches = await semanticSearch(db, {
+    guildId,
+    queryVector: vector,
+    limit,
+    minSimilarity: 0.3,
+    modelId: embeddingModelId(model),
+  });
   if (matches.length === 0) return 'No matching solved questions found.';
 
   const answers = new Map(

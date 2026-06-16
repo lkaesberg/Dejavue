@@ -1,4 +1,4 @@
-import { embed } from '@dejavue/ai';
+import { embed, embeddingModelId } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
   getBackfillJob,
@@ -34,6 +34,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   await updateBackfillJob(db, bf.id, { status: 'running' });
   const cfg = await getGuildConfig(db, bf.guildId);
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
+  const storedModelId = embeddingModelId(model); // the actual active model id for provenance
   const solvedTagId = cfg?.solvedTagId ?? undefined;
   const processed = new Set(bf.processedThreadIds);
 
@@ -82,7 +83,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
       if (text) {
         const [vector] = await embed([text], { mode: 'passage', model });
         if (vector) {
-          await upsertEmbedding(db, { threadRowId: row.id, guildId: bf.guildId, modelId: model, vector });
+          await upsertEmbedding(db, { threadRowId: row.id, guildId: bf.guildId, modelId: storedModelId, vector });
         }
       }
       processedCount++;

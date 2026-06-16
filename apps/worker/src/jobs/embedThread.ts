@@ -1,4 +1,4 @@
-import { embed } from '@dejavue/ai';
+import { embed, embeddingModelId } from '@dejavue/ai';
 import { childLogger } from '@dejavue/core';
 import { getDb, upsertEmbedding } from '@dejavue/db';
 import type { EmbedThreadJob } from '@dejavue/queue';
@@ -20,7 +20,7 @@ export async function handleEmbedThread(job: EmbedThreadJob): Promise<void> {
   await upsertEmbedding(getDb(), {
     threadRowId: job.threadRowId,
     guildId: job.guildId,
-    modelId: job.modelId,
+    modelId: embeddingModelId(job.modelId), // the actual active model, not a stale DB default
     vector,
   });
   log.info({ threadRowId: job.threadRowId, guildId: job.guildId }, 'embedded thread');

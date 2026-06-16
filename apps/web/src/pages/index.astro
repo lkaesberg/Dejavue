@@ -52,6 +52,16 @@ const faqJsonLd = faqs.length
       <h1>{tenant.slug} Knowledge Base</h1>
       <p class="muted">Solved community questions, kept current by Dejavue.</p>
 
+      <form class="search" action="/search" method="get" role="search">
+        <input
+          type="search"
+          name="q"
+          placeholder="Search the knowledge base…"
+          aria-label="Search the knowledge base"
+        />
+        <button type="submit">Search</button>
+      </form>
+
       {faqs.length > 0 && (
         <section>
           <h2>Frequently asked</h2>

@@ -12,7 +12,7 @@ import {
   upsertThread,
   type Thread,
 } from '@dejavue/db';
-import { enqueueEmbedThread, enqueueRevalidateKb, enqueueSummarize } from '@dejavue/queue';
+import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
 import { applyTag, fetchTranscript, findForumTags, forumParent, getStarterText } from './forum';
 import { getGuildTier, limitsFor } from './tier';
 
@@ -119,22 +119,12 @@ export async function solveThread(
     log.warn({ err, threadId: thread.id }, 'failed to enqueue embed-thread');
   }
 
-  // Pro: summarize into a canonical KB answer (quota-metered, runs in worker).
-  if (limits.generative && row.acceptedAnswerText) {
-    try {
-      await enqueueSummarize({
-        threadRowId: row.id,
-        guildId,
-        question: row.questionBody,
-        answer: row.acceptedAnswerText,
-      });
-    } catch (err) {
-      log.warn({ err, threadId: thread.id }, 'failed to enqueue summarize');
-    }
-  }
+  // AI summaries are generated lazily — only when a KB page is actually opened
+  // (see apps/web) — so we never pay to summarize threads nobody reads.
 
-  // Public KB (all tiers, opt-in, capped 10/100/unlimited).
-  if (cfg.kbPublishOptIn && !row.doNotPublish) {
+  // Public KB (all tiers, opt-in, capped). Duplicates are never published on
+  // their own — they're folded under the canonical thread.
+  if (cfg.kbPublishOptIn && !row.doNotPublish && !row.duplicateOfThreadId) {
     try {
       const published = await countPublished(db, guildId);
       if (published < limits.kbPageCap) {
@@ -149,9 +139,25 @@ export async function solveThread(
   return row;
 }
 
-/** Re-open a thread (also unpublishes its KB page). */
+/** Close a resolved thread: lock + archive it (Discord's "done" state). */
+export async function closeThread(thread: ThreadChannel): Promise<void> {
+  try {
+    if (!thread.locked) await thread.setLocked(true);
+    if (!thread.archived) await thread.setArchived(true);
+  } catch (err) {
+    log.warn({ err, threadId: thread.id }, 'failed to close thread');
+  }
+}
+
+/** Re-open a thread (unarchive + unlock + unpublish its KB page). */
 export async function unsolveThread(thread: ThreadChannel): Promise<void> {
   const db = getDb();
+  try {
+    if (thread.archived) await thread.setArchived(false);
+    if (thread.locked) await thread.setLocked(false);
+  } catch {
+    /* best effort */
+  }
   await setThreadStatus(db, thread.guildId, thread.id, 'unsolved');
   await setPublished(db, thread.guildId, thread.id, false);
   await enqueueRevalidateKb({ guildId: thread.guildId, threadId: thread.id, action: 'unpublish' }).catch(

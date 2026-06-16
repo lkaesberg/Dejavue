@@ -1,8 +1,9 @@
 import type { Message } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { getDb, getGuildConfig } from '@dejavue/db';
+import { channelMode, getDb, getGuildConfig } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
 import { forumParent } from '../lib/forum';
+import { scheduleKnowledgeArchive } from '../lib/knowledge';
 
 const log = childLogger({ mod: 'event:messageCreate' });
 
@@ -23,7 +24,11 @@ export async function onMessageCreate(message: Message): Promise<void> {
   try {
     const cfg = await getGuildConfig(getDb(), channel.guildId);
     if (cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) return;
-    scheduleDedup(channel);
+    if (channelMode(cfg, forum.id) === 'knowledge') {
+      scheduleKnowledgeArchive(channel);
+    } else {
+      scheduleDedup(channel);
+    }
   } catch (err) {
     log.warn({ err, threadId: channel.id }, 'messageCreate fallback failed');
   }

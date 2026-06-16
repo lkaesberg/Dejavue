@@ -41,6 +41,12 @@ const { title, description, canonical, noindex } = Astro.props;
       .list { list-style: none; padding: 0; margin: 1rem 0; }
       .q { font-weight: 600; margin-bottom: .35rem; }
       .answer { white-space: pre-wrap; }
+      .search { display: flex; gap: .5rem; margin: 1.25rem 0 1.75rem; }
+      .search input { flex: 1; padding: .65rem .9rem; font-size: 1rem; color: var(--fg); background: var(--card); border: 1px solid transparent; border-radius: 10px; }
+      .search input:focus { outline: none; border-color: var(--accent); }
+      .search button { padding: .65rem 1.1rem; font-size: 1rem; color: #fff; background: var(--accent); border: 0; border-radius: 10px; cursor: pointer; }
+      .dups { list-style: none; padding: 0; margin: .5rem 0 0; }
+      .dups li { margin: .25rem 0; font-size: .95rem; }
       footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
     </style>
   </head>

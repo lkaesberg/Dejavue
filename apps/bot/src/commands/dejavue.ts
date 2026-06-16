@@ -9,6 +9,8 @@ import {
 } from 'discord.js';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
+  type ChannelMode,
+  channelMode,
   checkQuota,
   countByStatus,
   countPublished,
@@ -51,6 +53,16 @@ const data = new SlashCommandBuilder()
           .setDescription('The forum channel to monitor')
           .addChannelTypes(ChannelType.GuildForum)
           .setRequired(true),
+      )
+      .addStringOption((o) =>
+        o
+          .setName('mode')
+          .setDescription('How this channel works')
+          .setRequired(true)
+          .addChoices(
+            { name: 'question — Q&A: dedup, mark-solved, answers', value: 'question' },
+            { name: 'knowledge — pure archive: publish every thread, no prompts', value: 'knowledge' },
+          ),
       ),
   )
   .addSubcommand((s) =>
@@ -187,14 +199,39 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       return;
     }
 
-    const { solvedTagId, unsolvedTagId } = await ensureForumTags(forum);
+    const mode = interaction.options.getString('mode', true) as ChannelMode;
     const channels = new Set(cfg.forumChannelIds);
     channels.add(forum.id);
-    await updateGuildConfig(db, guildId, { forumChannelIds: [...channels], solvedTagId, unsolvedTagId });
-    await interaction.editReply(
-      `✅ Now monitoring <#${forum.id}>. I ensured \`solved\` / \`unsolved\` tags exist. ` +
-        'New posts get an **unsolved** tag and a control message; solved posts are archived for `/dejavue search`.',
-    );
+    const channelModes = { ...(cfg.channelModes ?? {}), [forum.id]: mode };
+
+    // Question channels need the solved/unsolved tags; knowledge channels don't
+    // (pure archive), so a missing Manage Channels permission shouldn't block them.
+    let tagPatch: { solvedTagId?: string; unsolvedTagId?: string } = {};
+    try {
+      const { solvedTagId, unsolvedTagId } = await ensureForumTags(forum);
+      tagPatch = { solvedTagId, unsolvedTagId };
+    } catch (err) {
+      if (mode === 'question') throw err;
+      log.warn({ err, channel: forum.id }, 'knowledge channel: forum tags skipped');
+    }
+
+    await updateGuildConfig(db, guildId, {
+      forumChannelIds: [...channels],
+      channelModes,
+      ...tagPatch,
+    });
+
+    if (mode === 'knowledge') {
+      await interaction.editReply(
+        `✅ Now archiving <#${forum.id}> as a **knowledge** channel — every thread is added to the ` +
+          'knowledge base automatically. No answer prompts and no duplicate reminders here.',
+      );
+    } else {
+      await interaction.editReply(
+        `✅ Now monitoring <#${forum.id}> as a **question** channel. I ensured \`solved\` / \`unsolved\` tags exist. ` +
+          'New posts get an **unsolved** tag and a control message; solved posts are archived for `/dejavue search`.',
+      );
+    }
   } catch (err) {
     log.error({ err }, 'setup failed');
     await interaction.editReply(
@@ -217,7 +254,9 @@ async function handleUntrack(interaction: ChatInputCommandInteraction): Promise<
     return;
   }
   const remaining = cfg.forumChannelIds.filter((id) => id !== picked.id);
-  await updateGuildConfig(db, guildId, { forumChannelIds: remaining });
+  const channelModes = { ...(cfg.channelModes ?? {}) };
+  delete channelModes[picked.id];
+  await updateGuildConfig(db, guildId, { forumChannelIds: remaining, channelModes });
   await interaction.reply(
     eph(
       `✅ Stopped monitoring <#${picked.id}> — new posts there won't get duplicate detection or a control message.\n` +
@@ -239,7 +278,9 @@ async function handleConfig(interaction: ChatInputCommandInteraction): Promise<v
       {
         name: 'Monitored forums',
         value: cfg?.forumChannelIds.length
-          ? cfg.forumChannelIds.map((id) => `<#${id}>`).join(', ')
+          ? cfg.forumChannelIds
+              .map((id) => `<#${id}>${channelMode(cfg, id) === 'knowledge' ? ' _(knowledge)_' : ''}`)
+              .join(', ')
           : '_none — run_ `/dejavue setup`',
       },
       {
@@ -283,7 +324,9 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
       {
         name: `Monitored forums (${cfg?.forumChannelIds.length ?? 0} / ${channelCap})`,
         value: cfg?.forumChannelIds.length
-          ? cfg.forumChannelIds.map((id) => `<#${id}>`).join(', ')
+          ? cfg.forumChannelIds
+              .map((id) => `<#${id}>${channelMode(cfg, id) === 'knowledge' ? ' _(knowledge)_' : ''}`)
+              .join(', ')
           : '_none — run_ `/dejavue setup`',
       },
       {
@@ -308,7 +351,7 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
     embed.addFields({ name: 'Custom domain', value: `https://${cfg.customDomain}`, inline: true });
   }
   if (limits.generative) {
-    const q = await checkQuota(db, guildId, env.PRO_MONTHLY_QUOTA);
+    const q = await checkQuota(db, guildId, limits.monthlyGenerationQuota);
     embed.addFields({ name: 'AI generations (month)', value: `${q.used} / ${q.limit}`, inline: true });
   }
   if (limits.mcp) {
@@ -333,9 +376,15 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
   let results: SearchMatch[];
   if (limits.semanticSearch) {
     const cfg = await getGuildConfig(db, guildId);
-    const { embedOne } = await import('@dejavue/ai');
+    const { embedOne, embeddingModelId } = await import('@dejavue/ai');
     const vector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
-    results = await semanticSearch(db, { guildId, queryVector: vector, limit: 5, minSimilarity: 0.5 });
+    results = await semanticSearch(db, {
+      guildId,
+      queryVector: vector,
+      limit: 5,
+      minSimilarity: 0.5,
+      modelId: embeddingModelId(cfg?.embeddingModel),
+    });
   } else {
     results = await keywordSearch(db, { guildId, query, limit: 5 });
   }
@@ -352,7 +401,7 @@ async function handleStats(interaction: ChatInputCommandInteraction): Promise<vo
   const limits = limitsFor(await getGuildTier(guildId));
   const embed = statsEmbed(counts, !limits.removeBranding);
   if (limits.generative) {
-    const q = await checkQuota(db, guildId, getEnv().PRO_MONTHLY_QUOTA);
+    const q = await checkQuota(db, guildId, limits.monthlyGenerationQuota);
     embed.addFields({
       name: 'AI generations (this month)',
       value: `${q.used} / ${q.limit}${q.topUp ? ` (incl. ${q.topUp} top-up)` : ''}`,
@@ -570,6 +619,7 @@ async function handleKb(interaction: ChatInputCommandInteraction): Promise<void>
   }
   const guildId = interaction.guildId!;
   const db = getDb();
+  const limits = limitsFor(await getGuildTier(guildId));
   const rawSlug = interaction.options.getString('slug');
   const publish = interaction.options.getBoolean('publish');
 
@@ -598,9 +648,11 @@ async function handleKb(interaction: ChatInputCommandInteraction): Promise<void>
   const cfg = await getGuildConfig(db, guildId);
 
   const url = cfg?.kbSlug ? `https://${cfg.kbSlug}.${getEnv().KB_BASE_DOMAIN}` : '_set a slug first_';
+  const mcpLine =
+    limits.mcp && cfg?.kbSlug ? `\nMCP server (Max): \`${url}/mcp\` — add as a Streamable HTTP MCP server.` : '';
   await interaction.reply(
     eph(
-      `KB publishing: **${cfg?.kbPublishOptIn ? 'on' : 'off'}**\nPublic URL: ${url}` +
+      `KB publishing: **${cfg?.kbPublishOptIn ? 'on' : 'off'}**\nPublic URL: ${url}${mcpLine}` +
         `${backfilled ? `\nPublished **${backfilled}** existing solved post(s).` : ''}\n` +
         '_Usernames are aliased on public pages. Solved posts publish automatically while under your tier cap (Free 10 / Plus 100 / Pro 500 / Max unlimited)._',
     ),

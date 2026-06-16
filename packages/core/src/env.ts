@@ -28,8 +28,22 @@ const EnvSchema = z.object({
   SKU_TOPUP: z.string().optional(),
   SKU_CUSTOM_DOMAIN: z.string().optional(),
 
-  // Embeddings (local CPU model — Transformers.js repo id, resolved in @dejavue/ai)
+  // Embeddings — switch the backend between self-host and OpenRouter.
+  //   local      → CPU model via Transformers.js (free, no API).
+  //   openrouter → OpenAI-compatible embeddings API (e.g. text-embedding-3-large).
+  EMBEDDING_PROVIDER: z.enum(['local', 'openrouter']).default('local'),
+  // For local: a known model key (bge-small-en-v1.5 | multilingual-e5-small).
+  // For openrouter: the API model id (e.g. openai/text-embedding-3-large).
   EMBEDDING_MODEL: z.string().default('bge-small-en-v1.5'),
+  // Output dimension. MUST match the `vector(...)` DB column (currently 384).
+  // The OpenRouter backend requests this many dimensions (Matryoshka), so a
+  // big model like text-embedding-3-large drops straight into the 384-d column.
+  EMBEDDING_DIM: z.coerce.number().int().positive().default(384),
+  // OpenRouter backend: base URL + key. Defaults to OpenRouter using
+  // OPENROUTER_API_KEY; point EMBEDDING_BASE_URL at https://api.openai.com/v1
+  // (with EMBEDDING_API_KEY) to call OpenAI directly instead.
+  EMBEDDING_BASE_URL: z.string().optional(),
+  EMBEDDING_API_KEY: z.string().optional(),
 
   // Generative (OpenRouter, OpenAI-compatible)
   OPENROUTER_API_KEY: z.string().optional(),

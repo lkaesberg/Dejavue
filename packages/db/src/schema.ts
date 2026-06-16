@@ -61,6 +61,13 @@ const emptyTextArray = sql`'{}'::text[]`;
 export const guildConfig = pgTable('guild_config', {
   guildId: text('guild_id').primaryKey(),
   forumChannelIds: text('forum_channel_ids').array().notNull().default(emptyTextArray),
+  // Per-channel mode: a sparse map of forum channel id -> 'knowledge'. Absent
+  // means 'question' (the classic Q&A workflow). 'knowledge' channels are pure
+  // archive: every thread is published, with no answer-prompting or dedup.
+  channelModes: jsonb('channel_modes')
+    .$type<Record<string, 'knowledge' | 'question'>>()
+    .notNull()
+    .default({}),
   // Per-guild forum tag snowflakes — never hardcoded constants.
   solvedTagId: text('solved_tag_id'),
   unsolvedTagId: text('unsolved_tag_id'),
@@ -113,6 +120,9 @@ export const thread = pgTable(
     channelId: text('channel_id').notNull(), // parent forum channel
     channelName: text('channel_name'), // denormalized for KB category grouping
     threadId: text('thread_id').notNull(), // discord thread id (== starter message id)
+    // If set, this thread is a duplicate of another (canonical) thread — folded
+    // under it in the KB rather than listed on its own.
+    duplicateOfThreadId: text('duplicate_of_thread_id'),
     title: text('title').notNull(),
     questionBody: text('question_body').notNull().default(''),
     opUserId: text('op_user_id'),

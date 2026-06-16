@@ -1,6 +1,7 @@
 import type { ThreadChannel } from 'discord.js';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
+  channelMode,
   checkQuota,
   commitGeneration,
   getDb,
@@ -12,13 +13,12 @@ import {
   semanticSearch,
 } from '@dejavue/db';
 import { duplicatesMessage } from './embeds';
-import { forumParent, getStarterText } from './forum';
+import { fetchStarterWithRetry, forumParent } from './forum';
 import { getGuildTier, limitsFor } from './tier';
 
 const log = childLogger({ mod: 'dedup' });
 
 const DEBOUNCE_MS = 4000;
-const STARTER_RETRY_MS = 1500;
 // bge-small cosine for genuine paraphrases sits ~0.65–0.85, so keep the bar
 // modest enough to catch reworded duplicates without flagging unrelated posts.
 const SEMANTIC_MIN_SIMILARITY = 0.72;
@@ -38,27 +38,18 @@ export function scheduleDedup(thread: ThreadChannel): void {
   timer.unref();
 }
 
-/** The starter message may arrive after threadCreate — retry a few times. */
-async function fetchStarterWithRetry(thread: ThreadChannel, attempts = 3): Promise<string> {
-  for (let i = 0; i < attempts; i++) {
-    const starter = await getStarterText(thread);
-    if (starter && starter.content.trim()) return starter.content;
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, STARTER_RETRY_MS));
-  }
-  return '';
-}
-
 /** Pro: draft an answer from matched solved threads, metered against the quota. */
 async function maybeDraft(
   guildId: string,
   question: string,
   matches: SearchMatch[],
+  baseQuota: number,
 ): Promise<string | undefined> {
   const env = getEnv();
   if (!env.OPENROUTER_API_KEY) return undefined;
   const db = getDb();
   try {
-    const quota = await checkQuota(db, guildId, env.PRO_MONTHLY_QUOTA);
+    const quota = await checkQuota(db, guildId, baseQuota);
     if (!quota.allowed) return undefined;
 
     const rows = await getThreadsByRowIds(db, matches.map((m) => m.rowId));
@@ -76,7 +67,7 @@ async function maybeDraft(
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
       usedBefore: quota.used,
-      baseQuota: env.PRO_MONTHLY_QUOTA,
+      baseQuota,
     });
     return result.text.trim() || undefined;
   } catch (err) {
@@ -93,6 +84,8 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
   if (forum && cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) {
     return;
   }
+  // Knowledge channels are a pure archive — never post duplicate reminders.
+  if (forum && channelMode(cfg, forum.id) === 'knowledge') return;
 
   // Don't suggest duplicates on a post that's already solved (also keeps the
   // /demo seed posts quiet, since they're persisted solved before this fires).
@@ -107,7 +100,7 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
 
   let matches: SearchMatch[];
   if (limits.semanticSearch) {
-    const { embedOne } = await import('@dejavue/ai');
+    const { embedOne, embeddingModelId } = await import('@dejavue/ai');
     const vector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
     matches = await semanticSearch(db, {
       guildId,
@@ -115,6 +108,7 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
       limit: 3,
       minSimilarity: SEMANTIC_MIN_SIMILARITY,
       excludeThreadId: thread.id,
+      modelId: embeddingModelId(cfg?.embeddingModel),
     });
   } else {
     matches = await keywordSearch(db, { guildId, query, limit: 3, excludeThreadId: thread.id });
@@ -122,7 +116,9 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
 
   if (matches.length === 0) return;
 
-  const draft = limits.generative ? await maybeDraft(guildId, query, matches) : undefined;
+  const draft = limits.generative
+    ? await maybeDraft(guildId, query, matches, limits.monthlyGenerationQuota)
+    : undefined;
   try {
     await thread.send(duplicatesMessage(guildId, matches, !limits.removeBranding, draft));
   } catch (err) {

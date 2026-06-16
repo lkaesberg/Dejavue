@@ -83,10 +83,12 @@ export async function draftAnswer(input: {
 }
 
 const SUMMARY_SYSTEM =
-  'Summarize the resolved support thread into one clean, self-contained canonical answer for a ' +
-  'public knowledge base. Be concise and neutral. Output only the answer text, no preamble.';
+  'Write a SHORT summary (2-4 sentences) of this support thread for a knowledge base. ' +
+  'If a problem was solved, focus on HOW it was solved — the resolution and the key steps that fixed it. ' +
+  'Otherwise summarize the key information. Be concise, neutral, plain prose. This sits ABOVE the full ' +
+  'discussion log, so do not reproduce the whole answer — just recap. Output only the summary, no preamble or heading.';
 
-/** Summarize a solved thread into a canonical KB answer (Pro, quota-metered). */
+/** Summarize a thread into a short "how it was solved" recap shown above the logs. */
 export async function summarizeThread(input: {
   question: string;
   answer: string;
@@ -94,9 +96,9 @@ export async function summarizeThread(input: {
 }): Promise<ChatResult> {
   return chat({
     system: SUMMARY_SYSTEM,
-    user: `Question:\n${input.question}\n\nAccepted answer:\n${input.answer}`,
+    user: `Question:\n${input.question}\n\nAccepted answer / resolution:\n${input.answer}`,
     model: input.model,
-    maxTokens: 450,
+    maxTokens: 180,
   });
 }
 

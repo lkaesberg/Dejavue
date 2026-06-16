@@ -75,6 +75,8 @@ services:
       NODE_ENV: production
       HOST: "0.0.0.0"
       PORT: "4321"
+      # pino-pretty isn't bundled into the Astro SSR server; keep JSON logs here.
+      LOG_PRETTY: "0"
     ports:
       - "4321:4321"
     depends_on:

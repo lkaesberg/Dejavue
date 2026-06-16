@@ -34,6 +34,20 @@ export async function getStarterText(thread: ThreadChannel): Promise<StarterText
   }
 }
 
+/** The starter message can arrive after threadCreate fires — retry a few times. */
+export async function fetchStarterWithRetry(
+  thread: ThreadChannel,
+  attempts = 3,
+  delayMs = 1500,
+): Promise<string> {
+  for (let i = 0; i < attempts; i++) {
+    const starter = await getStarterText(thread);
+    if (starter && starter.content.trim()) return starter.content;
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return '';
+}
+
 /** Resolve the per-forum solved/unsolved tag ids by name (robust across forums). */
 export function findForumTags(forum: ForumChannel): {
   solvedTagId?: string;
@@ -52,9 +66,12 @@ export function findTagByName(forum: ForumChannel, name: string): string | undef
 /** Ensure "solved" + "unsolved" tags exist on the forum, creating any missing ones. */
 export async function ensureForumTags(
   forum: ForumChannel,
-): Promise<{ solvedTagId: string; unsolvedTagId: string }> {
+): Promise<{ solvedTagId: string; unsolvedTagId: string; duplicateTagId: string }> {
   let { solvedTagId, unsolvedTagId } = findForumTags(forum);
-  if (solvedTagId && unsolvedTagId) return { solvedTagId, unsolvedTagId };
+  let duplicateTagId = findTagByName(forum, 'duplicate');
+  if (solvedTagId && unsolvedTagId && duplicateTagId) {
+    return { solvedTagId, unsolvedTagId, duplicateTagId };
+  }
 
   const existing: GuildForumTagData[] = forum.availableTags.map((t) => ({
     id: t.id,
@@ -65,13 +82,15 @@ export async function ensureForumTags(
   const additions: GuildForumTagData[] = [];
   if (!solvedTagId) additions.push({ name: 'solved', moderated: false, emoji: null });
   if (!unsolvedTagId) additions.push({ name: 'unsolved', moderated: false, emoji: null });
+  if (!duplicateTagId) additions.push({ name: 'duplicate', moderated: false, emoji: null });
 
   const updated = await forum.setAvailableTags([...existing, ...additions]);
   ({ solvedTagId, unsolvedTagId } = findForumTags(updated));
-  if (!solvedTagId || !unsolvedTagId) {
+  duplicateTagId = findTagByName(updated, 'duplicate');
+  if (!solvedTagId || !unsolvedTagId || !duplicateTagId) {
     throw new Error('failed to ensure forum tags');
   }
-  return { solvedTagId, unsolvedTagId };
+  return { solvedTagId, unsolvedTagId, duplicateTagId };
 }
 
 /** Apply a tag to a thread (idempotent), respecting the 5-tag forum limit. */

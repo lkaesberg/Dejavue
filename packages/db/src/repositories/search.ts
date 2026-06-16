@@ -24,6 +24,12 @@ export interface SemanticSearchOptions {
   /** Discord thread id to exclude (e.g. the asking thread itself). */
   excludeThreadId?: string;
   solvedOnly?: boolean;
+  /**
+   * Only compare against embeddings produced by this model id. Set to the active
+   * model so a provider/model switch never compares the query vector against
+   * stale vectors from a different model (different geometry → garbage scores).
+   */
+  modelId?: string;
   /** HNSW recall knob; higher = better recall, slower. */
   efSearch?: number;
 }
@@ -41,6 +47,7 @@ export async function semanticSearch(
     minSimilarity = 0,
     excludeThreadId,
     solvedOnly = true,
+    modelId,
     efSearch = DEFAULT_EF_SEARCH,
   } = opts;
 
@@ -54,6 +61,7 @@ export async function semanticSearch(
     await tx.execute(sql`SET LOCAL hnsw.ef_search = ${sql.raw(String(Math.trunc(efSearch)))}`);
 
     const conditions = [eq(embedding.guildId, guildId)];
+    if (modelId) conditions.push(eq(embedding.modelId, modelId));
     if (solvedOnly) conditions.push(eq(thread.status, 'solved'));
     if (excludeThreadId) conditions.push(ne(thread.threadId, excludeThreadId));
 

@@ -1,6 +1,6 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../client';
-import { thread, type NewThread, type Thread, type TranscriptMessage } from '../schema';
+import { embedding, thread, type NewThread, type Thread, type TranscriptMessage } from '../schema';
 
 /** Insert or update a thread, keyed by (guildId, discord threadId). */
 export async function upsertThread(db: Database, values: NewThread): Promise<Thread> {
@@ -123,6 +123,75 @@ export async function setCanonicalSummary(
     .update(thread)
     .set({ canonicalSummary: summary, updatedAt: new Date() })
     .where(eq(thread.id, threadRowId));
+}
+
+/** Mark a thread as a duplicate of a canonical thread (folded in the KB). */
+export async function setDuplicateOf(
+  db: Database,
+  guildId: string,
+  discordThreadId: string,
+  originalThreadId: string,
+): Promise<void> {
+  await db
+    .update(thread)
+    .set({ duplicateOfThreadId: originalThreadId, updatedAt: new Date() })
+    .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));
+}
+
+/**
+ * Solved threads that lack an embedding produced by `activeModelId` — i.e. they
+ * have no embedding at all, or only one from a different model (so a model/
+ * provider switch surfaces them all for re-embedding). Used to catch up on startup.
+ */
+export async function getSolvedThreadsMissingEmbedding(
+  db: Database,
+  guildId: string,
+  activeModelId: string,
+  limit = 500,
+): Promise<{ id: string; guildId: string; title: string; questionBody: string; acceptedAnswerText: string | null }[]> {
+  return db
+    .select({
+      id: thread.id,
+      guildId: thread.guildId,
+      title: thread.title,
+      questionBody: thread.questionBody,
+      acceptedAnswerText: thread.acceptedAnswerText,
+    })
+    .from(thread)
+    .leftJoin(
+      embedding,
+      and(eq(embedding.threadId, thread.id), eq(embedding.modelId, activeModelId)),
+    )
+    .where(and(eq(thread.guildId, guildId), eq(thread.status, 'solved'), isNull(embedding.id)))
+    .limit(limit);
+}
+
+/**
+ * Threads in a channel lacking an `activeModelId` embedding, regardless of status
+ * (knowledge channels). Catches both never-embedded and stale-model threads.
+ */
+export async function getThreadsMissingEmbeddingInChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  activeModelId: string,
+  limit = 500,
+): Promise<{ id: string; guildId: string; title: string; questionBody: string; acceptedAnswerText: string | null }[]> {
+  return db
+    .select({
+      id: thread.id,
+      guildId: thread.guildId,
+      title: thread.title,
+      questionBody: thread.questionBody,
+      acceptedAnswerText: thread.acceptedAnswerText,
+    })
+    .from(thread)
+    .leftJoin(
+      embedding,
+      and(eq(embedding.threadId, thread.id), eq(embedding.modelId, activeModelId)),
+    )
+    .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId), isNull(embedding.id)))
+    .limit(limit);
 }
 
 /** Store the full human transcript of a thread (for the public KB). */

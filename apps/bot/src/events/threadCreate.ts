@@ -1,9 +1,10 @@
 import type { AnyThreadChannel, ThreadChannel } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { getDb, getGuildConfig, getThreadByDiscordId } from '@dejavue/db';
+import { channelMode, getDb, getGuildConfig, getThreadByDiscordId } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
 import { controlMessage } from '../lib/embeds';
 import { forumParent } from '../lib/forum';
+import { scheduleKnowledgeArchive } from '../lib/knowledge';
 import { ensureThreadRow, tagUnsolved } from '../lib/solve';
 import { getGuildTier, limitsFor } from '../lib/tier';
 
@@ -30,6 +31,11 @@ export async function onThreadCreate(
 
   const t = thread as ThreadChannel;
   try {
+    // Knowledge channels are a pure archive — no Q&A workflow, just capture it.
+    if (channelMode(cfg, forum.id) === 'knowledge') {
+      scheduleKnowledgeArchive(t);
+      return;
+    }
     await ensureThreadRow(t);
     await tagUnsolved(t);
     const showBranding = !limitsFor(await getGuildTier(guildId)).removeBranding;

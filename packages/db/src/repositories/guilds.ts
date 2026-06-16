@@ -2,6 +2,20 @@ import { eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import { guildConfig, type GuildConfig, type NewGuildConfig } from '../schema';
 
+export type ChannelMode = 'question' | 'knowledge';
+
+/**
+ * Resolve a forum channel's mode. 'knowledge' channels are a pure archive (every
+ * thread published, no answer-prompting/dedup); everything else is 'question'
+ * (the classic Q&A workflow). Defaults to 'question' when unset.
+ */
+export function channelMode(
+  cfg: Pick<GuildConfig, 'channelModes'> | null | undefined,
+  channelId: string,
+): ChannelMode {
+  return cfg?.channelModes?.[channelId] === 'knowledge' ? 'knowledge' : 'question';
+}
+
 export async function getGuildConfig(
   db: Database,
   guildId: string,

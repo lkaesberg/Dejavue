@@ -2,7 +2,7 @@ import { ApplicationCommandType, ContextMenuCommandBuilder, MessageFlags } from 
 import { forumParent } from '../lib/forum';
 import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph } from '../lib/reply';
-import { solveThread } from '../lib/solve';
+import { closeThread, solveThread } from '../lib/solve';
 import type { MessageContextCommand } from './types';
 
 const data = new ContextMenuCommandBuilder()
@@ -29,8 +29,9 @@ export const markAnswerCommand: MessageContextCommand = {
     const answer = interaction.targetMessage;
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await solveThread(channel, { answer, solverId: interaction.user.id });
+    await closeThread(channel);
     await interaction.editReply(
-      `✅ Recorded ${answer.author}'s reply as the answer and marked this solved.`,
+      `✅ Recorded ${answer.author}'s reply as the answer, marked this solved, and closed the thread.`,
     );
   },
 };

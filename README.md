@@ -113,9 +113,10 @@ Billed per-server via Discord Premium Apps (prices are suggestions — set the r
 
 ## Architecture
 
-**Stack:** TypeScript · discord.js v14 · Postgres + pgvector (Drizzle) · local CPU embeddings
-(Transformers.js, `bge-small-en-v1.5`, 384-dim) · DeepSeek V4 Pro via OpenRouter · pg-boss
-(Postgres-backed jobs, no Redis) · Astro SSR (public KB + MCP).
+**Stack:** TypeScript · discord.js v14 · Postgres + pgvector (Drizzle) · pluggable embeddings
+(self-host CPU via Transformers.js `bge-small-en-v1.5`, or OpenRouter `text-embedding-3-large`;
+384-dim either way) · DeepSeek V4 Pro via OpenRouter · pg-boss (Postgres-backed jobs, no Redis) ·
+Astro SSR (public KB + MCP).
 
 ```
 packages/core   shared types, env, tier/entitlement logic, clustering
@@ -184,8 +185,22 @@ named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature local
 
 `DATABASE_URL` · `DISCORD_TOKEN` · `DISCORD_CLIENT_ID` · `DISCORD_DEV_GUILD_ID` ·
 `OPENROUTER_API_KEY` · `OPENROUTER_MODEL` (default `deepseek/deepseek-v4-pro`) ·
-`EMBEDDING_MODEL` (default `bge-small-en-v1.5`) · `KB_BASE_DOMAIN` (default `dejavue.app`) ·
-`PRO_MONTHLY_QUOTA` (default 300) · the `SKU_*` ids · `DEV_FORCE_TIER` (dev only).
+`KB_BASE_DOMAIN` (default `dejavue.app`) · `PRO_MONTHLY_QUOTA` (default 300) · the `SKU_*` ids ·
+`DEV_FORCE_TIER` (dev only).
+
+**Embeddings** are pluggable via `EMBEDDING_PROVIDER`:
+
+| Provider | `EMBEDDING_MODEL` | Cost | Notes |
+|---|---|---|---|
+| `local` (default) | `bge-small-en-v1.5` / `multilingual-e5-small` | free, on-CPU | downloads a small ONNX model |
+| `openrouter` | `openai/text-embedding-3-large` | per-token API | reuses `OPENROUTER_API_KEY` |
+
+Both produce **384-dim** vectors (`EMBEDDING_DIM`) to share one `vector(384)` column, so switching is
+a config change — set `EMBEDDING_PROVIDER=openrouter` and restart. On startup the bot re-embeds threads
+with the new model (search is scoped to the active model id, so stale vectors are never mixed in); run
+`/dejavue backfill` to re-embed a forum's full history. Point `EMBEDDING_BASE_URL`/`EMBEDDING_API_KEY` at
+`https://api.openai.com/v1` to call OpenAI directly instead of OpenRouter. Using a larger native
+dimension means migrating the `vec` column (and re-embedding).
 
 ---
 

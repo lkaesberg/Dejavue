@@ -1,5 +1,6 @@
 import { type Client, Events } from 'discord.js';
 import { logger } from '@dejavue/core';
+import { kbStartupReconcile } from '../lib/kbReconcile';
 import { reconcileAllEntitlements } from '../lib/reconcile';
 import { onEntitlementCreate, onEntitlementDelete, onEntitlementUpdate } from './entitlements';
 import { onInteraction } from './interactionCreate';
@@ -14,6 +15,8 @@ export function registerEvents(client: Client): void {
     // Heal any entitlement drift on startup, then hourly.
     void reconcileAllEntitlements(c);
     setInterval(() => void reconcileAllEntitlements(c), RECONCILE_INTERVAL_MS).unref();
+    // Auto-fill the KB on startup: publish missed solves + backfill embeddings.
+    void kbStartupReconcile(c);
   });
 
   client.on(Events.ThreadCreate, (thread, newlyCreated) => {
