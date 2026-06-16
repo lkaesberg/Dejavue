@@ -3,7 +3,10 @@ import { getEnv } from './env';
 
 function build(): Logger {
   const env = getEnv();
-  const pretty = env.NODE_ENV === 'development';
+  // pino-pretty runs as a worker-thread transport that doesn't survive bundling
+  // (e.g. the Astro SSR build), so keep it opt-in via LOG_PRETTY=1. Everywhere
+  // else (incl. the web app and production) logs as plain JSON.
+  const pretty = process.env.LOG_PRETTY === '1';
   return pino({
     level: env.LOG_LEVEL,
     ...(pretty

@@ -23,8 +23,10 @@ const EnvSchema = z.object({
   // Premium Apps SKU ids
   SKU_PLUS: z.string().optional(),
   SKU_PRO: z.string().optional(),
+  SKU_MAX: z.string().optional(),
   SKU_BACKFILL: z.string().optional(),
   SKU_TOPUP: z.string().optional(),
+  SKU_CUSTOM_DOMAIN: z.string().optional(),
 
   // Embeddings (local CPU model — Transformers.js repo id, resolved in @dejavue/ai)
   EMBEDDING_MODEL: z.string().default('bge-small-en-v1.5'),
@@ -45,7 +47,7 @@ const EnvSchema = z.object({
 
   // Dev-only: force a tier regardless of entitlements (e.g. 'pro' locally so all
   // features are exercisable without real SKUs). Leave unset in production.
-  DEV_FORCE_TIER: z.enum(['free', 'plus', 'pro']).optional(),
+  DEV_FORCE_TIER: z.enum(['free', 'plus', 'pro', 'max']).optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

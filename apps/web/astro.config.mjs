@@ -7,7 +7,12 @@ export default defineConfig({
   adapter: node({ mode: 'standalone' }),
   server: { port: 4321, host: true },
   vite: {
-    // Workspace packages ship raw TS, so Vite must transpile them for SSR.
-    ssr: { noExternal: ['@dejavue/core', '@dejavue/db'] },
+    ssr: {
+      // Workspace packages ship raw TS, so Vite must transpile them for SSR.
+      noExternal: ['@dejavue/core', '@dejavue/db', '@dejavue/ai'],
+      // …but keep heavy native deps external — sharp/onnxruntime use dynamic
+      // native requires that break if Vite tries to bundle them.
+      external: ['@huggingface/transformers', 'sharp', 'onnxruntime-node'],
+    },
   },
 });

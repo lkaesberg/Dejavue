@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveTier, isEntitlementActive } from './tier';
 import { tierLimits, tierAtLeast } from './types';
 
-const SKUS = { plus: 'sku_plus', pro: 'sku_pro' };
+const SKUS = { plus: 'sku_plus', pro: 'sku_pro', max: 'sku_max' };
 const NOW = new Date('2026-06-16T00:00:00Z');
 
 describe('isEntitlementActive', () => {
@@ -43,6 +43,24 @@ describe('deriveTier', () => {
     ).toBe('pro');
   });
 
+  it('returns max for an active max entitlement', () => {
+    expect(deriveTier([{ skuId: 'sku_max', endsAt: null }], SKUS, NOW)).toBe('max');
+  });
+
+  it('lets max win over pro and plus', () => {
+    expect(
+      deriveTier(
+        [
+          { skuId: 'sku_plus', endsAt: null },
+          { skuId: 'sku_pro', endsAt: null },
+          { skuId: 'sku_max', endsAt: null },
+        ],
+        SKUS,
+        NOW,
+      ),
+    ).toBe('max');
+  });
+
   it('ignores expired entitlements', () => {
     expect(deriveTier([{ skuId: 'sku_pro', endsAt: '2026-01-01T00:00:00Z' }], SKUS, NOW)).toBe('free');
   });
@@ -53,10 +71,48 @@ describe('deriveTier', () => {
 });
 
 describe('tierLimits', () => {
-  it('caps the public KB at 10 / 100 / unlimited', () => {
+  it('caps the public KB at 10 / 100 / 500 / unlimited', () => {
     expect(tierLimits('free').kbPageCap).toBe(10);
     expect(tierLimits('plus').kbPageCap).toBe(100);
-    expect(tierLimits('pro').kbPageCap).toBe(Number.POSITIVE_INFINITY);
+    expect(tierLimits('pro').kbPageCap).toBe(500);
+    expect(tierLimits('max').kbPageCap).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('caps forum channels at 1 / 3 / 5 / unlimited', () => {
+    expect(tierLimits('free').maxForumChannels).toBe(1);
+    expect(tierLimits('plus').maxForumChannels).toBe(3);
+    expect(tierLimits('pro').maxForumChannels).toBe(5);
+    expect(tierLimits('max').maxForumChannels).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('caps the searchable archive at 500 / 1,500 / 2,500 / unlimited', () => {
+    expect(tierLimits('free').archiveCap).toBe(500);
+    expect(tierLimits('plus').archiveCap).toBe(1500);
+    expect(tierLimits('pro').archiveCap).toBe(2500);
+    expect(tierLimits('max').archiveCap).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('reserves unlimited caps for max only', () => {
+    for (const t of ['free', 'plus', 'pro'] as const) {
+      const l = tierLimits(t);
+      expect(Number.isFinite(l.maxForumChannels)).toBe(true);
+      expect(Number.isFinite(l.archiveCap)).toBe(true);
+      expect(Number.isFinite(l.kbPageCap)).toBe(true);
+    }
+    const max = tierLimits('max');
+    expect(max.maxForumChannels).toBe(Number.POSITIVE_INFINITY);
+    expect(max.archiveCap).toBe(Number.POSITIVE_INFINITY);
+    expect(max.kbPageCap).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('reserves MCP for the max tier only', () => {
+    expect(tierLimits('pro').mcp).toBe(false);
+    expect(tierLimits('max').mcp).toBe(true);
+  });
+
+  it('gives max a larger quota than pro', () => {
+    expect(tierLimits('max', 300).monthlyGenerationQuota).toBe(1500);
+    expect(tierLimits('pro', 300).monthlyGenerationQuota).toBe(300);
   });
 
   it('reserves generative + summarized KB answers for pro', () => {
@@ -80,5 +136,6 @@ describe('tierAtLeast', () => {
     expect(tierAtLeast('pro', 'plus')).toBe(true);
     expect(tierAtLeast('free', 'plus')).toBe(false);
     expect(tierAtLeast('plus', 'plus')).toBe(true);
+    expect(tierAtLeast('max', 'pro')).toBe(true);
   });
 });

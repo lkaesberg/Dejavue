@@ -14,7 +14,7 @@ const TTL_MS = 60_000;
 
 export function tierSkus(): TierSkus {
   const env = getEnv();
-  return { plus: env.SKU_PLUS, pro: env.SKU_PRO };
+  return { plus: env.SKU_PLUS, pro: env.SKU_PRO, max: env.SKU_MAX };
 }
 
 export async function getGuildTier(guildId: string): Promise<Tier> {

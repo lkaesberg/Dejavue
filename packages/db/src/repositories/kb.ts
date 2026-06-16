@@ -12,6 +12,19 @@ export async function getGuildBySlug(db: Database, slug: string): Promise<GuildC
   return row;
 }
 
+/** Resolve a guild by its custom domain (one-time purchase), if publishing is opted in. */
+export async function getGuildByCustomDomain(
+  db: Database,
+  host: string,
+): Promise<GuildConfig | undefined> {
+  const [row] = await db
+    .select()
+    .from(guildConfig)
+    .where(and(eq(guildConfig.customDomain, host), eq(guildConfig.kbPublishOptIn, true)))
+    .limit(1);
+  return row;
+}
+
 export async function getPublishedThreads(
   db: Database,
   guildId: string,

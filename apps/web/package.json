@@ -14,7 +14,9 @@
     "@dejavue/ai": "workspace:*",
     "@dejavue/core": "workspace:*",
     "@dejavue/db": "workspace:*",
-    "astro": "^6.4.7"
+    "@huggingface/transformers": "^4.2.0",
+    "astro": "^6.4.7",
+    "openai": "^6.42.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4"

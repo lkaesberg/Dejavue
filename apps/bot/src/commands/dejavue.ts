@@ -53,6 +53,18 @@ const data = new SlashCommandBuilder()
           .setRequired(true),
       ),
   )
+  .addSubcommand((s) =>
+    s
+      .setName('untrack')
+      .setDescription('Stop monitoring a forum channel (admin)')
+      .addChannelOption((o) =>
+        o
+          .setName('channel')
+          .setDescription('The forum channel to stop monitoring')
+          .addChannelTypes(ChannelType.GuildForum)
+          .setRequired(true),
+      ),
+  )
   .addSubcommand((s) => s.setName('config').setDescription('Show the current configuration'))
   .addSubcommand((s) =>
     s.setName('status').setDescription('Full status: config, URLs, MCP endpoint (admin)'),
@@ -108,12 +120,23 @@ const data = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((s) =>
+    s
+      .setName('domain')
+      .setDescription('Set a custom domain for the KB (one-time purchase, admin)')
+      .addStringOption((o) =>
+        o
+          .setName('domain')
+          .setDescription('Your domain, e.g. help.yoursite.com (or "none" to remove)'),
+      ),
+  )
+  .addSubcommand((s) =>
     s.setName('demo').setDescription('Create an example forum with sample questions (admin)'),
   )
   .addSubcommand((s) => s.setName('help').setDescription('How Dejavue works'));
 
 const RESERVED_SLUGS = new Set(['www', 'app', 'api', 'docs', 'status', 'admin', 'dejavue', 'mail', 'cdn']);
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 
 async function resolveForum(interaction: ChatInputCommandInteraction): Promise<ForumChannel | null> {
   const picked = interaction.options.getChannel('channel', true);
@@ -157,7 +180,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       await interaction.editReply(
         upsellPayload({
           title: 'Upgrade for more forum channels',
-          description: `Your plan monitors up to ${limits.maxForumChannels} forum channel(s). Upgrade to **Plus** (3 forums) or **Pro** (unlimited).`,
+          description: `Your plan monitors up to ${limits.maxForumChannels} forum channel(s). Upgrade to **Plus** (3 forums), **Pro** (5), or **Max** (unlimited).`,
           skuId: getEnv().SKU_PLUS,
         }),
       );
@@ -178,6 +201,29 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       'Setup failed — I need the **Manage Channels** permission to create the forum tags. Grant it and re-run.',
     );
   }
+}
+
+async function handleUntrack(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply(eph('You need the **Manage Server** permission to change monitored channels.'));
+    return;
+  }
+  const guildId = interaction.guildId!;
+  const db = getDb();
+  const picked = interaction.options.getChannel('channel', true);
+  const cfg = await getGuildConfig(db, guildId);
+  if (!cfg || !cfg.forumChannelIds.includes(picked.id)) {
+    await interaction.reply(eph(`<#${picked.id}> isn't being monitored.`));
+    return;
+  }
+  const remaining = cfg.forumChannelIds.filter((id) => id !== picked.id);
+  await updateGuildConfig(db, guildId, { forumChannelIds: remaining });
+  await interaction.reply(
+    eph(
+      `✅ Stopped monitoring <#${picked.id}> — new posts there won't get duplicate detection or a control message.\n` +
+        '_Already-archived answers are kept (so search/KB still work). To also remove its public pages, unsolve those threads or turn off `/dejavue kb`._',
+    ),
+  );
 }
 
 async function handleConfig(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -258,13 +304,16 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
       },
     );
 
+  if (cfg?.customDomain) {
+    embed.addFields({ name: 'Custom domain', value: `https://${cfg.customDomain}`, inline: true });
+  }
   if (limits.generative) {
     const q = await checkQuota(db, guildId, env.PRO_MONTHLY_QUOTA);
     embed.addFields({ name: 'AI generations (month)', value: `${q.used} / ${q.limit}`, inline: true });
   }
   if (limits.mcp) {
     embed.addFields({
-      name: 'MCP server (Pro)',
+      name: 'MCP server (Max)',
       value: kbUrl
         ? `\`${kbUrl}/mcp\`\nAdd as a Streamable HTTP MCP server in your AI client to query this KB.`
         : '_set a KB slug first:_ `/dejavue kb slug:<name>`',
@@ -553,7 +602,69 @@ async function handleKb(interaction: ChatInputCommandInteraction): Promise<void>
     eph(
       `KB publishing: **${cfg?.kbPublishOptIn ? 'on' : 'off'}**\nPublic URL: ${url}` +
         `${backfilled ? `\nPublished **${backfilled}** existing solved post(s).` : ''}\n` +
-        '_Usernames are aliased on public pages. Solved posts publish automatically while under your tier cap (Free 10 / Plus 100 / Pro unlimited)._',
+        '_Usernames are aliased on public pages. Solved posts publish automatically while under your tier cap (Free 10 / Plus 100 / Pro 500 / Max unlimited)._',
+    ),
+  );
+}
+
+async function handleDomain(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply(eph('You need the **Manage Server** permission to set a custom domain.'));
+    return;
+  }
+  const guildId = interaction.guildId!;
+  const db = getDb();
+  const env = getEnv();
+  const raw = interaction.options.getString('domain');
+
+  if (!raw) {
+    const cfg = await getGuildConfig(db, guildId);
+    await interaction.reply(
+      eph(
+        cfg?.customDomain
+          ? `Custom domain: \`${cfg.customDomain}\` → CNAME it at your Dejavue web host.`
+          : 'No custom domain set. Run `/dejavue domain domain:<host>` (one-time purchase) to add one.',
+      ),
+    );
+    return;
+  }
+
+  const value = raw.toLowerCase().trim();
+  if (value === 'none' || value === 'remove') {
+    await updateGuildConfig(db, guildId, { customDomain: null });
+    await interaction.reply(eph('Custom domain removed.'));
+    return;
+  }
+
+  // Durable one-time purchase grants the capability (not consumed — it's ongoing).
+  const otp = env.SKU_CUSTOM_DOMAIN
+    ? await getActiveOtp(db, guildId, env.SKU_CUSTOM_DOMAIN)
+    : undefined;
+  if (!otp && !env.DEV_FORCE_TIER) {
+    await interaction.reply({
+      ...upsellPayload({
+        title: 'Custom domain',
+        description:
+          'Serve your knowledge base on your own domain (e.g. help.yoursite.com) — a one-time purchase.',
+        skuId: env.SKU_CUSTOM_DOMAIN,
+      }),
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (!DOMAIN_RE.test(value) || value.endsWith(env.KB_BASE_DOMAIN)) {
+    await interaction.reply(eph('Invalid domain. Use a hostname you own, e.g. `help.yoursite.com`.'));
+    return;
+  }
+
+  await updateGuildConfig(db, guildId, { customDomain: value });
+  await interaction.reply(
+    eph(
+      `✅ Custom domain set to \`${value}\`.\n` +
+        `1. Add a **CNAME**: \`${value}\` → your Dejavue web host (same target as \`*.${env.KB_BASE_DOMAIN}\`).\n` +
+        '2. Ensure TLS covers it (on-demand certs / Cloudflare for SaaS).\n' +
+        `Your KB will then be reachable at https://${value}`,
     ),
   );
 }
@@ -612,6 +723,8 @@ export const dejavueCommand: SlashCommand = {
     switch (interaction.options.getSubcommand()) {
       case 'setup':
         return handleSetup(interaction);
+      case 'untrack':
+        return handleUntrack(interaction);
       case 'config':
         return handleConfig(interaction);
       case 'status':
@@ -634,6 +747,8 @@ export const dejavueCommand: SlashCommand = {
         return handleBackfill(interaction);
       case 'kb':
         return handleKb(interaction);
+      case 'domain':
+        return handleDomain(interaction);
       case 'demo':
         return handleDemo(interaction);
       case 'help':

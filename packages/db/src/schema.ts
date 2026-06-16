@@ -72,6 +72,8 @@ export const guildConfig = pgTable('guild_config', {
   // Public web KB
   kbPublishOptIn: boolean('kb_publish_opt_in').notNull().default(false),
   kbSlug: text('kb_slug').unique(),
+  // Custom domain for the public KB (one-time purchase). e.g. help.acme.com
+  customDomain: text('custom_domain').unique(),
   // "powered by Dejavue" branding (forced on for Free tier regardless of this flag)
   brandingEnabled: boolean('branding_enabled').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

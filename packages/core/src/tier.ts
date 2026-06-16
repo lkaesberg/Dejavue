@@ -24,6 +24,7 @@ export interface EntitlementLike {
 export interface TierSkus {
   plus?: string | undefined;
   pro?: string | undefined;
+  max?: string | undefined;
 }
 
 /** Coerce a nullable Date|string into epoch ms, or null. */
@@ -60,11 +61,14 @@ export function deriveTier(
 ): Tier {
   let hasPlus = false;
   let hasPro = false;
+  let hasMax = false;
   for (const e of entitlements) {
     if (!isEntitlementActive(e, now)) continue;
-    if (skus.pro && e.skuId === skus.pro) hasPro = true;
+    if (skus.max && e.skuId === skus.max) hasMax = true;
+    else if (skus.pro && e.skuId === skus.pro) hasPro = true;
     else if (skus.plus && e.skuId === skus.plus) hasPlus = true;
   }
+  if (hasMax) return 'max';
   if (hasPro) return 'pro';
   if (hasPlus) return 'plus';
   return 'free';

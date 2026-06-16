@@ -1,10 +1,15 @@
 # Dejavue — Discord Q&A Deduplication Bot (Implementation Plan)
 
+> **Historical design doc.** This is the originally approved plan. The shipped product has since
+> evolved — notably a 4th **Max** tier (only Max has unlimited caps; Pro is finite), **Plus = 3**
+> forum channels, a **custom-domain** one-time purchase, full-**transcript** KB pages, and an **MCP
+> server** (Max). See **[README.md](../README.md)** for the current, authoritative tiers + features.
+
 ## Context
 
 **Dejavue** is a paid SaaS Discord bot that watches help/Q&A **forum channels**, fights duplicate questions, and turns solved threads into a searchable knowledge base. The problem it solves: active support communities drown in repeat questions; the same answers get re-typed forever, and good answers are never reused. Dejavue detects likely duplicates the moment a post is created, drives a "mark-solved" workflow, archives canonical answers, and (on paid tiers) layers AI drafting/summarization and a public SEO knowledge base on top.
 
-It is monetized through **Discord Premium Apps** (native per-server billing) across three tiers, with pricing aligned to marginal cost: keyword features are free, embedding-based semantic search anchors the mid tier, and generative AI lives behind a quota in the top tier. The public knowledge base — near-zero marginal cost to serve — is available on **every tier** (page caps 10 / 100 / unlimited) to maximize the SEO/adoption flywheel.
+It is monetized through **Discord Premium Apps** (native per-server billing) across three tiers, with pricing aligned to marginal cost: keyword features are free, embedding-based semantic search anchors the mid tier, and generative AI lives behind a quota in the top tier. The public knowledge base — near-zero marginal cost to serve — is available on **every tier** (page caps 10 / 100 / 500 / unlimited — only Max is unlimited) to maximize the SEO/adoption flywheel.
 
 This is a **greenfield build** — the working directory is empty. The decided stack is **TypeScript + discord.js v14**, **Postgres + pgvector**, **local CPU embeddings**, and **DeepSeek V4 Pro via OpenRouter** for generative AI. The public web KB is **multi-tenant by subdomain** (`{guild-slug}.{KB_BASE_DOMAIN}`). Scope is the full three-tier feature set plus the public knowledge base.
 
@@ -195,7 +200,7 @@ Pin retention/archive config (v10 changed defaults; default completion archival 
 
 ## Public web KB (`apps/web`, Astro SSR — subdomain multi-tenant)
 
-Available on **every tier** (cheap to serve, and it drives the SEO/adoption flywheel), with per-guild **published-page caps**: **Free 10 · Plus 100 · Pro unlimited**. Publishing is **not** a metered generative action. KB *content* differs by tier so cost stays aligned: Free/Plus publish the **raw question + accepted answer**; **Pro** publishes the **AI-summarized canonical answer** (the only generative, quota-counted part). Free-tier pages carry a small "powered by Dejavue" footer. Enforce by counting `published_to_kb = true` threads per guild against the tier cap; the 11th / 101st publish surfaces the Premium upsell instead of publishing.
+Available on **every tier** (cheap to serve, and it drives the SEO/adoption flywheel), with per-guild **published-page caps**: **Free 10 · Plus 100 · Pro 500 · Max unlimited**. Publishing is **not** a metered generative action. KB *content* differs by tier so cost stays aligned: Free/Plus publish the **raw question + accepted answer**; **Pro** publishes the **AI-summarized canonical answer** (the only generative, quota-counted part). Free-tier pages carry a small "powered by Dejavue" footer. Enforce by counting `published_to_kb = true` threads per guild against the tier cap; the 11th / 101st publish surfaces the Premium upsell instead of publishing.
 
 - **Routing:** each guild's KB is served at **`{kb_slug}.{KB_BASE_DOMAIN}`** (e.g. `acme.dejavue.app`). A host-based **middleware** (`src/middleware.ts`) reads the `Host` header, extracts the subdomain, resolves the guild, and 404s unknown/unpublished slugs. Apex + `www` serve the marketing/landing page; reserve `app`, `api`, `docs`, `status`.
 - **Slugs:** `guild_config.kb_slug` is unique, lowercase, DNS-safe, validated against a reserved-word blocklist; set via `/dejavue config`.
@@ -208,17 +213,19 @@ Available on **every tier** (cheap to serve, and it drives the SEO/adoption flyw
 
 ## Tier-gating matrix
 
+_(Original 3-tier matrix; a **Max** tier was added later — only Max is unlimited. See README.)_
+
 | Feature | Free | Plus (~$4.99) | Pro (~$9.99) |
 |---|---|---|---|
-| Forum channels monitored | 1 | unlimited | unlimited |
+| Forum channels monitored | 1 | 3 | 5 |
 | Duplicate detection | keyword | **semantic** | semantic + AI draft |
-| Mark-solved + archive | ✓ (cap ~500) | ✓ unlimited | ✓ unlimited |
+| Mark-solved + archive | ✓ (cap ~500) | ✓ (~1.5k) | ✓ (~2.5k) |
 | `/dejavue search` | keyword | semantic | semantic |
 | Stale-question nudges | — | ✓ | ✓ |
 | Analytics | basic counts | full | full |
 | Branding ("powered by Dejavue") | shown | removed | removed |
 | AI summarization / gap clustering / auto-FAQ | — | — | ✓ (quota) |
-| Public web KB (subdomain) | ✓ — up to **10** pages | ✓ — up to **100** pages | ✓ — **unlimited** |
+| Public web KB (subdomain) | ✓ — up to **10** pages | ✓ — up to **100** pages | ✓ — up to **500** pages |
 | KB answer rendering | raw accepted answer | raw accepted answer | **AI-summarized** canonical answer |
 | Backfill | — | one-time purchase (durable SKU) | one-time purchase |
 | Generation quota | — | — | ~300/mo + top-ups |
@@ -235,7 +242,7 @@ Available on **every tier** (cheap to serve, and it drives the SEO/adoption flyw
 - **M5 — Generative layer + quota (Pro).** OpenRouter client defaulting to **DeepSeek V4 Pro** (per-feature overrides; prompted-JSON + zod repair); AI draft on dedup; summarize on solve; quota ledger + reserve/commit; near-limit/top-up buttons. *Verify:* Pro guild gets a draft; the quota'th call blocks with upsell; consumable top-up restores capacity; embeddings still work when quota exhausted.
 - **M6 — Backfill (durable OTP).** Checkpointed job; paginate archived+active threads; backoff; bulk-embed then build HNSW; progress message; consume entitlement on durable start. *Verify:* point at a forum with hundreds of threads; kill mid-run; confirm clean resume + idempotent re-run.
 - **M7 — Analytics + gap clustering + auto-FAQ.** Analytics aggregates; greedy-threshold clustering over pgvector + LLM labels; auto-FAQ cron respecting `manual_override`. *Verify:* analytics returns numbers; clustering surfaces a recurring theme; FAQ generates/updates.
-- **M8 — Public web KB (all tiers, subdomain).** Astro SSR + host-based tenant middleware; published threads (`QAPage`) + FAQ (`FAQPage`); **per-tier publish caps (Free 10 / Plus 100 / Pro unlimited)** enforced by counting published threads, with a Premium upsell on overflow; Free/Plus render the raw accepted answer while Pro renders the AI-summarized canonical answer; per-tenant DB-driven sitemap; opt-in publishing + username aliasing + "powered by Dejavue" footer on Free + unpublish/410; worker-triggered revalidation; wildcard DNS/TLS. *Verify:* solving in an opted-in guild creates a page at `{slug}.{KB_BASE_DOMAIN}` with valid structured data (Google Rich Results test); a Free guild's 11th publish is blocked with an upsell; unsolving removes a page; sitemap updates.
+- **M8 — Public web KB (all tiers, subdomain).** Astro SSR + host-based tenant middleware; published threads (`QAPage`) + FAQ (`FAQPage`); **per-tier publish caps (Free 10 / Plus 100 / Pro 500 / Max unlimited)** enforced by counting published threads, with a Premium upsell on overflow; Free/Plus render the raw accepted answer while Pro renders the AI-summarized canonical answer; per-tenant DB-driven sitemap; opt-in publishing + username aliasing + "powered by Dejavue" footer on Free + unpublish/410; worker-triggered revalidation; wildcard DNS/TLS. *Verify:* solving in an opted-in guild creates a page at `{slug}.{KB_BASE_DOMAIN}` with valid structured data (Google Rich Results test); a Free guild's 11th publish is blocked with an upsell; unsolving removes a page; sitemap updates.
 
 **Stub-early:** entitlements (M0–M3 run as "everyone Pro"); all AI (M0–M4); backfill, analytics, KB; multilingual (start English-only — the `model_id` column makes the swap free later).
 
@@ -294,7 +301,7 @@ Available on **every tier** (cheap to serve, and it drives the SEO/adoption flyw
 - **Backfill rate limits:** concurrency cap, `Retry-After`, checkpointed/idempotent. *(M6)*
 - **Quota:** count on success, ledger not counter, embeddings unmetered. *(M5)*
 - **HNSW recall:** tune `ef_search` + distance threshold; index after bulk load. *(M3/M6)*
-- **KB subdomains:** all tiers, per-guild caps 10/100/unlimited; SSR + wildcard DNS/TLS; opt-in default off, alias usernames, 410 on unpublish; per-tenant authority (SEO tradeoff). *(M8)*
+- **KB subdomains:** all tiers, per-guild caps 10/100/500/unlimited (only Max unlimited); SSR + wildcard DNS/TLS; opt-in default off, alias usernames, 410 on unpublish; per-tenant authority (SEO tradeoff). *(M8)*
 - **Embedding dim lock-in:** `model_id`/`embedding_version` column keeps swaps non-destructive. *(M0)*
 
 > Freshness caveat: discord.js (mid-v15 migration), pg-boss, Drizzle, and the exact DeepSeek V4 Pro OpenRouter model id move fast. Version-pin everything and confirm exact APIs/ids against what you install during M0–M1.

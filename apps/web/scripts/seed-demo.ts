@@ -1,3 +1,4 @@
+import { embed } from '@dejavue/ai';
 import {
   closeDb,
   ensureGuildConfig,
@@ -5,6 +6,7 @@ import {
   setPublished,
   setTranscript,
   updateGuildConfig,
+  upsertEmbedding,
   upsertThread,
 } from '@dejavue/db';
 
@@ -13,7 +15,11 @@ const GUILD = 'demo-guild';
 const db = getDb();
 
 await ensureGuildConfig(db, GUILD);
-await updateGuildConfig(db, GUILD, { kbSlug: 'demo', kbPublishOptIn: true });
+await updateGuildConfig(db, GUILD, {
+  kbSlug: 'demo',
+  kbPublishOptIn: true,
+  customDomain: 'kb.example.test',
+});
 
 const row = await upsertThread(db, {
   guildId: GUILD,
@@ -36,5 +42,12 @@ await setTranscript(db, row.id, [
   { authorId: 'demo-asker', content: 'Got it, that worked. Thank you!', createdAt: '2026-06-16T10:06:00.000Z' },
 ]);
 
-console.log('✓ seeded demo tenant: slug=demo, thread=demo-thread-1 (with transcript)');
+// Embed the thread so semantic search + the MCP server return it.
+const MODEL = 'bge-small-en-v1.5';
+const text =
+  'How do I reset my password?\nI forgot my password and cannot log in to my account.\nUse the "Forgot password" link on the login page; a reset email arrives within a minute.';
+const [vector] = await embed([text], { mode: 'passage', model: MODEL });
+if (vector) await upsertEmbedding(db, { threadRowId: row.id, guildId: GUILD, modelId: MODEL, vector });
+
+console.log('✓ seeded demo tenant: slug=demo, thread=demo-thread-1 (transcript + embedding)');
 await closeDb();

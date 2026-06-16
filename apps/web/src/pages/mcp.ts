@@ -1,4 +1,4 @@
-import { getEnv } from '@dejavue/core';
+import { getEnv, tierLimits } from '@dejavue/core';
 import { getDb, getKbAnswersByRowIds, resolveGuildTier, semanticSearch } from '@dejavue/db';
 import type { APIRoute } from 'astro';
 
@@ -83,9 +83,13 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const env = getEnv();
   const tier =
     env.DEV_FORCE_TIER ??
-    (await resolveGuildTier(getDb(), tenant.guildId, { plus: env.SKU_PLUS, pro: env.SKU_PRO }));
-  if (tier !== 'pro') {
-    return new Response(JSON.stringify({ error: 'The MCP server is a Pro feature.' }), {
+    (await resolveGuildTier(getDb(), tenant.guildId, {
+      plus: env.SKU_PLUS,
+      pro: env.SKU_PRO,
+      max: env.SKU_MAX,
+    }));
+  if (!tierLimits(tier).mcp) {
+    return new Response(JSON.stringify({ error: 'The MCP server is a Max-tier feature.' }), {
       status: 402,
       headers: { 'content-type': 'application/json', ...CORS },
     });
