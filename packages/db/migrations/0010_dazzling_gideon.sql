@@ -1,0 +1,1 @@
+ALTER TABLE "thread" ADD COLUMN "last_embed_msg_count" integer;

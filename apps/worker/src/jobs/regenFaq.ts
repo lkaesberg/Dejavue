@@ -6,6 +6,7 @@ import {
   getDb,
   getThreadsByRowIds,
   getTopClusters,
+  markGenerationFinished,
   upsertGeneratedFaq,
 } from '@dejavue/db';
 import type { RegenFaqJob } from '@dejavue/queue';
@@ -17,11 +18,12 @@ const MAX_FAQ = 10;
 /** Generate / maintain the auto-FAQ from the top clusters (Pro, quota-metered). */
 export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
   const env = getEnv();
+  const db = getDb();
   if (!env.OPENROUTER_API_KEY) {
     log.warn('OPENROUTER_API_KEY not set; skipping FAQ regen');
+    await markGenerationFinished(db, job.guildId, 'faq');
     return;
   }
-  const db = getDb();
   const baseQuota = await guildGenerationQuota(job.guildId);
   const clusters = await getTopClusters(db, job.guildId, MAX_FAQ);
 
@@ -58,5 +60,6 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
       baseQuota,
     });
   }
+  await markGenerationFinished(db, job.guildId, 'faq');
   log.info({ guildId: job.guildId, clusters: clusters.length }, 'regenerated FAQ');
 }

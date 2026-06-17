@@ -7,6 +7,8 @@ import {
   getGuildConfig,
   listChannelIdsForGuild,
   listThreadIdsByChannel,
+  setChannelGuidelines,
+  updateChannelName,
   updateGuildConfig,
 } from '@dejavue/db';
 import { ensureForumTags } from './forum';
@@ -76,10 +78,15 @@ async function reconcileGuild(guild: Guild): Promise<void> {
     // existing-but-untracked channel keeps its archived answers (untrack semantics).
     if (!tracked.has(channelId)) continue;
 
-    // Keep our managed forum tags (emoji + moderated) current on tracked forums.
+    // Keep tags, the channel name, and post-guidelines current on tracked forums
+    // (heals renames / guideline edits that happened while we were offline).
     try {
       const ch = await guild.channels.fetch(channelId);
-      if (ch?.type === ChannelType.GuildForum) await ensureForumTags(ch);
+      if (ch?.type === ChannelType.GuildForum) {
+        await ensureForumTags(ch);
+        await updateChannelName(db, guild.id, channelId, ch.name);
+        await setChannelGuidelines(db, guild.id, channelId, ch.topic ?? null);
+      }
     } catch {
       /* needs Manage Channels; best effort */
     }

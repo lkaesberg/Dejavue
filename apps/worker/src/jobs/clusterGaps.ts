@@ -5,6 +5,7 @@ import {
   commitGeneration,
   getDb,
   getGuildEmbeddingPoints,
+  markGenerationFinished,
   type NewClusterInput,
   replaceClusters,
 } from '@dejavue/db';
@@ -23,6 +24,7 @@ export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
   const points = await getGuildEmbeddingPoints(db, job.guildId, embeddingModelId());
   if (points.length < 4) {
     await replaceClusters(db, job.guildId, []);
+    await markGenerationFinished(db, job.guildId, 'cluster');
     log.info({ guildId: job.guildId, points: points.length }, 'too few points to cluster');
     return;
   }
@@ -78,5 +80,6 @@ export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
   }
 
   await replaceClusters(db, job.guildId, toStore);
+  await markGenerationFinished(db, job.guildId, 'cluster');
   log.info({ guildId: job.guildId, clusters: toStore.length }, 'clustered knowledge gaps');
 }

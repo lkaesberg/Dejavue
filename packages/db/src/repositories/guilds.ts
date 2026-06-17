@@ -16,6 +16,33 @@ export function channelMode(
   return cfg?.channelModes?.[channelId] === 'knowledge' ? 'knowledge' : 'question';
 }
 
+/** A channel's forum post-guidelines (its Discord topic), kept in sync. */
+export function channelGuidelinesOf(
+  cfg: Pick<GuildConfig, 'channelGuidelines'> | null | undefined,
+  channelId: string,
+): string | undefined {
+  return cfg?.channelGuidelines?.[channelId] || undefined;
+}
+
+/** Store (or clear, when empty) a channel's forum post-guidelines. */
+export async function setChannelGuidelines(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  guidelines: string | null,
+): Promise<void> {
+  const cfg = await getGuildConfig(db, guildId);
+  if (!cfg) return;
+  const map = { ...(cfg.channelGuidelines ?? {}) };
+  const trimmed = guidelines?.trim();
+  if (trimmed) map[channelId] = trimmed;
+  else delete map[channelId];
+  await db
+    .update(guildConfig)
+    .set({ channelGuidelines: map, updatedAt: new Date() })
+    .where(eq(guildConfig.guildId, guildId));
+}
+
 export async function getGuildConfig(
   db: Database,
   guildId: string,
@@ -52,4 +79,64 @@ export async function updateGuildConfig(
     .where(eq(guildConfig.guildId, guildId))
     .returning();
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// Generative run state — lets the gaps/faq commands dedupe in-flight runs and
+// show progress + freshness instead of re-triggering work on every invocation.
+// ---------------------------------------------------------------------------
+
+export type GenFeature = 'cluster' | 'faq';
+
+export interface GenStatus {
+  /** A run was requested and the worker hasn't reported finishing it yet. */
+  inFlight: boolean;
+  /** A run finished recently enough that a re-run should just show the result. */
+  fresh: boolean;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+/** Derive a feature's generation status from the stored run timestamps. */
+export function generationStatus(
+  cfg: Pick<GuildConfig, 'genRuns'> | null | undefined,
+  feature: GenFeature,
+  opts: { throttleMs: number; maxRunMs: number },
+  now = Date.now(),
+): GenStatus {
+  const run = cfg?.genRuns?.[feature] ?? {};
+  const started = run.started;
+  const finished = run.finished;
+  const inFlight =
+    typeof started === 'number' &&
+    (typeof finished !== 'number' || started > finished) &&
+    now - started < opts.maxRunMs;
+  const fresh = typeof finished === 'number' && now - finished < opts.throttleMs;
+  return { inFlight, fresh, startedAt: started, finishedAt: finished };
+}
+
+async function patchGenRun(
+  db: Database,
+  guildId: string,
+  feature: GenFeature,
+  patch: { started?: number; finished?: number },
+): Promise<void> {
+  const cfg = await getGuildConfig(db, guildId);
+  if (!cfg) return;
+  const runs = { ...(cfg.genRuns ?? {}) };
+  runs[feature] = { ...(runs[feature] ?? {}), ...patch };
+  await db
+    .update(guildConfig)
+    .set({ genRuns: runs, updatedAt: new Date() })
+    .where(eq(guildConfig.guildId, guildId));
+}
+
+/** Mark that a generation run was just requested (command-side). */
+export function markGenerationStarted(db: Database, guildId: string, feature: GenFeature): Promise<void> {
+  return patchGenRun(db, guildId, feature, { started: Date.now() });
+}
+
+/** Mark that a generation run finished (worker-side, any trigger). */
+export function markGenerationFinished(db: Database, guildId: string, feature: GenFeature): Promise<void> {
+  return patchGenRun(db, guildId, feature, { finished: Date.now() });
 }

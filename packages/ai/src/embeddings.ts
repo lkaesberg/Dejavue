@@ -5,6 +5,7 @@ import {
 } from '@huggingface/transformers';
 import OpenAI from 'openai';
 import { childLogger, getEnv, requireEnv } from '@dejavue/core';
+import { findAnswerIndex } from './text';
 
 const log = childLogger({ mod: 'ai:embeddings' });
 
@@ -148,6 +149,57 @@ async function embedViaApi(texts: string[], model: string, dim: number): Promise
   return [...resp.data]
     .sort((a, b) => a.index - b.index)
     .map((d) => l2normalize(d.embedding as number[]));
+}
+
+export interface EmbedSource {
+  title: string;
+  questionBody?: string | null;
+  acceptedAnswerText?: string | null;
+  transcript?: { content: string }[] | null;
+}
+
+const QUESTION_WINDOW = 3; // the OP + the next couple of replies
+const ANSWER_WINDOW = 1; // the accepted answer ± its neighbours
+
+/**
+ * Build the passage text to embed for a thread. When a transcript is present we
+ * include context *around the question* (the opening messages) and *around the
+ * answer* (the accepted answer plus its neighbours), which gives retrieval more
+ * signal than the bare question + answer — and means knowledge-channel threads
+ * (which have no single answer) still get their surrounding discussion indexed.
+ * Falls back to title + question + answer when no transcript was captured.
+ */
+export function buildEmbeddingText(src: EmbedSource): string {
+  const msgs = (src.transcript ?? []).map((m) => (m.content ?? '').trim()).filter(Boolean);
+  const parts: string[] = [];
+  if (src.title) parts.push(src.title);
+
+  if (msgs.length > 0) {
+    parts.push(...msgs.slice(0, QUESTION_WINDOW));
+    const answer = (src.acceptedAnswerText ?? '').trim();
+    if (answer) {
+      const idx = findAnswerIndex(msgs, answer);
+      if (idx >= 0) parts.push(...msgs.slice(Math.max(0, idx - ANSWER_WINDOW), idx + ANSWER_WINDOW + 1));
+      else parts.push(answer);
+    } else if (msgs.length > QUESTION_WINDOW) {
+      // No accepted answer (knowledge / unresolved): include the tail too.
+      parts.push(...msgs.slice(-(ANSWER_WINDOW + 1)));
+    }
+  } else {
+    if (src.questionBody) parts.push(src.questionBody);
+    if (src.acceptedAnswerText) parts.push(src.acceptedAnswerText);
+  }
+
+  // De-dup while preserving order (windows can overlap), then join.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p && !seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out.join('\n\n');
 }
 
 export type EmbedMode = 'query' | 'passage';

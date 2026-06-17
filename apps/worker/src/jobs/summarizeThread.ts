@@ -1,6 +1,12 @@
-import { summarizeThread } from '@dejavue/ai';
+import { buildSummaryContext, summarizeThread } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
-import { checkQuota, commitGeneration, getDb, setCanonicalSummary } from '@dejavue/db';
+import {
+  checkQuota,
+  commitGeneration,
+  getDb,
+  getThreadByRowId,
+  setCanonicalSummary,
+} from '@dejavue/db';
 import type { SummarizeThreadJob } from '@dejavue/queue';
 import { guildGenerationQuota } from '../lib/quota';
 
@@ -21,7 +27,22 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
     return;
   }
 
-  const result = await summarizeThread({ question: job.question, answer: job.answer });
+  // Prefer the live row (it has the full transcript, so we can give the model the
+  // whole thread — or start + answer-window context when long); fall back to the payload.
+  const row = await getThreadByRowId(db, job.threadRowId);
+  const context = buildSummaryContext(
+    row
+      ? {
+          title: row.title,
+          questionBody: row.questionBody,
+          acceptedAnswerText: row.acceptedAnswerText,
+          transcript: row.transcript,
+        }
+      : { title: job.question, acceptedAnswerText: job.answer },
+  );
+  if (!context.trim()) return;
+
+  const result = await summarizeThread({ context });
   const summary = result.text.trim();
   if (!summary) return;
 

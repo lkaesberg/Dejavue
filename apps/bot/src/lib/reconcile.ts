@@ -3,6 +3,7 @@ import { childLogger } from '@dejavue/core';
 import { getDb, type NewEntitlement, reconcileGuildEntitlements } from '@dejavue/db';
 import { mapEntitlement } from './entitlementMap';
 import { invalidateTier } from './tier';
+import { checkTierUpgrade } from './upgrade';
 
 const log = childLogger({ mod: 'reconcile' });
 
@@ -27,6 +28,8 @@ export async function reconcileAllEntitlements(client: Client): Promise<void> {
     for (const [guildId, rows] of byGuild) {
       await reconcileGuildEntitlements(getDb(), guildId, rows);
       invalidateTier(guildId);
+      // Catch upgrades that happened while we were offline (heals missed events).
+      await checkTierUpgrade(guildId);
     }
     log.info({ guilds: byGuild.size, total: fetched.size }, 'reconciled entitlements');
   } catch (err) {

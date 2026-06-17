@@ -8,11 +8,14 @@ import {
   getGuildConfig,
   getThreadByDiscordId,
   getThreadsByRowIds,
+  type GuildConfig,
   keywordSearch,
+  listChannelTopicChannelIds,
   type SearchMatch,
   semanticSearch,
 } from '@dejavue/db';
-import { duplicatesMessage } from './embeds';
+import { checkChannelFit, ensureChannelTopics } from './channelFit';
+import { channelFitMessage, duplicatesMessage } from './embeds';
 import { fetchStarterWithRetry, forumParent } from './forum';
 import { getGuildTier, limitsFor } from './tier';
 
@@ -76,6 +79,39 @@ async function maybeDraft(
   }
 }
 
+/**
+ * Channel-fit advisory: if another monitored question channel is a clearly better
+ * home for this post, suggest it. Self-heals per-channel: any monitored question
+ * channel missing a topic for the active model is rebuilt in the background
+ * (guarded against bursts); we only skip the suggestion when *this* channel's topic
+ * isn't ready yet (without it there's nothing to compare against).
+ */
+async function maybeSuggestChannel(
+  thread: ThreadChannel,
+  currentChannelId: string,
+  queryVector: number[],
+  cfg: GuildConfig,
+  showBranding: boolean,
+): Promise<void> {
+  try {
+    const db = getDb();
+    const { embeddingModelId } = await import('@dejavue/ai');
+    const present = new Set(
+      await listChannelTopicChannelIds(db, thread.guildId, embeddingModelId(cfg.embeddingModel)),
+    );
+    const candidates = cfg.forumChannelIds.filter((id) => channelMode(cfg, id) !== 'knowledge');
+    if (candidates.some((id) => !present.has(id))) {
+      // Build the missing topics for next time (ensureChannelTopics is guarded).
+      void ensureChannelTopics(thread.guild, cfg).catch(() => undefined);
+    }
+    if (!present.has(currentChannelId)) return; // can't judge fit without this channel's topic
+    const suggestion = await checkChannelFit(thread.guildId, currentChannelId, queryVector, cfg);
+    if (suggestion) await thread.send(channelFitMessage(suggestion.channelId, showBranding));
+  } catch (err) {
+    log.warn({ err, threadId: thread.id }, 'channel-fit check failed');
+  }
+}
+
 async function runDedup(thread: ThreadChannel): Promise<void> {
   const db = getDb();
   const guildId = thread.guildId;
@@ -99,12 +135,13 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
   const limits = limitsFor(await getGuildTier(guildId));
 
   let matches: SearchMatch[];
+  let queryVector: number[] | undefined;
   if (limits.semanticSearch) {
     const { embedOne, embeddingModelId } = await import('@dejavue/ai');
-    const vector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
+    queryVector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
     matches = await semanticSearch(db, {
       guildId,
-      queryVector: vector,
+      queryVector,
       limit: 3,
       minSimilarity: SEMANTIC_MIN_SIMILARITY,
       excludeThreadId: thread.id,
@@ -112,6 +149,13 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
     });
   } else {
     matches = await keywordSearch(db, { guildId, query, limit: 3, excludeThreadId: thread.id });
+  }
+
+  // Channel-fit advisory (Plus+, opt-in): does this question belong in a better
+  // channel? Independent of whether duplicates were found, so it runs before the
+  // no-matches early return.
+  if (cfg?.channelFitCheck && forum && queryVector) {
+    await maybeSuggestChannel(thread, forum.id, queryVector, cfg, !limits.removeBranding);
   }
 
   if (matches.length === 0) return;

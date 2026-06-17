@@ -1,6 +1,12 @@
 import { ChannelType, type DMChannel, type GuildChannel } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { deleteThreadsByChannel, getDb, getGuildConfig, updateGuildConfig } from '@dejavue/db';
+import {
+  deleteChannelTopic,
+  deleteThreadsByChannel,
+  getDb,
+  getGuildConfig,
+  updateGuildConfig,
+} from '@dejavue/db';
 
 const log = childLogger({ mod: 'event:channelDelete' });
 
@@ -15,6 +21,9 @@ export async function onChannelDelete(channel: DMChannel | GuildChannel): Promis
   try {
     const db = getDb();
     const removed = await deleteThreadsByChannel(db, guildId, channel.id);
+    // Drop the channel's topic vector(s) too, so a delete-and-recreate can't leave
+    // an orphan that the fit check would still score against.
+    await deleteChannelTopic(db, guildId, channel.id).catch(() => undefined);
 
     const cfg = await getGuildConfig(db, guildId);
     if (cfg?.forumChannelIds.includes(channel.id)) {

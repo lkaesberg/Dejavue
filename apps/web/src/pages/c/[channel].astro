@@ -1,5 +1,11 @@
 ---
-import { getDb, getPublishedThreads, type Thread } from '@dejavue/db';
+import {
+  channelGuidelinesOf,
+  getDb,
+  getGuildConfig,
+  getPublishedThreads,
+  type Thread,
+} from '@dejavue/db';
 import KbFooter from '../../components/KbFooter.astro';
 import KbNav from '../../components/KbNav.astro';
 import Base from '../../layouts/Base.astro';
@@ -9,12 +15,17 @@ const { channel } = Astro.params;
 const origin = new URL(Astro.request.url).origin;
 
 let all: Thread[] = [];
-if (tenant) all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
+let cfg: Awaited<ReturnType<typeof getGuildConfig>> = undefined;
+if (tenant) {
+  all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
+  cfg = await getGuildConfig(getDb(), tenant.guildId);
+}
 const threads = all.filter((t) => t.channelId === channel);
 const found = !!tenant && threads.length > 0;
 if (!found) Astro.response.status = 404;
 
 const channelName = threads[0]?.channelName ?? 'Channel';
+const guidelines = channel ? channelGuidelinesOf(cfg, channel) : undefined;
 const totalCategories = new Set(all.map((t) => t.channelId)).size;
 const handle = `#${channelName.toLowerCase().replace(/\s+/g, '-')}`;
 
@@ -26,6 +37,7 @@ const snippetOf = (t: Thread): string => {
     .trim();
   return body.length > 200 ? `${body.slice(0, 200)}…` : body;
 };
+const msgCount = (t: Thread): number => t.transcript?.length ?? 0;
 ---
 
 {
@@ -47,6 +59,9 @@ const snippetOf = (t: Thread): string => {
             <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#6D5FE8; white-space:nowrap;">{handle}</span>
             <span style="font-size:13px; color:#9AA0C3; white-space:nowrap;">· {threads.length} answers</span>
           </div>
+          {guidelines && (
+            <p style="font-size:15px; color:#6B6F86; margin:12px 0 0; line-height:1.55; white-space:pre-wrap;">{guidelines}</p>
+          )}
         </div>
 
         <div class="kb-pad" style="padding-bottom:40px;">
@@ -62,7 +77,7 @@ const snippetOf = (t: Thread): string => {
                 {snippetOf(q) && (
                   <div style="font-size:13.5px; color:#8A8EA6; line-height:1.5; margin-top:4px;">{snippetOf(q)}</div>
                 )}
-                <div style="font-size:12px; color:#A2A6BE; margin-top:8px;">Solved{q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}</div>
+                <div style="font-size:12px; color:#A2A6BE; margin-top:8px;">Solved{q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}{msgCount(q) > 0 ? ` · ${msgCount(q)} ${msgCount(q) === 1 ? 'message' : 'messages'}` : ''}</div>
               </div>
             </a>
           ))}

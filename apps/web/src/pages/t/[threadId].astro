@@ -133,7 +133,7 @@ const jsonLd = thread
             <div style="display:flex; align-items:center; gap:16px; margin-top:14px; font-size:13px; color:#9AA0C3; flex-wrap:wrap;">
               <span>Asked by <span style="color:#6B6F86;">Original poster</span></span>
               {thread.solvedAt && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>Resolved {fmtDate(thread.solvedAt)}</span></>)}
-              {transcript.length > 0 && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>{transcript.length} messages</span></>)}
+              {transcript.length > 0 && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>{`${transcript.length} ${transcript.length === 1 ? 'message' : 'messages'}`}</span></>)}
               <span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span>
               <a class="kb-link" href={discordUrl} target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:5px; color:#6D5FE8; font-weight:500;">View on Discord <span style="color:#A2A6BE;">↗</span></a>
             </div>

@@ -7,6 +7,7 @@ import {
 } from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import { getDb, getThreadByDiscordId, setDuplicateOf } from '@dejavue/db';
+import { enqueueRevalidateKb } from '@dejavue/queue';
 import {
   ACCEPT_BUTTON_PREFIX,
   buildSolveModal,
@@ -40,7 +41,13 @@ async function acceptDuplicate(
 ): Promise<void> {
   const db = getDb();
   // Mark as a duplicate first so solveThread won't publish it as its own KB page.
+  // setDuplicateOf also unpublishes it; revalidate (410) in case a page already existed.
   await setDuplicateOf(db, channel.guildId, channel.id, originalThreadId);
+  await enqueueRevalidateKb({
+    guildId: channel.guildId,
+    threadId: channel.id,
+    action: 'unpublish',
+  }).catch(() => undefined);
   const original = await getThreadByDiscordId(db, channel.guildId, originalThreadId);
   const url = threadUrl(channel.guildId, originalThreadId);
   const answerText = original?.canonicalSummary || original?.acceptedAnswerText || '';

@@ -161,6 +161,24 @@ export function duplicatesMessage(
   return { embeds: [embed], components };
 }
 
+/** Advisory: this question looks like a better fit for another channel (Plus, opt-in). */
+export function channelFitMessage(
+  betterChannelId: string,
+  showBranding: boolean,
+): BaseMessageOptions {
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('🧭 Might fit better elsewhere')
+      .setDescription(
+        `This looks like it may be a better fit for <#${betterChannelId}>. ` +
+          'You can move it there to reach the right people faster — or ignore this if it belongs here.',
+      ),
+    showBranding,
+  );
+  return { embeds: [embed] };
+}
+
 /** Modal that forces the solver to provide an answer (no empty solves). */
 export function buildSolveModal(controlMessageId?: string): ModalBuilder {
   const modal = new ModalBuilder()

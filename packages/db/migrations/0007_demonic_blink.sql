@@ -1,0 +1,1 @@
+ALTER TABLE "guild_config" ADD COLUMN "gen_runs" jsonb DEFAULT '{}'::jsonb NOT NULL;

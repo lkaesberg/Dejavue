@@ -35,6 +35,12 @@ export async function getThreadByDiscordId(
   return row;
 }
 
+/** Fetch a thread by its row uuid (used by the embed job to read the transcript). */
+export async function getThreadByRowId(db: Database, id: string): Promise<Thread | undefined> {
+  const [row] = await db.select().from(thread).where(eq(thread.id, id)).limit(1);
+  return row;
+}
+
 export interface MarkSolvedInput {
   guildId: string;
   discordThreadId: string;
@@ -125,7 +131,12 @@ export async function setCanonicalSummary(
     .where(eq(thread.id, threadRowId));
 }
 
-/** Mark a thread as a duplicate of a canonical thread (folded in the KB). */
+/**
+ * Mark a thread as a duplicate of a canonical thread (folded in the KB). Folding
+ * also unpublishes it: a duplicate is never a standalone KB page, so leaving it
+ * published would waste the tier's page cap and orphan a no-longer-reachable URL.
+ * Callers should enqueue a KB revalidation (unpublish/410) if a page may have existed.
+ */
 export async function setDuplicateOf(
   db: Database,
   guildId: string,
@@ -134,8 +145,20 @@ export async function setDuplicateOf(
 ): Promise<void> {
   await db
     .update(thread)
-    .set({ duplicateOfThreadId: originalThreadId, updatedAt: new Date() })
+    .set({ duplicateOfThreadId: originalThreadId, publishedToKb: false, updatedAt: new Date() })
     .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));
+}
+
+/** Record the thread message count at the last (re-)embed (knowledge backoff schedule). */
+export async function setLastEmbedMsgCount(
+  db: Database,
+  threadRowId: string,
+  count: number,
+): Promise<void> {
+  await db
+    .update(thread)
+    .set({ lastEmbedMsgCount: count, updatedAt: new Date() })
+    .where(eq(thread.id, threadRowId));
 }
 
 /**
@@ -206,6 +229,12 @@ export async function deleteThreadByDiscordId(
   guildId: string,
   discordThreadId: string,
 ): Promise<number> {
+  // Un-fold any duplicates that pointed at this (soon-deleted) canonical so they
+  // don't stay hidden under a thread that no longer exists.
+  await db
+    .update(thread)
+    .set({ duplicateOfThreadId: null, updatedAt: new Date() })
+    .where(and(eq(thread.guildId, guildId), eq(thread.duplicateOfThreadId, discordThreadId)));
   const rows = await db
     .delete(thread)
     .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)))
@@ -219,6 +248,15 @@ export async function deleteThreadsByChannel(
   guildId: string,
   channelId: string,
 ): Promise<number> {
+  await db
+    .update(thread)
+    .set({ duplicateOfThreadId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        sql`${thread.duplicateOfThreadId} in (select thread_id from thread where guild_id = ${guildId} and channel_id = ${channelId})`,
+      ),
+    );
   const rows = await db
     .delete(thread)
     .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)))
@@ -233,6 +271,10 @@ export async function deleteThreadsByDiscordIds(
   discordThreadIds: string[],
 ): Promise<number> {
   if (discordThreadIds.length === 0) return 0;
+  await db
+    .update(thread)
+    .set({ duplicateOfThreadId: null, updatedAt: new Date() })
+    .where(and(eq(thread.guildId, guildId), inArray(thread.duplicateOfThreadId, discordThreadIds)));
   const rows = await db
     .delete(thread)
     .where(and(eq(thread.guildId, guildId), inArray(thread.threadId, discordThreadIds)))
@@ -249,6 +291,34 @@ export async function listThreadIdsByChannel(
   const rows = await db
     .select({ threadId: thread.threadId })
     .from(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)));
+  return rows.map((r) => r.threadId);
+}
+
+/** Keep the denormalized channel name on threads current after a forum rename. */
+export async function updateChannelName(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  name: string,
+): Promise<void> {
+  await db
+    .update(thread)
+    .set({ channelName: name, updatedAt: new Date() })
+    .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)));
+}
+
+/** Discord thread ids in a channel already embedded with `modelId` (skip on re-import). */
+export async function listEmbeddedThreadIdsInChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  modelId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ threadId: thread.threadId })
+    .from(thread)
+    .innerJoin(embedding, and(eq(embedding.threadId, thread.id), eq(embedding.modelId, modelId)))
     .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)));
   return rows.map((r) => r.threadId);
 }

@@ -1,16 +1,26 @@
-import { embed, embeddingModelId } from '@dejavue/ai';
+import { buildEmbeddingText, embed, embeddingModelId } from '@dejavue/ai';
 import { childLogger } from '@dejavue/core';
-import { getDb, upsertEmbedding } from '@dejavue/db';
+import { getDb, getThreadByRowId, upsertEmbedding } from '@dejavue/db';
 import type { EmbedThreadJob } from '@dejavue/queue';
 
 const log = childLogger({ mod: 'job:embed-thread' });
 
-/** Generate + store the passage embedding for a solved thread. */
+/** Generate + store the passage embedding for a thread (question + answer context). */
 export async function handleEmbedThread(job: EmbedThreadJob): Promise<void> {
-  const text = [job.title, job.question, job.answer ?? '']
-    .map((s) => (s ?? '').trim())
-    .filter(Boolean)
-    .join('\n\n');
+  const db = getDb();
+  // Prefer the live row (it has the transcript, so we can embed context around the
+  // question and answer); fall back to the job payload if the row is gone.
+  const row = await getThreadByRowId(db, job.threadRowId);
+  const text = buildEmbeddingText(
+    row
+      ? {
+          title: row.title,
+          questionBody: row.questionBody,
+          acceptedAnswerText: row.acceptedAnswerText,
+          transcript: row.transcript,
+        }
+      : { title: job.title, questionBody: job.question, acceptedAnswerText: job.answer },
+  );
   if (!text) {
     log.warn({ threadRowId: job.threadRowId }, 'nothing to embed, skipping');
     return;

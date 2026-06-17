@@ -63,6 +63,7 @@ export async function getPublishedThread(
         eq(thread.threadId, discordThreadId),
         eq(thread.publishedToKb, true),
         eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId), // a folded duplicate is not its own page
       ),
     )
     .limit(1);
@@ -205,11 +206,23 @@ export async function publishExistingInChannel(
   return rows.length;
 }
 
+/**
+ * Number of threads that occupy a KB page against the tier cap. Must mirror
+ * getPublishedThreads' filter — a folded or do-not-publish thread isn't a visible
+ * page, so it must not consume the cap.
+ */
 export async function countPublished(db: Database, guildId: string): Promise<number> {
   const [row] = await db
     .select({ c: sql<number>`count(*)::int` })
     .from(thread)
-    .where(and(eq(thread.guildId, guildId), eq(thread.publishedToKb, true)));
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        eq(thread.publishedToKb, true),
+        eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId),
+      ),
+    );
   return row?.c ?? 0;
 }
 
@@ -247,6 +260,7 @@ export async function publishExistingSolved(
         eq(thread.status, 'solved'),
         eq(thread.publishedToKb, false),
         eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId), // never retroactively publish a folded duplicate
       ),
     )
     .orderBy(sql`${thread.solvedAt} desc nulls last`)

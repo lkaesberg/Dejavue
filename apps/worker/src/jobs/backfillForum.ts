@@ -1,14 +1,23 @@
-import { embed, embeddingModelId } from '@dejavue/ai';
+import { buildEmbeddingText, embed, embeddingModelId } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
+  channelMode,
+  countByStatus,
+  countPublished,
   getBackfillJob,
   getDb,
   getGuildConfig,
+  getThreadByDiscordId,
+  listEmbeddedThreadIdsInChannel,
   markEntitlementConsumed,
+  semanticSearch,
+  setDuplicateOf,
+  setPublished,
   updateBackfillJob,
   upsertEmbedding,
   upsertThread,
 } from '@dejavue/db';
+import { enqueueRevalidateKb } from '@dejavue/queue';
 import type { BackfillForumJob } from '@dejavue/queue';
 import {
   fetchActiveGuildThreads,
@@ -16,15 +25,18 @@ import {
   fetchStarterMessage,
   type RawThread,
 } from '../lib/discordRest';
+import { guildLimits } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:backfill-forum' });
 const CHECKPOINT_EVERY = 25;
+// No human confirms an imported duplicate, so only fold near-identical reposts.
+const AUTO_FOLD_SIMILARITY = 0.9;
 
 /**
- * Import a forum channel's existing history into the archive. Idempotent
- * (upserts; skips already-processed threads) and resumable (checkpointed
- * processed-id set). The HNSW index already exists, so embeddings insert into it
- * incrementally.
+ * Import a forum channel's existing history into the archive — free and bounded
+ * by the guild's tier (archive cap). Idempotent (upserts; skips processed) and
+ * resumable. As it imports it also: folds near-duplicate threads, and (if the KB
+ * is on) publishes threads so older, inactive-but-solved threads show up online.
  */
 export async function handleBackfillForum(job: BackfillForumJob): Promise<void> {
   const db = getDb();
@@ -36,6 +48,9 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model); // the actual active model id for provenance
   const solvedTagId = cfg?.solvedTagId ?? undefined;
+  const limits = await guildLimits(bf.guildId);
+  const mode = channelMode(cfg, bf.channelId);
+  const optedIn = cfg?.kbPublishOptIn ?? false;
   const processed = new Set(bf.processedThreadIds);
 
   // Collect active + paginated archived threads for the forum.
@@ -60,13 +75,32 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
     return;
   }
 
+  // Oldest first (snowflake order) so a duplicate always folds under the older
+  // canonical — acyclic and stable across re-imports.
+  all.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
   await updateBackfillJob(db, bf.id, { total: all.length });
+
+  // Tier limits: stop importing at the archive cap; stop publishing at the KB cap.
+  const counts = await countByStatus(db, bf.guildId);
+  let archiveCount = counts.open + counts.solved + counts.unsolved;
+  let publishedCount = optedIn ? await countPublished(db, bf.guildId) : 0;
+  // Threads already imported + embedded with the active model are skipped, so
+  // re-running (e.g. setup again, or after a tier upgrade) is cheap and only
+  // processes new history.
+  const alreadyDone = new Set(
+    await listEmbeddedThreadIdsInChannel(db, bf.guildId, bf.channelId, storedModelId),
+  );
 
   let processedCount = bf.processed;
   let failed = bf.failed;
+  let cappedOut = false;
 
   for (const t of all) {
-    if (processed.has(t.id)) continue;
+    if (processed.has(t.id) || alreadyDone.has(t.id)) continue;
+    if (archiveCount >= limits.archiveCap) {
+      cappedOut = true;
+      break;
+    }
     try {
       const starter = await fetchStarterMessage(t.id);
       const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
@@ -79,13 +113,59 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
         opUserId: starter?.author?.id ?? null,
         status: isSolved ? 'solved' : 'open',
       });
-      const text = [t.name, starter?.content ?? ''].join('\n').trim();
+      archiveCount++;
+
+      let vector: number[] | undefined;
+      // Backfill only has the starter message (no full transcript), so the
+      // embedding text is title + question — the helper keeps it consistent with
+      // the live embed job's fallback path.
+      const text = buildEmbeddingText({ title: t.name, questionBody: starter?.content ?? '' });
       if (text) {
-        const [vector] = await embed([text], { mode: 'passage', model });
+        [vector] = await embed([text], { mode: 'passage', model });
         if (vector) {
           await upsertEmbedding(db, { threadRowId: row.id, guildId: bf.guildId, modelId: storedModelId, vector });
         }
       }
+
+      // Already a duplicate from a prior run, or fold it now under an older
+      // near-identical canonical (resolve to root; only ever fold newer → older
+      // so the graph stays acyclic).
+      let isDup = !!row.duplicateOfThreadId;
+      if (!isDup && vector) {
+        const [match] = await semanticSearch(db, {
+          guildId: bf.guildId,
+          queryVector: vector,
+          limit: 1,
+          minSimilarity: AUTO_FOLD_SIMILARITY,
+          excludeThreadId: t.id,
+          solvedOnly: false,
+          modelId: storedModelId,
+        });
+        if (match && match.threadId !== t.id) {
+          const matchRow = await getThreadByDiscordId(db, bf.guildId, match.threadId);
+          const root = matchRow?.duplicateOfThreadId ?? match.threadId;
+          if (root !== t.id && BigInt(root) < BigInt(t.id)) {
+            await setDuplicateOf(db, bf.guildId, t.id, root);
+            isDup = true;
+          }
+        }
+      }
+
+      if (isDup) {
+        // A folded copy never stands alone on the KB.
+        await setPublished(db, bf.guildId, t.id, false);
+      } else if (optedIn && publishedCount < limits.kbPageCap) {
+        // Publish so older inactive threads show on the KB (mode-aware, capped).
+        const shouldPublish = mode === 'knowledge' || isSolved;
+        if (shouldPublish) {
+          await setPublished(db, bf.guildId, t.id, true);
+          publishedCount++;
+          await enqueueRevalidateKb({ guildId: bf.guildId, threadId: t.id, action: 'publish' }).catch(
+            () => undefined,
+          );
+        }
+      }
+
       processedCount++;
     } catch (err) {
       failed++;
@@ -108,7 +188,10 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
     processedThreadIds: [...processed],
     status: 'completed',
   });
-  // Consume the durable entitlement only once the job has durably completed.
+  // Consume any legacy durable backfill entitlement once the job durably completes.
   if (bf.entitlementId) await markEntitlementConsumed(db, bf.entitlementId);
-  log.info({ jobId: bf.id, processed: processedCount, failed, total: all.length }, 'backfill complete');
+  log.info(
+    { jobId: bf.id, processed: processedCount, failed, total: all.length, cappedOut, published: publishedCount },
+    'backfill complete',
+  );
 }

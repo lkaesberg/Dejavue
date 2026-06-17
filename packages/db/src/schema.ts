@@ -68,6 +68,21 @@ export const guildConfig = pgTable('guild_config', {
     .$type<Record<string, 'knowledge' | 'question'>>()
     .notNull()
     .default({}),
+  // Forum "post guidelines" (the channel topic) per channel id, kept in sync with
+  // Discord and shown beneath the channel name on the public KB.
+  channelGuidelines: jsonb('channel_guidelines')
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  // Per-guild generative run state (epoch ms), keyed by feature ('cluster' | 'faq').
+  // Lets commands dedupe in-flight runs and show "still working" + freshness.
+  genRuns: jsonb('gen_runs')
+    .$type<Record<string, { started?: number; finished?: number }>>()
+    .notNull()
+    .default({}),
+  // Last tier we acted on — a change-detection marker for auto-backfill on upgrade.
+  // NOT a source of truth: gating always derives the tier from entitlement rows.
+  lastTier: text('last_tier'),
   // Per-guild forum tag snowflakes — never hardcoded constants.
   solvedTagId: text('solved_tag_id'),
   unsolvedTagId: text('unsolved_tag_id'),
@@ -83,6 +98,10 @@ export const guildConfig = pgTable('guild_config', {
   customDomain: text('custom_domain').unique(),
   // "powered by Dejavue" branding (forced on for Free tier regardless of this flag)
   brandingEnabled: boolean('branding_enabled').notNull().default(true),
+  // Channel-fit check (Plus+): embed each monitored channel's name + description and,
+  // when a new question is posted, suggest a better-fitting channel if one scores
+  // notably higher. See the channel_topic table for the stored topic vectors.
+  channelFitCheck: boolean('channel_fit_check').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -134,6 +153,10 @@ export const thread = pgTable(
     canonicalSummary: text('canonical_summary'),
     // Full human conversation, captured on solve, for the public KB page.
     transcript: jsonb('transcript').$type<TranscriptMessage[]>(),
+    // Thread message count at the last (re-)embed of a knowledge thread. Knowledge
+    // channels have no solve point, so they re-embed on a doubling schedule keyed
+    // off this — frequent early, then exponentially rarer as the topic settles.
+    lastEmbedMsgCount: integer('last_embed_msg_count'),
     publishedToKb: boolean('published_to_kb').notNull().default(false),
     doNotPublish: boolean('do_not_publish').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -169,6 +192,30 @@ export const embedding = pgTable(
   (t) => [
     uniqueIndex('embedding_thread_source_ver_idx').on(t.threadId, t.source, t.embeddingVersion),
     index('embedding_guild_idx').on(t.guildId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Channel topic embeddings — one per monitored channel, built from its name +
+// description. Used (Plus+, opt-in) to score how well a new question fits the
+// channel it landed in. Only a handful of rows per guild, so no HNSW index — a
+// sequential scan with the cosine operator is plenty.
+// ---------------------------------------------------------------------------
+export const channelTopic = pgTable(
+  'channel_topic',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    modelId: text('model_id').notNull(),
+    // The source text the vector was built from (name + description) — provenance.
+    text: text('text').notNull(),
+    vec: vector('vec', { dimensions: EMBEDDING_DIM }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('channel_topic_guild_channel_model_idx').on(t.guildId, t.channelId, t.modelId),
+    index('channel_topic_guild_idx').on(t.guildId),
   ],
 );
 
@@ -279,6 +326,8 @@ export type Thread = typeof thread.$inferSelect;
 export type NewThread = typeof thread.$inferInsert;
 export type Embedding = typeof embedding.$inferSelect;
 export type NewEmbedding = typeof embedding.$inferInsert;
+export type ChannelTopic = typeof channelTopic.$inferSelect;
+export type NewChannelTopic = typeof channelTopic.$inferInsert;
 export type GenerationEvent = typeof generationEvent.$inferSelect;
 export type FaqEntry = typeof faqEntry.$inferSelect;
 export type KnowledgeGapCluster = typeof knowledgeGapCluster.$inferSelect;

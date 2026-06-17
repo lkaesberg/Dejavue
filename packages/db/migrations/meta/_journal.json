@@ -50,6 +50,41 @@
       "when": 1781637229935,
       "tag": "0006_naive_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781648032016,
+      "tag": "0007_demonic_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781651412458,
+      "tag": "0008_smart_silver_centurion",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781652532511,
+      "tag": "0009_absent_hellcat",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781654082588,
+      "tag": "0010_dazzling_gideon",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781656628719,
+      "tag": "0011_left_ultimatum",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
-import { getEnv, tierLimits } from '@dejavue/core';
+import { getEnv, type TierLimits, tierLimits } from '@dejavue/core';
 import { getDb, resolveGuildTier } from '@dejavue/db';
 
-/** The guild's monthly AI-generation quota, derived from its actual tier (Pro 300, Max 1500…). */
-export async function guildGenerationQuota(guildId: string): Promise<number> {
+/** Resolve a guild's full tier limits from its actual entitlements. */
+export async function guildLimits(guildId: string): Promise<TierLimits> {
   const env = getEnv();
   const tier =
     env.DEV_FORCE_TIER ??
@@ -11,5 +11,10 @@ export async function guildGenerationQuota(guildId: string): Promise<number> {
       pro: env.SKU_PRO,
       max: env.SKU_MAX,
     }));
-  return tierLimits(tier, env.PRO_MONTHLY_QUOTA).monthlyGenerationQuota;
+  return tierLimits(tier, env.PRO_MONTHLY_QUOTA);
+}
+
+/** The guild's monthly AI-generation quota (Pro 300, Max 1500…). */
+export async function guildGenerationQuota(guildId: string): Promise<number> {
+  return (await guildLimits(guildId)).monthlyGenerationQuota;
 }

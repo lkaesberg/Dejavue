@@ -1,0 +1,1 @@
+ALTER TABLE "guild_config" ADD COLUMN "channel_guidelines" jsonb DEFAULT '{}'::jsonb NOT NULL;

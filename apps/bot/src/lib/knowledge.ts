@@ -5,6 +5,7 @@ import {
   countPublished,
   ensureGuildConfig,
   getDb,
+  setLastEmbedMsgCount,
   setPublished,
   setTranscript,
   upsertThread,
@@ -16,6 +17,22 @@ import { getGuildTier, limitsFor } from './tier';
 const log = childLogger({ mod: 'knowledge' });
 
 const DEBOUNCE_MS = 4000;
+// Knowledge threads have no solve point, so they re-capture + re-embed on a
+// quadrupling schedule keyed off the thread's message count: at ~1, 4, 16, 64, … msgs.
+// Early posts (where the topic is still forming) refresh sooner; once a thread is
+// large the content has settled, so re-scans get exponentially rarer and stop
+// entirely past the cap. Growth factor 4 keeps the whole-thread coverage but with
+// ~half as many scans as plain doubling. Avoids re-embedding on every reply.
+const REEMBED_GROWTH = 4;
+const REEMBED_MAX_MESSAGES = 256;
+
+/** Is this thread due for a (re-)embed given the count at its last embed? */
+export function isReembedDue(currentCount: number, lastEmbedCount: number | null): boolean {
+  const last = lastEmbedCount ?? 0;
+  if (last <= 0) return true; // never embedded → always capture the first time
+  if (last >= REEMBED_MAX_MESSAGES) return false; // settled → stop re-scanning
+  return currentCount >= last * REEMBED_GROWTH; // only after the count has doubled
+}
 
 /** Threads already scheduled, so threadCreate + messageCreate collapse to one run. */
 const scheduled = new Set<string>();
@@ -59,6 +76,34 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
     status: 'open',
   });
 
+  // Publish to the public KB (opt-in + page cap). This runs on every archive,
+  // independent of the re-embed backoff below, so a thread is published promptly
+  // once the guild opts in or the page cap frees up — even between re-embed
+  // checkpoints. Skipped when already published (idempotent, avoids re-revalidating).
+  if (cfg.kbPublishOptIn && !row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
+    try {
+      const limits = limitsFor(await getGuildTier(guildId));
+      if ((await countPublished(db, guildId)) < limits.kbPageCap) {
+        await setPublished(db, guildId, thread.id, true);
+        await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });
+      }
+    } catch (err) {
+      log.warn({ err, threadId: thread.id }, 'failed to publish knowledge thread');
+    }
+  }
+
+  // Exponential backoff: skip the expensive transcript re-capture + re-embed unless
+  // the thread has grown enough since the last embed (the cheap upsert above already
+  // kept the title/body fresh). The first capture (lastEmbedMsgCount null) always runs.
+  const msgCount = thread.totalMessageSent ?? thread.messageCount ?? 0;
+  if (!isReembedDue(msgCount, row.lastEmbedMsgCount)) {
+    log.debug(
+      { threadId: thread.id, msgCount, lastEmbed: row.lastEmbedMsgCount },
+      'knowledge thread not yet due for re-embed',
+    );
+    return;
+  }
+
   // Capture the post body (+ any early replies) for the KB page.
   try {
     const transcript = await fetchTranscript(thread);
@@ -68,6 +113,7 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
   }
 
   // Index for /dejavue search + MCP (the post body is the content — no answer).
+  let embedQueued = false;
   try {
     await enqueueEmbedThread({
       threadRowId: row.id,
@@ -77,21 +123,15 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
       question: row.questionBody,
       answer: null,
     });
+    embedQueued = true;
   } catch (err) {
     log.warn({ err, threadId: thread.id }, 'failed to enqueue knowledge embed');
   }
 
-  // Publish to the public KB (opt-in + page cap), just like a solved thread.
-  if (cfg.kbPublishOptIn && !row.doNotPublish && !row.duplicateOfThreadId) {
-    try {
-      const limits = limitsFor(await getGuildTier(guildId));
-      const published = await countPublished(db, guildId);
-      if (published < limits.kbPageCap) {
-        await setPublished(db, guildId, thread.id, true);
-        await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });
-      }
-    } catch (err) {
-      log.warn({ err, threadId: thread.id }, 'failed to publish knowledge thread');
-    }
-  }
+  // Advance the backoff watermark ONLY when a re-embed was actually enqueued. If the
+  // queue was briefly down we must not move it — otherwise isReembedDue would skip
+  // this thread until its count doubles again (possibly never, past the cap), leaving
+  // the new content unindexed. pg-boss then guarantees the enqueued job eventually runs.
+  // max(.,1) guards against providers that don't report a count.
+  if (embedQueued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
 }

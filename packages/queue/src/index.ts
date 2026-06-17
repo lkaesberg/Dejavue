@@ -25,17 +25,22 @@ export async function enqueueEmbedThread(job: EmbedThreadJob): Promise<void> {
 
 export async function enqueueSummarize(job: SummarizeThreadJob): Promise<void> {
   const boss = await startBoss();
-  await boss.send(QUEUES.SUMMARIZE_THREAD, job, { singletonKey: job.threadRowId });
+  // singletonKey dedupes concurrent jobs; singletonSeconds throttles re-enqueues
+  // (e.g. a KB page reloaded during generation) to one per thread per window.
+  await boss.send(QUEUES.SUMMARIZE_THREAD, job, {
+    singletonKey: job.threadRowId,
+    singletonSeconds: 180,
+  });
 }
 
 export async function enqueueClusterGaps(job: ClusterGapsJob): Promise<void> {
   const boss = await startBoss();
-  await boss.send(QUEUES.CLUSTER_GAPS, job, { singletonKey: job.guildId });
+  await boss.send(QUEUES.CLUSTER_GAPS, job, { singletonKey: job.guildId, singletonSeconds: 60 });
 }
 
 export async function enqueueRegenFaq(job: RegenFaqJob): Promise<void> {
   const boss = await startBoss();
-  await boss.send(QUEUES.REGEN_FAQ, job, { singletonKey: job.guildId });
+  await boss.send(QUEUES.REGEN_FAQ, job, { singletonKey: job.guildId, singletonSeconds: 60 });
 }
 
 export async function enqueueBackfill(job: BackfillForumJob): Promise<void> {
