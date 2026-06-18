@@ -22,6 +22,8 @@ export const EMBEDDING_DIM = 384;
 
 /** One human message in a thread's archived transcript (bot messages excluded). */
 export interface TranscriptMessage {
+  /** Discord message id — lets the KB mark the accepted-answer message in the log. */
+  id?: string;
   authorId: string;
   content: string;
   createdAt: string;
@@ -182,6 +184,9 @@ export const thread = pgTable(
     // 'forum' = a real forum post; 'channel' = a conversation segment captured from a
     // tracked normal channel. Counted against separate quotas.
     kind: text('kind').$type<ThreadKind>().notNull().default('forum'),
+    // User/mod-applied forum tags (custom labels), excluding our managed
+    // solved/unsolved/duplicate/wrong-channel tags. Shown on the KB and filterable.
+    labels: text('labels').array().notNull().default(emptyTextArray),
     threadId: text('thread_id').notNull(), // discord thread id (== starter message id), or synthetic segment id
     // If set, this thread is a duplicate of another (canonical) thread — folded
     // under it in the KB rather than listed on its own.

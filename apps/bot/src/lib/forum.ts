@@ -63,6 +63,25 @@ export function findTagByName(forum: ForumChannel, name: string): string | undef
   return forum.availableTags.find((t) => t.name.toLowerCase() === name.toLowerCase())?.id;
 }
 
+/** Tag names Dejavue manages itself — never surfaced as user "labels" on the KB. */
+const MANAGED_TAG_NAMES = new Set(['solved', 'unsolved', 'duplicate', 'wrong-channel']);
+
+/**
+ * The custom labels (forum tags) a thread carries — the applied tags minus our
+ * managed ones — resolved to their display names. Empty for non-forum threads.
+ */
+export function threadLabels(thread: ThreadChannel): string[] {
+  const forum = forumParent(thread);
+  if (!forum) return [];
+  const nameById = new Map(forum.availableTags.map((t) => [t.id, t.name]));
+  const labels: string[] = [];
+  for (const id of thread.appliedTags) {
+    const name = nameById.get(id);
+    if (name && !MANAGED_TAG_NAMES.has(name.toLowerCase())) labels.push(name);
+  }
+  return labels;
+}
+
 /**
  * Our managed forum tags. Each carries an emoji and is `moderated: true`, so only
  * members with Manage Threads — and the bot — can apply or remove them (regular
@@ -170,6 +189,7 @@ export async function fetchTranscript(
         const content = msg.content?.trim();
         if (!content) continue;
         collected.push({
+          id: msg.id,
           authorId: msg.author.id,
           content,
           createdAt: new Date(msg.createdTimestamp).toISOString(),

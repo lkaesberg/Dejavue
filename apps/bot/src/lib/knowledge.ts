@@ -7,11 +7,12 @@ import {
   getDb,
   setLastEmbedMsgCount,
   setPublished,
+  setThreadLabels,
   setTranscript,
   upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
-import { fetchStarterWithRetry, fetchTranscript, forumParent } from './forum';
+import { fetchStarterWithRetry, fetchTranscript, forumParent, threadLabels } from './forum';
 import { getGuildTier, limitsFor } from './tier';
 
 const log = childLogger({ mod: 'knowledge' });
@@ -100,6 +101,8 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
   } catch (err) {
     log.warn({ err, threadId: thread.id }, 'failed to capture knowledge transcript');
   }
+  // Keep custom forum labels current for the KB + filtering.
+  await setThreadLabels(db, guildId, thread.id, threadLabels(thread)).catch(() => undefined);
 
   // Re-index for search/MCP on the quadrupling backoff (frequent while small, rare
   // once the topic settles) — the embedding barely changes per added reply, so we

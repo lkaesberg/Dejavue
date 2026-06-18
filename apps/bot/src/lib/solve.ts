@@ -7,13 +7,21 @@ import {
   getThreadByDiscordId,
   markThreadSolved,
   setPublished,
+  setThreadLabels,
   setThreadStatus,
   setTranscript,
   upsertThread,
   type Thread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
-import { applyTag, fetchTranscript, findForumTags, forumParent, getStarterText } from './forum';
+import {
+  applyTag,
+  fetchTranscript,
+  findForumTags,
+  forumParent,
+  getStarterText,
+  threadLabels,
+} from './forum';
 import { getGuildTier, limitsFor } from './tier';
 
 const log = childLogger({ mod: 'solve' });
@@ -36,6 +44,36 @@ export async function ensureThreadRow(thread: ThreadChannel): Promise<Thread> {
     opUserId: starter?.authorId ?? thread.ownerId ?? null,
     status: 'open',
   });
+}
+
+// Q&A threads keep their KB transcript current on every message too (not only at
+// solve), so the published page always shows the whole chat log. Embedding still
+// happens at solve (with the accepted answer) — this only refreshes the transcript.
+const QUESTION_DEBOUNCE_MS = 4000;
+const questionScheduled = new Set<string>();
+
+/** Debounced, idempotent-per-thread transcript refresh for a question post. */
+export function scheduleQuestionArchive(thread: ThreadChannel): void {
+  if (questionScheduled.has(thread.id)) return;
+  questionScheduled.add(thread.id);
+  const timer = setTimeout(() => {
+    void captureQuestionTranscript(thread)
+      .catch((err) => log.warn({ err, threadId: thread.id }, 'question transcript capture failed'))
+      .finally(() => questionScheduled.delete(thread.id));
+  }, QUESTION_DEBOUNCE_MS);
+  timer.unref();
+}
+
+async function captureQuestionTranscript(thread: ThreadChannel): Promise<void> {
+  const db = getDb();
+  const row = await ensureThreadRow(thread);
+  try {
+    const transcript = await fetchTranscript(thread);
+    if (transcript.length > 0) await setTranscript(db, row.id, transcript);
+  } catch (err) {
+    log.warn({ err, threadId: thread.id }, 'failed to capture question transcript');
+  }
+  await setThreadLabels(db, thread.guildId, thread.id, threadLabels(thread)).catch(() => undefined);
 }
 
 /** Apply the per-forum "unsolved" tag to a freshly created post (never to a solved one). */
@@ -102,6 +140,8 @@ export async function solveThread(
   } catch (err) {
     log.warn({ err, threadId: thread.id }, 'failed to capture transcript');
   }
+  // Capture the thread's custom forum labels for the KB + filtering.
+  await setThreadLabels(db, guildId, thread.id, threadLabels(thread)).catch(() => undefined);
 
   const limits = limitsFor(await getGuildTier(guildId));
 

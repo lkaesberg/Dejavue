@@ -54,6 +54,7 @@ if (!thread) Astro.response.status = 404;
 const summary = thread?.canonicalSummary ?? '';
 const acceptedAnswer = thread?.acceptedAnswerText ?? '';
 const transcript = thread?.transcript ?? [];
+const acceptedMessageId = thread?.acceptedAnswerMessageId ?? null;
 const channelName = thread?.channelName ?? '';
 const hasContent = !!(acceptedAnswer || thread?.questionBody);
 const brand = brandOf(cfg, tenant?.slug ?? undefined);
@@ -187,18 +188,34 @@ const jsonLd = thread
 
             {transcript.length > 0 && (
               <div style="margin-top:32px;">
-                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Full discussion</div>
-                <div style="display:flex; flex-direction:column; gap:18px; margin-top:18px;">
-                  {transcript.map((m) => (
-                    <div style="display:flex; gap:13px;">
-                      <div style={`width:34px; height:34px; border-radius:50%; background:${avatarOf(m.authorId).bg}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>{avatarOf(m.authorId).initial}</div>
-                      <div style="flex:1; min-width:0;">
-                        <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-weight:600; font-size:14px; color:var(--text); white-space:nowrap;">{aliasOf(m.authorId)}</span><span style="font-size:12px; color:var(--textmut); white-space:nowrap;">{fmtTime(m.createdAt)}</span></div>
-                        <div style="font-size:14px; line-height:1.6; color:var(--textmid); margin-top:4px; white-space:pre-wrap;">{m.content}</div>
-                      </div>
-                    </div>
-                  ))}
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Full discussion</div>
+                  <div style="display:flex; align-items:center; gap:8px; background:var(--inputbg); border:1px solid var(--border); border-radius:var(--radsm); padding:6px 11px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+                    <input id="kb-msg-filter" type="search" placeholder="Filter messages…" aria-label="Filter messages" style="border:none; outline:none; background:transparent; font-size:12.5px; color:var(--text); width:150px;" />
+                  </div>
                 </div>
+                <div id="kb-msgs" style="display:flex; flex-direction:column; gap:18px; margin-top:18px;">
+                  {transcript.map((m) => {
+                    const accepted = !!m.id && m.id === acceptedMessageId;
+                    return (
+                      <div class="kb-msg" data-msg={m.content.toLowerCase()} style="display:flex; gap:13px;">
+                        <div style={`width:34px; height:34px; border-radius:50%; background:${avatarOf(m.authorId).bg}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>{avatarOf(m.authorId).initial}</div>
+                        <div style="flex:1; min-width:0;">
+                          <div style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">
+                            <span style="font-weight:600; font-size:14px; color:var(--text); white-space:nowrap;">{aliasOf(m.authorId)}</span>
+                            <span style="font-size:12px; color:var(--textmut); white-space:nowrap;">{fmtTime(m.createdAt)}</span>
+                            {accepted && (
+                              <span style="display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:#0F9B82; background:#E6FAF5; padding:2px 8px; border-radius:999px;">✓ Accepted answer</span>
+                            )}
+                          </div>
+                          <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`}>{m.content}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div id="kb-msg-empty" hidden style="font-size:13px; color:var(--textmut); padding:12px 2px;">No messages match your filter.</div>
               </div>
             )}
 
@@ -209,9 +226,14 @@ const jsonLd = thread
               </div>
             )}
 
-            {channelName && (
-              <div style="display:flex; gap:8px; margin-top:32px; padding-top:24px; border-top:1px solid var(--border); flex-wrap:wrap;">
-                <a href={`/c/${thread.channelId}`} style="background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
+            {(channelName || thread.labels.length > 0) && (
+              <div style="display:flex; align-items:center; gap:8px; margin-top:32px; padding-top:24px; border-top:1px solid var(--border); flex-wrap:wrap;">
+                {channelName && (
+                  <a href={`/c/${thread.channelId}`} style="background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
+                )}
+                {thread.labels.map((l) => (
+                  <a href={`/c/${thread.channelId}?label=${encodeURIComponent(l)}`} style="background:var(--chipbg); color:var(--chiptext); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{l}</a>
+                ))}
               </div>
             )}
           </div>
@@ -258,6 +280,27 @@ const jsonLd = thread
       </div>
 
       <KbFooter note={channelName ? `in ${channelName}` : ''} />
+
+      {transcript.length > 0 && (
+        <script is:inline>
+          (function () {
+            var input = document.getElementById('kb-msg-filter');
+            if (!input) return;
+            var list = document.getElementById('kb-msgs');
+            var empty = document.getElementById('kb-msg-empty');
+            input.addEventListener('input', function () {
+              var q = input.value.trim().toLowerCase();
+              var shown = 0;
+              list.querySelectorAll('.kb-msg').forEach(function (el) {
+                var hit = !q || (el.getAttribute('data-msg') || '').indexOf(q) !== -1;
+                el.style.display = hit ? 'flex' : 'none';
+                if (hit) shown++;
+              });
+              if (empty) empty.hidden = shown !== 0;
+            });
+          })();
+        </script>
+      )}
 
       {summaryPending && (
         <script is:inline>

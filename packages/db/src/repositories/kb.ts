@@ -8,6 +8,8 @@ export interface KbSearchResult {
   title: string;
   channel: string | null;
   snippet: string;
+  /** Custom forum labels on the thread. */
+  labels: string[];
   /** Cosine similarity in [0,1] for semantic results; undefined for keyword. */
   relevance?: number;
 }
@@ -150,6 +152,7 @@ export async function searchPublished(
       threadId: thread.threadId,
       title: thread.title,
       channel: thread.channelName,
+      labels: thread.labels,
       summary: thread.canonicalSummary,
       answer: thread.acceptedAnswerText,
       question: thread.questionBody,
@@ -172,6 +175,7 @@ export async function searchPublished(
     threadId: r.threadId,
     title: r.title,
     channel: r.channel,
+    labels: r.labels,
     snippet: snippetFrom(r),
   }));
 }
@@ -196,6 +200,7 @@ export async function searchPublishedSemantic(
       threadId: thread.threadId,
       title: thread.title,
       channel: thread.channelName,
+      labels: thread.labels,
       summary: thread.canonicalSummary,
       answer: thread.acceptedAnswerText,
       question: thread.questionBody,
@@ -225,6 +230,7 @@ export async function searchPublishedSemantic(
       threadId: r.threadId,
       title: r.title,
       channel: r.channel,
+      labels: r.labels,
       snippet: snippetFrom(r),
       relevance: r.relevance,
     });

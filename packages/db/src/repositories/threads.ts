@@ -345,6 +345,19 @@ export async function listChannelIdsForGuild(db: Database, guildId: string): Pro
   return rows.map((r) => r.channelId);
 }
 
+/** Store the custom forum labels (tags) applied to a thread, for the KB + filtering. */
+export async function setThreadLabels(
+  db: Database,
+  guildId: string,
+  discordThreadId: string,
+  labels: string[],
+): Promise<void> {
+  await db
+    .update(thread)
+    .set({ labels, updatedAt: new Date() })
+    .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));
+}
+
 /** Store the full human transcript of a thread (for the public KB). */
 export async function setTranscript(
   db: Database,

@@ -4,6 +4,7 @@ import { channelMode, getDb, getGuildConfig } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
+import { scheduleQuestionArchive } from '../lib/solve';
 import { scheduleTrackedCapture } from '../lib/trackedChannel';
 
 const log = childLogger({ mod: 'event:messageCreate' });
@@ -43,9 +44,11 @@ export async function onMessageCreate(message: Message): Promise<void> {
     if (channelMode(cfg, forum.id) === 'knowledge') {
       // Any message keeps the archived/embedded copy current, not just the starter.
       scheduleKnowledgeArchive(channel);
-    } else if (message.id === channel.id) {
-      // Question channel: only the starter message (shares the thread's id) triggers dedup.
-      scheduleDedup(channel);
+    } else {
+      // Question channel: keep the KB transcript current on every message (the whole
+      // chat log), and run dedup once — when the starter (shares the thread id) lands.
+      scheduleQuestionArchive(channel);
+      if (message.id === channel.id) scheduleDedup(channel);
     }
   } catch (err) {
     log.warn({ err, threadId: channel.id }, 'messageCreate fallback failed');

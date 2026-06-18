@@ -15,7 +15,9 @@ import { brandOf, channelHandle, channelKind } from '../../lib/theme';
 
 const { tenant, cfg, tier } = Astro.locals;
 const { channel } = Astro.params;
-const origin = new URL(Astro.request.url).origin;
+const url = new URL(Astro.request.url);
+const origin = url.origin;
+const labelParam = url.searchParams.get('label') ?? undefined;
 
 let all: Thread[] = [];
 let topics: { name: string; count: number; q: string }[] = [];
@@ -36,6 +38,10 @@ if (!found) Astro.response.status = 404;
 const channelName = threads[0]?.channelName ?? 'Channel';
 const guidelines = channel ? channelGuidelinesOf(cfg, channel) : undefined;
 const kind = channelKind(cfg, channel ?? '');
+
+// Custom labels present in this channel, and the (optionally) label-filtered list.
+const allLabels = [...new Set(threads.flatMap((t) => t.labels ?? []))].sort();
+const shown = labelParam ? threads.filter((t) => (t.labels ?? []).includes(labelParam)) : threads;
 
 const channels = (() => {
   const m = new Map<string, { id: string; name: string; count: number }>();
@@ -82,11 +88,30 @@ const snippetOf = (t: Thread): string => {
                 <p style="font-size:15px; color:var(--textmid); margin:11px 0 0; line-height:1.55; white-space:pre-wrap;">{guidelines}</p>
               )}
 
+              {/* search within this channel */}
+              <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:10px; margin-top:18px; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:11px 15px;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+                <input type="search" name="q" placeholder={`Search in ${channelName}…`} aria-label={`Search in ${channelName}`} style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:14px; color:var(--text);" />
+                <input type="hidden" name="channel" value={channel} />
+                <button type="submit" style="border:none; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:12px; font-weight:600; padding:7px 13px; border-radius:var(--radsm);">Search</button>
+              </form>
+
+              {/* label filter */}
+              {allLabels.length > 0 && (
+                <div style="display:flex; align-items:center; gap:8px; margin-top:14px; flex-wrap:wrap;">
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Labels</span>
+                  <a href={`/c/${channel}`} style={`font-size:12px; font-weight:600; padding:4px 11px; border-radius:999px; ${!labelParam ? 'background:var(--accent); color:#fff;' : 'background:var(--chipbg); color:var(--chiptext);'}`}>All</a>
+                  {allLabels.map((l) => (
+                    <a href={`/c/${channel}?label=${encodeURIComponent(l)}`} style={`font-size:12px; font-weight:600; padding:4px 11px; border-radius:999px; ${labelParam === l ? 'background:var(--accent); color:#fff;' : 'background:var(--chipbg); color:var(--chiptext);'}`}>{l}</a>
+                  ))}
+                </div>
+              )}
+
               <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 2px 12px; margin-top:14px; border-bottom:1px solid var(--border);">
-                <span style="font-size:13px; color:var(--textmut);">Solved answers</span>
+                <span style="font-size:13px; color:var(--textmut);">{shown.length} {shown.length === 1 ? 'answer' : 'answers'}{labelParam ? ` · ${labelParam}` : ''}</span>
                 <span style="font-size:13px; color:var(--textmid); font-weight:500;">Most recent</span>
               </div>
-              {threads.map((q) => (
+              {shown.map((q) => (
                 <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; gap:14px; padding:17px 2px; border-bottom:1px solid var(--border);">
                   <span style="color:#2DD4BF; font-size:15px; margin-top:1px;">✓</span>
                   <div style="flex:1; min-width:0;">
@@ -94,14 +119,22 @@ const snippetOf = (t: Thread): string => {
                     {snippetOf(q) && (
                       <div style="font-size:13.5px; color:var(--textmid); line-height:1.5; margin-top:4px;">{snippetOf(q)}</div>
                     )}
-                    <div style="font-size:12px; color:var(--textmut); margin-top:8px;">
-                      {q.status === 'solved' ? 'Solved' : 'Indexed'}
-                      {q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}
-                      {(q.transcript?.length ?? 0) > 0 ? ` · ${q.transcript!.length} messages` : ''}
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                      <span style="font-size:12px; color:var(--textmut);">
+                        {q.status === 'solved' ? 'Solved' : 'Indexed'}
+                        {q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}
+                        {(q.transcript?.length ?? 0) > 0 ? ` · ${q.transcript!.length} messages` : ''}
+                      </span>
+                      {(q.labels ?? []).map((l) => (
+                        <span style="font-size:11px; font-weight:500; padding:2px 8px; border-radius:999px; background:var(--accentsoft); color:var(--accentline);">{l}</span>
+                      ))}
                     </div>
                   </div>
                 </a>
               ))}
+              {shown.length === 0 && (
+                <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No answers with the label “{labelParam}”.</p>
+              )}
             </div>
         </main>
       </div>
