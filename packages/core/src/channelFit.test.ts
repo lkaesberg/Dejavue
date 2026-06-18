@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIT_MARGIN, FIT_MIN_BEST, suggestBetterChannel } from './channelFit';
+import { FIT_MARGIN, FIT_MIN_BEST, GUARD_THRESHOLDS, judgeWrongChannel, suggestBetterChannel } from './channelFit';
 
 describe('suggestBetterChannel', () => {
   it('suggests a clearly better-fitting channel', () => {
@@ -50,5 +50,53 @@ describe('suggestBetterChannel', () => {
     ];
     const s = suggestBetterChannel(scores, 'general', new Set(['general', 'support']));
     expect(s?.channelId).toBe('support'); // knowledge excluded despite the higher score
+  });
+});
+
+describe('judgeWrongChannel', () => {
+  it('flags a confidently misfiled post (low current fit, strong other, big gap)', () => {
+    const scores = [
+      { channelId: 'general', score: 0.1 },
+      { channelId: 'billing', score: 0.6 },
+    ];
+    const v = judgeWrongChannel(scores, 'general', 'medium');
+    expect(v?.channelId).toBe('billing');
+    expect(v?.currentScore).toBe(0.1);
+  });
+
+  it('does NOT flag when the post fits its current channel well enough', () => {
+    const scores = [
+      { channelId: 'billing', score: 0.45 }, // above medium currentMax (0.28)
+      { channelId: 'general', score: 0.7 },
+    ];
+    expect(judgeWrongChannel(scores, 'billing', 'medium')).toBeNull();
+  });
+
+  it('does NOT flag when no other channel is clearly relevant', () => {
+    const scores = [
+      { channelId: 'general', score: 0.1 },
+      { channelId: 'billing', score: GUARD_THRESHOLDS.medium.bestMin - 0.05 },
+    ];
+    expect(judgeWrongChannel(scores, 'general', 'medium')).toBeNull();
+  });
+
+  it('high sensitivity flags borderline cases that medium leaves alone', () => {
+    const scores = [
+      { channelId: 'general', score: 0.3 },
+      { channelId: 'billing', score: 0.43 },
+    ];
+    // current 0.3 > medium.currentMax (0.28) → medium ignores; high.currentMax 0.34 → high flags.
+    expect(judgeWrongChannel(scores, 'general', 'medium')).toBeNull();
+    expect(judgeWrongChannel(scores, 'general', 'high')?.channelId).toBe('billing');
+  });
+
+  it('respects candidate filtering', () => {
+    const scores = [
+      { channelId: 'general', score: 0.1 },
+      { channelId: 'knowledge', score: 0.9 }, // best but not a candidate
+      { channelId: 'support', score: 0.55 },
+    ];
+    const v = judgeWrongChannel(scores, 'general', 'medium', new Set(['general', 'support']));
+    expect(v?.channelId).toBe('support');
   });
 });

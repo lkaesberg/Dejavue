@@ -1,25 +1,30 @@
 ---
-import { getEnv, tierLimits } from '@dejavue/core';
+import { tierLimits } from '@dejavue/core';
 import {
   getDb,
   getDuplicatesOf,
   getPublishedThread,
   getPublishedThreads,
-  resolveGuildTier,
+  getTopClusters,
   type Thread,
 } from '@dejavue/db';
 import { enqueueSummarize } from '@dejavue/queue';
+import ChannelRail from '../../components/ChannelRail.astro';
 import KbFooter from '../../components/KbFooter.astro';
 import KbNav from '../../components/KbNav.astro';
 import Base from '../../layouts/Base.astro';
+import { brandOf, channelKind } from '../../lib/theme';
 
-const { tenant } = Astro.locals;
+const { tenant, cfg, tier } = Astro.locals;
 const { threadId } = Astro.params;
 const origin = new URL(Astro.request.url).origin;
+const limits = tierLimits(tier);
 
 let thread: Thread | undefined;
 let duplicates: { threadId: string; title: string }[] = [];
 let related: Thread[] = [];
+let channels: { id: string; name: string; count: number }[] = [];
+let topics: { name: string; count: number; q: string }[] = [];
 if (tenant && threadId) {
   const db = getDb();
   thread = await getPublishedThread(db, tenant.guildId, threadId);
@@ -29,6 +34,19 @@ if (tenant && threadId) {
     related = siblings
       .filter((t) => t.channelId === thread!.channelId && t.threadId !== thread!.threadId)
       .slice(0, 5);
+    const m = new Map<string, { id: string; name: string; count: number }>();
+    for (const t of siblings) {
+      const e = m.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+      e.count += 1;
+      m.set(t.channelId, e);
+    }
+    channels = [...m.values()].sort((a, b) => b.count - a.count);
+    if (limits.generative) {
+      const clusters = await getTopClusters(db, tenant.guildId, 6);
+      topics = clusters
+        .filter((c) => c.label || c.representativeText)
+        .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
+    }
   }
 }
 if (!thread) Astro.response.status = 404;
@@ -38,32 +56,24 @@ const acceptedAnswer = thread?.acceptedAnswerText ?? '';
 const transcript = thread?.transcript ?? [];
 const channelName = thread?.channelName ?? '';
 const hasContent = !!(acceptedAnswer || thread?.questionBody);
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
 
 // Lazy AI summary: enqueue on first view (generative tier, none yet); the worker
 // fills it in and the client polls + streams it into the card.
 let summaryPending = false;
-if (thread && tenant && !summary && hasContent) {
-  const env = getEnv();
-  const tier =
-    env.DEV_FORCE_TIER ??
-    (await resolveGuildTier(getDb(), tenant.guildId, { plus: env.SKU_PLUS, pro: env.SKU_PRO, max: env.SKU_MAX }));
-  if (tierLimits(tier).generative) {
-    summaryPending = true;
-    await enqueueSummarize({
-      threadRowId: thread.id,
-      guildId: tenant.guildId,
-      question: thread.title,
-      answer: acceptedAnswer || thread.questionBody || thread.title,
-    }).catch(() => undefined);
-  }
+if (thread && tenant && !summary && hasContent && limits.generative) {
+  summaryPending = true;
+  await enqueueSummarize({
+    threadRowId: thread.id,
+    guildId: tenant.guildId,
+    question: thread.title,
+    answer: acceptedAnswer || thread.questionBody || thread.title,
+  }).catch(() => undefined);
 }
 
-const cardBody = summary || acceptedAnswer;
-const cardLabel = summary || summaryPending ? 'Summary' : 'Accepted answer';
-const showCard = !!cardBody || summaryPending;
-const bestAnswer = acceptedAnswer || summary || (thread?.questionBody ?? '');
+const showSummaryCard = limits.generative && (!!summary || summaryPending);
 const isSolved = thread?.status === 'solved';
-// Always link the KB page back to its source Discord thread.
+const bestAnswer = acceptedAnswer || summary || (thread?.questionBody ?? '');
 const discordUrl =
   thread && tenant ? `https://discord.com/channels/${tenant.guildId}/${thread.threadId}` : '#';
 
@@ -103,66 +113,88 @@ const jsonLd = thread
 {
   thread ? (
     <Base
-      title={`${thread.title} — ${tenant?.slug ?? 'Dejavue'}`}
+      title={`${thread.title} — ${brand}`}
       description={(thread.questionBody || thread.title).slice(0, 160)}
       canonical={`${origin}/t/${thread.threadId}`}
     >
       <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
-      <div class="kb-page">
-        <KbNav slug={tenant!.slug} compactSearch />
-
-        <div class="kb-twocol">
-          {/* main column */}
-          <div class="kb-main kb-pad" style="padding-top:36px; padding-bottom:44px;">
-            <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:#9AA0C3;">
+      <KbNav query="" />
+      <div class="kb-inner">
+        <ChannelRail channels={channels} activeChannelId={thread.channelId} topics={topics} isPaid={limits.generative} />
+        <main class="kb-main">
+          <div class="kb-article">
+            {/* main column */}
+            <div style="min-width:0; padding:26px clamp(0px,3vw,32px) 44px 0;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut); flex-wrap:wrap;">
               <a href="/" class="kb-link">Help Center</a>
-              {channelName && (<><span style="color:#CDD0DE;">/</span><a href={`/c/${thread.channelId}`} class="kb-link">{channelName}</a></>)}
-              <span style="color:#CDD0DE;">/</span><span style="color:#6B6F86;">{thread.title}</span>
+              {channelName && (<><span style="color:var(--border2);">/</span><a href={`/c/${thread.channelId}`} class="kb-link">{channelName}</a></>)}
+              <span style="color:var(--border2);">/</span><span style="color:var(--textmid);">{thread.title.slice(0, 40)}</span>
             </div>
 
-            <div style="display:flex; align-items:center; gap:8px; margin-top:22px; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:8px; margin-top:20px; flex-wrap:wrap;">
               {channelName && (
                 <span style="background:#EEF6FF; color:#2563EB; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">{channelName}</span>
               )}
+              {thread.channelId && (() => {
+                const kind = channelKind(cfg, thread.channelId);
+                return <span style={`font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px; background:${kind.bg}; color:${kind.fg};`}>{kind.label}</span>;
+              })()}
               {isSolved && (
                 <span style="display:inline-flex; align-items:center; gap:6px; background:#E6FAF5; color:#0F9B82; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">✓ Solved</span>
               )}
             </div>
 
-            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(24px,5vw,32px); letter-spacing:-0.025em; line-height:1.18; margin:16px 0 0;">{thread.title}</h1>
-            <div style="display:flex; align-items:center; gap:16px; margin-top:14px; font-size:13px; color:#9AA0C3; flex-wrap:wrap;">
-              <span>Asked by <span style="color:#6B6F86;">Original poster</span></span>
-              {thread.solvedAt && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>Resolved {fmtDate(thread.solvedAt)}</span></>)}
-              {transcript.length > 0 && (<><span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span><span>{`${transcript.length} ${transcript.length === 1 ? 'message' : 'messages'}`}</span></>)}
-              <span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span>
-              <a class="kb-link" href={discordUrl} target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:5px; color:#6D5FE8; font-weight:500;">View on Discord <span style="color:#A2A6BE;">↗</span></a>
+            <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(25px,3.4vw,31px); letter-spacing:-0.025em; line-height:1.2; margin:16px 0 0; color:var(--text);">{thread.title}</h1>
+            <div style="display:flex; align-items:center; gap:14px; margin-top:13px; font-size:13px; color:var(--textmut); flex-wrap:wrap;">
+              <span>Asked by <span style="color:var(--textmid);">Original poster</span></span>
+              {thread.solvedAt && (<><span style="width:3px; height:3px; border-radius:50%; background:var(--border2);"></span><span>Resolved {fmtDate(thread.solvedAt)}</span></>)}
+              {transcript.length > 0 && (<><span style="width:3px; height:3px; border-radius:50%; background:var(--border2);"></span><span>{`${transcript.length} ${transcript.length === 1 ? 'reply' : 'replies'}`}</span></>)}
+              <span style="width:3px; height:3px; border-radius:50%; background:var(--border2);"></span>
+              <a class="kb-link" href={discordUrl} target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:5px; color:var(--accentline); font-weight:500;">View on Discord ↗</a>
             </div>
 
-            {showCard && (
-              <div style="margin-top:28px; border:1px solid #B7EFE2; background:#F4FDFA; border-radius:16px; padding:24px 26px;">
+            {/* AI summary (Pro/Max) */}
+            {showSummaryCard && (
+              <div style="margin-top:26px; border:1px solid var(--border2); background:linear-gradient(180deg,var(--accentsoft),var(--surface)); border-radius:var(--rad); padding:22px 24px;">
                 <div style="display:flex; align-items:center; gap:9px;">
-                  <span style="display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#2DD4BF; color:#fff; font-size:13px; font-weight:700;">✓</span>
-                  <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; color:#0F9B82; letter-spacing:0.01em;">{cardLabel}</span>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2l2.4 5.8L20 9l-4.5 4 1.3 6L12 16l-4.8 3 1.3-6L4 9l5.6-1.2z"></path></svg>
+                  <span style="font-family:var(--headfont); font-weight:600; font-size:14px; color:var(--accentline);">Summary</span>
+                  <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:3px 8px; border-radius:999px;">AI-GENERATED</span>
                 </div>
                 <p
                   id="kb-summary"
                   data-thread={thread.threadId}
                   data-pending={summaryPending ? 'true' : 'false'}
-                  style="font-size:15.5px; line-height:1.65; color:#1F2235; margin:16px 0 0; white-space:pre-wrap;"
-                >{cardBody || 'Generating a summary…'}</p>
+                  style="font-size:15.5px; line-height:1.65; color:var(--text); margin:14px 0 0; white-space:pre-wrap;"
+                >{summary || 'Generating a summary…'}</p>
               </div>
             )}
 
+            {/* accepted answer */}
+            {acceptedAnswer && (
+              <div style="margin-top:22px; border:1px solid var(--ansborder); background:var(--ansbg); border-radius:var(--rad); padding:22px 24px;">
+                <div style="display:flex; align-items:center; gap:9px;">
+                  <span style="display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; background:#2DD4BF; color:#fff; font-size:13px; font-weight:700;">✓</span>
+                  <span style="font-family:var(--headfont); font-weight:600; font-size:14px; color:#0F9B82;">Accepted answer</span>
+                </div>
+                <p style="font-size:15.5px; line-height:1.65; color:var(--text); margin:15px 0 0; white-space:pre-wrap;">{acceptedAnswer}</p>
+              </div>
+            )}
+
+            {!limits.kbSummarizedAnswers && (
+              <div style="font-size:12.5px; color:var(--textmut); margin-top:12px; line-height:1.5;">Raw thread transcript. <span style="color:var(--accentline);">Pro &amp; Max</span> add a clean AI summary at the top of every answer.</div>
+            )}
+
             {transcript.length > 0 && (
-              <div style="margin-top:34px;">
-                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">Full discussion</div>
+              <div style="margin-top:32px;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Full discussion</div>
                 <div style="display:flex; flex-direction:column; gap:18px; margin-top:18px;">
                   {transcript.map((m) => (
                     <div style="display:flex; gap:13px;">
                       <div style={`width:34px; height:34px; border-radius:50%; background:${avatarOf(m.authorId).bg}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>{avatarOf(m.authorId).initial}</div>
-                      <div style="flex:1;">
-                        <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-weight:600; font-size:14px; color:#2A2C3F; white-space:nowrap;">{aliasOf(m.authorId)}</span><span style="font-size:12px; color:#A2A6BE; white-space:nowrap;">{fmtTime(m.createdAt)}</span></div>
-                        <div style="font-size:14px; line-height:1.6; color:#444862; margin-top:4px; white-space:pre-wrap;">{m.content}</div>
+                      <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-weight:600; font-size:14px; color:var(--text); white-space:nowrap;">{aliasOf(m.authorId)}</span><span style="font-size:12px; color:var(--textmut); white-space:nowrap;">{fmtTime(m.createdAt)}</span></div>
+                        <div style="font-size:14px; line-height:1.6; color:var(--textmid); margin-top:4px; white-space:pre-wrap;">{m.content}</div>
                       </div>
                     </div>
                   ))}
@@ -172,61 +204,64 @@ const jsonLd = thread
 
             {transcript.length === 0 && thread.questionBody && (
               <div style="margin-top:30px;">
-                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">{acceptedAnswer ? 'Question' : 'Details'}</div>
-                <div style="font-size:15px; line-height:1.65; color:#444862; margin-top:12px; white-space:pre-wrap;">{thread.questionBody}</div>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">{acceptedAnswer ? 'Question' : 'Details'}</div>
+                <div style="font-size:15px; line-height:1.65; color:var(--textmid); margin-top:12px; white-space:pre-wrap;">{thread.questionBody}</div>
               </div>
             )}
 
             {channelName && (
-              <div style="display:flex; gap:8px; margin-top:32px; padding-top:24px; border-top:1px solid #EDEDF2; flex-wrap:wrap;">
-                <a href={`/c/${thread.channelId}`} style="background:#F4F4F9; color:#6D5FE8; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
+              <div style="display:flex; gap:8px; margin-top:32px; padding-top:24px; border-top:1px solid var(--border); flex-wrap:wrap;">
+                <a href={`/c/${thread.channelId}`} style="background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
               </div>
             )}
           </div>
 
           {/* sidebar */}
-          <aside class="kb-aside" style="padding:36px 26px;">
+          <aside style="min-width:0; padding:34px 0 24px;">
             {related.length > 0 && (
               <>
-                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">Related</div>
-                <div style="display:flex; flex-direction:column; gap:4px; margin-top:14px;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Related</div>
+                <div style="display:flex; flex-direction:column; gap:3px; margin-top:13px;">
                   {related.map((r) => (
-                    <a href={`/t/${r.threadId}`} class="kb-row" style="display:flex; gap:9px; padding:11px 12px; border-radius:10px; align-items:flex-start;">
+                    <a href={`/t/${r.threadId}`} class="kb-row" style="display:flex; gap:9px; padding:11px 12px; border-radius:var(--radsm); align-items:flex-start;">
                       <span style="color:#2DD4BF; font-size:13px; margin-top:1px;">✓</span>
-                      <span style="font-size:13.5px; line-height:1.4; color:#3A3D52;">{r.title}</span>
+                      <span style="font-size:13.5px; line-height:1.4; color:var(--textmid);">{r.title}</span>
                     </a>
                   ))}
                 </div>
               </>
             )}
             {duplicates.length > 0 && (
-              <div style={related.length > 0 ? 'margin-top:28px;' : ''}>
-                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600;">Also asked as</div>
-                <div style="display:flex; flex-direction:column; gap:9px; margin-top:14px;">
+              <div style={related.length > 0 ? 'margin-top:24px;' : ''}>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Also asked as</div>
+                <div style="display:flex; flex-direction:column; gap:9px; margin-top:13px;">
                   {duplicates.map((d) => (
-                    <a
-                      class="kb-link"
-                      href={`https://discord.com/channels/${tenant!.guildId}/${d.threadId}`}
-                      target="_blank"
-                      rel="noopener"
-                      style="display:flex; gap:7px; font-size:13px; line-height:1.4; color:#6D5FE8;"
-                    >
-                      <span>{d.title}</span>
-                      <span style="color:#A2A6BE; flex-shrink:0;">↗</span>
+                    <a class="kb-link" href={`https://discord.com/channels/${tenant!.guildId}/${d.threadId}`} target="_blank" rel="noopener" style="display:flex; gap:7px; font-size:13px; line-height:1.4; color:var(--accentline);">
+                      <span>{d.title}</span><span style="color:var(--textmut); flex-shrink:0;">↗</span>
                     </a>
                   ))}
                 </div>
               </div>
             )}
-          </aside>
-        </div>
-
-        <KbFooter note={channelName ? `in ${channelName}` : ''} />
+            {limits.mcp && (
+              <a href="/connect" class="kb-card-hover" style="display:block; margin-top:20px; padding:17px; border:1px solid var(--border2); border-radius:var(--rad); background:linear-gradient(160deg,var(--accentsoft),var(--surface));">
+                <div style="display:flex; align-items:center; gap:7px;">
+                  <span style="width:6px; height:6px; border-radius:50%; background:#2DD4BF;"></span>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accentline); font-weight:600;">MCP · Max</span>
+                </div>
+                <div style="font-size:12.5px; color:var(--textmid); line-height:1.5; margin-top:8px;">Query this knowledge base from Claude, Cursor &amp; more. <span style="color:var(--accentline); font-weight:600;">View setup →</span></div>
+              </a>
+            )}
+            </aside>
+          </div>
+        </main>
       </div>
+
+      <KbFooter note={channelName ? `in ${channelName}` : ''} />
 
       {summaryPending && (
         <script is:inline>
-          {`(function () {
+          (function () {
             var el = document.getElementById('kb-summary');
             if (!el || el.getAttribute('data-pending') !== 'true') return;
             var id = el.getAttribute('data-thread');
@@ -244,17 +279,15 @@ const jsonLd = thread
                 })
                 .catch(function () {});
             }, 2500);
-          })();`}
+          })();
         </script>
       )}
     </Base>
   ) : (
     <Base title="Answer not found" noindex>
-      <div class="kb-page">
-        <div style="padding:80px 40px; text-align:center;">
-          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.03em;">Answer not found</h1>
-          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;"><a href="/" class="kb-link" style="color:#6D5FE8;">Back to the knowledge base</a></p>
-        </div>
+      <div class="kb-bound" style="padding:80px 40px; text-align:center;">
+        <h1 style="font-family:var(--headfont); font-weight:700; font-size:26px; letter-spacing:-0.03em;">Answer not found</h1>
+        <p style="font-size:15px; color:var(--textmid); margin:12px 0 0;"><a href="/" class="kb-link" style="color:var(--accentline);">Back to the knowledge base</a></p>
       </div>
     </Base>
   )

@@ -1,6 +1,21 @@
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, cosineDistance, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../client';
-import { type GuildConfig, guildConfig, type Thread, thread } from '../schema';
+import { embedding, type GuildConfig, guildConfig, type Thread, thread } from '../schema';
+
+/** A public-KB search hit: the same shape for keyword and semantic, plus an optional match %. */
+export interface KbSearchResult {
+  threadId: string;
+  title: string;
+  channel: string | null;
+  snippet: string;
+  /** Cosine similarity in [0,1] for semantic results; undefined for keyword. */
+  relevance?: number;
+}
+
+function snippetFrom(parts: { summary?: string | null; answer?: string | null; question?: string | null }): string {
+  const body = (parts.summary || parts.answer || parts.question || '').replace(/\s+/g, ' ').trim();
+  return body.length > 180 ? `${body.slice(0, 180)}…` : body;
+}
 
 export async function listGuildsWithKb(db: Database): Promise<GuildConfig[]> {
   return db.select().from(guildConfig).where(eq(guildConfig.kbPublishOptIn, true));
@@ -113,9 +128,8 @@ export async function searchPublished(
   guildId: string,
   query: string,
   limit = 20,
-): Promise<
-  { threadId: string; title: string; channel: string | null; snippet: string }[]
-> {
+  channelId?: string,
+): Promise<KbSearchResult[]> {
   // Full text over EVERY text field on the thread — including each reply in the
   // discussion transcript — so an answer is findable by anything said in it.
   // (jsonb_typeof guards against null / non-array transcripts.)
@@ -147,21 +161,75 @@ export async function searchPublished(
         eq(thread.publishedToKb, true),
         eq(thread.doNotPublish, false),
         isNull(thread.duplicateOfThreadId),
+        ...(channelId ? [eq(thread.channelId, channelId)] : []),
         sql`${document} @@ ${tsquery}`,
       ),
     )
     .orderBy(sql`${rank} desc`)
     .limit(limit);
 
-  return rows.map((r) => {
-    const body = (r.summary || r.answer || r.question || '').replace(/\s+/g, ' ').trim();
-    return {
+  return rows.map((r) => ({
+    threadId: r.threadId,
+    title: r.title,
+    channel: r.channel,
+    snippet: snippetFrom(r),
+  }));
+}
+
+/**
+ * Semantic (embedding) search over a tenant's published, non-duplicate KB threads
+ * (forum + tracked-channel). Mirrors `searchPublished` output plus a `relevance`
+ * (cosine similarity in [0,1]). Caller supplies the query vector + active model id.
+ */
+export async function searchPublishedSemantic(
+  db: Database,
+  guildId: string,
+  queryVector: number[],
+  modelId: string,
+  limit = 20,
+  channelId?: string,
+): Promise<KbSearchResult[]> {
+  const distance = cosineDistance(embedding.vec, queryVector);
+  const similarity = sql<number>`1 - (${distance})`;
+  const rows = await db
+    .select({
+      threadId: thread.threadId,
+      title: thread.title,
+      channel: thread.channelName,
+      summary: thread.canonicalSummary,
+      answer: thread.acceptedAnswerText,
+      question: thread.questionBody,
+      relevance: similarity,
+    })
+    .from(embedding)
+    .innerJoin(thread, eq(embedding.threadId, thread.id))
+    .where(
+      and(
+        eq(embedding.guildId, guildId),
+        eq(embedding.modelId, modelId),
+        eq(thread.publishedToKb, true),
+        eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId),
+        ...(channelId ? [eq(thread.channelId, channelId)] : []),
+      ),
+    )
+    .orderBy(distance)
+    .limit(limit);
+
+  // One row per thread (a thread may have several passage embeddings); keep the best.
+  const best = new Map<string, KbSearchResult>();
+  for (const r of rows) {
+    const existing = best.get(r.threadId);
+    if (existing && (existing.relevance ?? 0) >= r.relevance) continue;
+    best.set(r.threadId, {
       threadId: r.threadId,
       title: r.title,
       channel: r.channel,
-      snippet: body.length > 180 ? `${body.slice(0, 180)}…` : body,
-    };
-  });
+      snippet: snippetFrom(r),
+      relevance: r.relevance,
+    });
+  }
+  return [...best.values()].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
 }
 
 /**
@@ -218,6 +286,7 @@ export async function countPublished(db: Database, guildId: string): Promise<num
     .where(
       and(
         eq(thread.guildId, guildId),
+        eq(thread.kind, 'forum'), // tracked-channel segments have a separate quota
         eq(thread.publishedToKb, true),
         eq(thread.doNotPublish, false),
         isNull(thread.duplicateOfThreadId),

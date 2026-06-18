@@ -13,10 +13,12 @@ import {
   listChannelTopicChannelIds,
   type SearchMatch,
   semanticSearch,
+  updateGuildConfig,
 } from '@dejavue/db';
-import { checkChannelFit, ensureChannelTopics } from './channelFit';
-import { channelFitMessage, duplicatesMessage } from './embeds';
-import { fetchStarterWithRetry, forumParent } from './forum';
+import { assessChannel, ensureChannelTopics } from './channelFit';
+import { channelFitMessage, channelGuardMessage, duplicatesMessage } from './embeds';
+import { applyTag, ensureWrongChannelTag, fetchStarterWithRetry, forumParent } from './forum';
+import { closeThread } from './solve';
 import { getGuildTier, limitsFor } from './tier';
 
 const log = childLogger({ mod: 'dedup' });
@@ -80,19 +82,20 @@ async function maybeDraft(
 }
 
 /**
- * Channel-fit advisory: if another monitored question channel is a clearly better
- * home for this post, suggest it. Self-heals per-channel: any monitored question
- * channel missing a topic for the active model is rebuilt in the background
- * (guarded against bursts); we only skip the suggestion when *this* channel's topic
- * isn't ready yet (without it there's nothing to compare against).
+ * Channel-fit advisory + off-topic guard. If another monitored question channel is a
+ * clearly better home, suggest it (advisory). When the guard is on with auto-close and
+ * the post is *confidently* in the wrong channel, tag it `wrong-channel` and close the
+ * thread (returns true so the caller skips duplicate suggestions on a closed thread).
+ * Self-heals per-channel: a missing topic for the active model is rebuilt in the
+ * background; we only skip when *this* channel's topic isn't ready (nothing to compare).
  */
-async function maybeSuggestChannel(
+async function maybeGuardOrSuggest(
   thread: ThreadChannel,
   currentChannelId: string,
   queryVector: number[],
   cfg: GuildConfig,
   showBranding: boolean,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const db = getDb();
     const { embeddingModelId } = await import('@dejavue/ai');
@@ -104,11 +107,35 @@ async function maybeSuggestChannel(
       // Build the missing topics for next time (ensureChannelTopics is guarded).
       void ensureChannelTopics(thread.guild, cfg).catch(() => undefined);
     }
-    if (!present.has(currentChannelId)) return; // can't judge fit without this channel's topic
-    const suggestion = await checkChannelFit(thread.guildId, currentChannelId, queryVector, cfg);
+    if (!present.has(currentChannelId)) return false; // can't judge fit without this channel's topic
+
+    const { suggestion, wrong } = await assessChannel(thread.guildId, currentChannelId, queryVector, cfg);
+
+    // Guard auto-close: confidently the wrong channel → tag + close the thread.
+    if (cfg.guardEnabled && cfg.guardAutoClose && wrong) {
+      const forum = forumParent(thread);
+      if (forum) {
+        try {
+          const tagId = cfg.wrongChannelTagId ?? (await ensureWrongChannelTag(forum));
+          if (!cfg.wrongChannelTagId) {
+            await updateGuildConfig(db, thread.guildId, { wrongChannelTagId: tagId }).catch(() => undefined);
+          }
+          await applyTag(thread, tagId).catch(() => undefined);
+        } catch (err) {
+          log.warn({ err, threadId: thread.id }, 'failed to apply wrong-channel tag');
+        }
+      }
+      await thread.send(channelGuardMessage(wrong.channelId, showBranding)).catch(() => undefined);
+      await closeThread(thread).catch(() => undefined);
+      return true;
+    }
+
+    // Otherwise a soft suggestion (advisory fit-check, or guard without auto-close).
     if (suggestion) await thread.send(channelFitMessage(suggestion.channelId, showBranding));
+    return false;
   } catch (err) {
-    log.warn({ err, threadId: thread.id }, 'channel-fit check failed');
+    log.warn({ err, threadId: thread.id }, 'channel-fit/guard check failed');
+    return false;
   }
 }
 
@@ -151,11 +178,11 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
     matches = await keywordSearch(db, { guildId, query, limit: 3, excludeThreadId: thread.id });
   }
 
-  // Channel-fit advisory (Plus+, opt-in): does this question belong in a better
-  // channel? Independent of whether duplicates were found, so it runs before the
-  // no-matches early return.
-  if (cfg?.channelFitCheck && forum && queryVector) {
-    await maybeSuggestChannel(thread, forum.id, queryVector, cfg, !limits.removeBranding);
+  // Channel-fit advisory + off-topic guard (Plus+, opt-in). Runs before the no-matches
+  // early return. If the guard auto-closes the thread, skip duplicate suggestions.
+  if ((cfg?.channelFitCheck || cfg?.guardEnabled) && forum && queryVector) {
+    const closed = await maybeGuardOrSuggest(thread, forum.id, queryVector, cfg, !limits.removeBranding);
+    if (closed) return;
   }
 
   if (matches.length === 0) return;

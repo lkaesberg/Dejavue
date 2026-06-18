@@ -27,6 +27,26 @@ export interface TranscriptMessage {
   createdAt: string;
 }
 
+/** Public KB appearance, set by the admin via `/dejavue customize` (Plus+). */
+export type KbTheme = 'light' | 'dark';
+export type KbAccent = 'indigo' | 'blue' | 'teal' | 'violet' | 'amber';
+export type KbCorners = 'rounded' | 'sharp';
+export type KbHeadingFont = 'grotesk' | 'sans' | 'serif';
+
+/** Off-topic guard sensitivity → how readily a post is judged wrong-channel. */
+export type GuardSensitivity = 'low' | 'medium' | 'high';
+
+/** Imprint fields rendered on the public KB's legal page. */
+export interface KbImprint {
+  operator?: string;
+  contact?: string;
+  representedBy?: string;
+  responsible?: string;
+}
+
+/** Whether a thread came from a forum post or a tracked normal channel (separate quotas). */
+export type ThreadKind = 'forum' | 'channel';
+
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
@@ -102,6 +122,27 @@ export const guildConfig = pgTable('guild_config', {
   // when a new question is posted, suggest a better-fitting channel if one scores
   // notably higher. See the channel_topic table for the stored topic vectors.
   channelFitCheck: boolean('channel_fit_check').notNull().default(false),
+  // ---- Off-topic guard (Plus+): the channel-fit check, escalated. When a post is
+  // clearly off-topic it's warned about; with auto-close on, it's tagged
+  // "wrong-channel" and the thread is closed. Sensitivity tunes the confidence bar.
+  guardEnabled: boolean('guard_enabled').notNull().default(false),
+  guardAutoClose: boolean('guard_auto_close').notNull().default(false),
+  guardSensitivity: text('guard_sensitivity').$type<GuardSensitivity>().notNull().default('medium'),
+  wrongChannelTagId: text('wrong_channel_tag_id'),
+  // ---- Tracked normal (non-forum) channels: indexed as searchable KB content with
+  // a quota separate from the forum archive. A flat list of text/announcement channel ids.
+  trackedChannelIds: text('tracked_channel_ids').array().notNull().default(emptyTextArray),
+  // ---- Public KB customization (`/dejavue customize`). Appearance is Plus+; brand /
+  // slug / passphrase work on any tier.
+  brandName: text('brand_name'),
+  kbTheme: text('kb_theme').$type<KbTheme>().notNull().default('light'),
+  kbAccent: text('kb_accent').$type<KbAccent>().notNull().default('indigo'),
+  kbCorners: text('kb_corners').$type<KbCorners>().notNull().default('rounded'),
+  kbHeadingFont: text('kb_heading_font').$type<KbHeadingFont>().notNull().default('grotesk'),
+  kbLogoUrl: text('kb_logo_url'),
+  // A shared passphrase gate for a private KB (salted hash; null = public).
+  kbPassphraseHash: text('kb_passphrase_hash'),
+  kbImprint: jsonb('kb_imprint').$type<KbImprint>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -136,9 +177,12 @@ export const thread = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     guildId: text('guild_id').notNull(),
-    channelId: text('channel_id').notNull(), // parent forum channel
+    channelId: text('channel_id').notNull(), // parent forum channel (or tracked text channel)
     channelName: text('channel_name'), // denormalized for KB category grouping
-    threadId: text('thread_id').notNull(), // discord thread id (== starter message id)
+    // 'forum' = a real forum post; 'channel' = a conversation segment captured from a
+    // tracked normal channel. Counted against separate quotas.
+    kind: text('kind').$type<ThreadKind>().notNull().default('forum'),
+    threadId: text('thread_id').notNull(), // discord thread id (== starter message id), or synthetic segment id
     // If set, this thread is a duplicate of another (canonical) thread — folded
     // under it in the KB rather than listed on its own.
     duplicateOfThreadId: text('duplicate_of_thread_id'),
@@ -168,6 +212,7 @@ export const thread = pgTable(
     uniqueIndex('thread_guild_thread_idx').on(t.guildId, t.threadId),
     index('thread_guild_status_idx').on(t.guildId, t.status),
     index('thread_guild_published_idx').on(t.guildId, t.publishedToKb),
+    index('thread_guild_kind_idx').on(t.guildId, t.kind),
   ],
 );
 

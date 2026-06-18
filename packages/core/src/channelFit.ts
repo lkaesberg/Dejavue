@@ -48,3 +48,56 @@ export function suggestBetterChannel(
   if (best.score - current.score < FIT_MARGIN) return null;
   return { channelId: best.channelId, score: best.score, currentScore: current.score };
 }
+
+// ---------------------------------------------------------------------------
+// Off-topic guard: a stronger verdict than `suggestBetterChannel`. We only call a
+// post "wrong channel" (worth auto-closing) when it's confidently misfiled: its own
+// channel barely matches it, another channel matches it well, and the gap is large.
+// Cosine similarities are model-dependent, so all three bars are tunable via the
+// admin's sensitivity setting. `high` flags more posts (lower bars); `low` is strict.
+// ---------------------------------------------------------------------------
+
+export type GuardSensitivity = 'low' | 'medium' | 'high';
+
+export interface GuardThresholds {
+  /** The post's fit to its *current* channel must be at or below this. */
+  currentMax: number;
+  /** The best other channel must be at least this relevant to the post. */
+  bestMin: number;
+  /** …and must beat the current channel by at least this margin. */
+  margin: number;
+}
+
+export const GUARD_THRESHOLDS: Record<GuardSensitivity, GuardThresholds> = {
+  high: { currentMax: 0.34, bestMin: 0.36, margin: 0.12 },
+  medium: { currentMax: 0.28, bestMin: 0.42, margin: 0.18 },
+  low: { currentMax: 0.22, bestMin: 0.5, margin: 0.24 },
+};
+
+/**
+ * Decide whether a post is confidently in the wrong channel. Returns the better
+ * channel (with both scores) when all three thresholds pass, else null. Deterministic
+ * + pure, so it's unit-testable without embeddings.
+ */
+export function judgeWrongChannel(
+  scores: ChannelFitScore[],
+  currentChannelId: string,
+  sensitivity: GuardSensitivity = 'medium',
+  candidateChannelIds?: ReadonlySet<string>,
+): FitSuggestion | null {
+  const current = scores.find((s) => s.channelId === currentChannelId);
+  if (!current) return null; // no topic for the current channel → can't judge fit
+  const th = GUARD_THRESHOLDS[sensitivity] ?? GUARD_THRESHOLDS.medium;
+  if (current.score > th.currentMax) return null; // it fits its channel well enough
+
+  let best: ChannelFitScore | null = null;
+  for (const s of scores) {
+    if (s.channelId === currentChannelId) continue;
+    if (candidateChannelIds && !candidateChannelIds.has(s.channelId)) continue;
+    if (!best || s.score > best.score) best = s;
+  }
+  if (!best) return null;
+  if (best.score < th.bestMin) return null;
+  if (best.score - current.score < th.margin) return null;
+  return { channelId: best.channelId, score: best.score, currentScore: current.score };
+}

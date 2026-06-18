@@ -84,10 +84,11 @@ export async function setThreadStatus(
 export type StatusCounts = { open: number; solved: number; unsolved: number };
 
 export async function countByStatus(db: Database, guildId: string): Promise<StatusCounts> {
+  // Forum posts only — tracked normal-channel segments have their own quota/count.
   const rows = await db
     .select({ status: thread.status, count: sql<number>`count(*)::int` })
     .from(thread)
-    .where(eq(thread.guildId, guildId))
+    .where(and(eq(thread.guildId, guildId), eq(thread.kind, 'forum')))
     .groupBy(thread.status);
   const out: StatusCounts = { open: 0, solved: 0, unsolved: 0 };
   for (const r of rows) out[r.status] = r.count;
@@ -99,7 +100,19 @@ export async function countSolved(db: Database, guildId: string): Promise<number
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(thread)
-    .where(and(eq(thread.guildId, guildId), eq(thread.status, 'solved')));
+    .where(and(eq(thread.guildId, guildId), eq(thread.kind, 'forum'), eq(thread.status, 'solved')));
+  return row?.count ?? 0;
+}
+
+/**
+ * Count indexed conversation segments captured from tracked normal channels
+ * (separate from the forum archive). Used to enforce the tier's `trackedDocCap`.
+ */
+export async function countTracked(db: Database, guildId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.kind, 'channel')));
   return row?.count ?? 0;
 }
 

@@ -1,0 +1,74 @@
+---
+import { tierLimits } from '@dejavue/core';
+import { getDb, getPublishedThreads, getTopClusters } from '@dejavue/db';
+import ChannelRail from '../components/ChannelRail.astro';
+import KbFooter from '../components/KbFooter.astro';
+import KbNav from '../components/KbNav.astro';
+import Base from '../layouts/Base.astro';
+import { brandOf } from '../lib/theme';
+
+const { tenant, cfg, slug, tier } = Astro.locals;
+const notFound = slug !== null && tenant === null;
+if (notFound || !tenant) Astro.response.status = 404;
+const origin = new URL(Astro.request.url).origin;
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
+const limits = tierLimits(tier);
+const sections = [
+  { t: 'What gets published', b: 'Only threads a moderator marked as solved (and channels an admin chose to index) are published here. Open or private threads stay inside Discord.' },
+  { t: 'Identities are aliased', b: 'Author names are replaced with neutral aliases like "Original poster" and "Helper 1". No Discord handles, avatars or IDs are shown.' },
+  { t: 'No tracking', b: 'Pages are static and near-zero-JS. We set no advertising or analytics cookies and do not profile visitors.' },
+  { t: 'Opt-in & removal', b: 'Publishing is off by default and enabled per server. To remove an answer, contact the server admin or the email in the imprint.' },
+];
+
+let channels: { id: string; name: string; count: number }[] = [];
+let topics: { name: string; count: number; q: string }[] = [];
+if (tenant) {
+  const all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
+  const m = new Map<string, { id: string; name: string; count: number }>();
+  for (const t of all) {
+    const e = m.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+    e.count += 1;
+    m.set(t.channelId, e);
+  }
+  channels = [...m.values()].sort((a, b) => b.count - a.count);
+  if (limits.generative) {
+    const clusters = await getTopClusters(getDb(), tenant.guildId, 6);
+    topics = clusters
+      .filter((c) => c.label || c.representativeText)
+      .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
+  }
+}
+---
+
+{
+  tenant && (
+    <Base title={`Privacy Policy — ${brand}`} description={`How ${brand}'s knowledge base handles published content.`} canonical={`${origin}/privacy`} noindex>
+      <KbNav />
+      <div class="kb-inner">
+        <ChannelRail channels={channels} activeChannelId={null} topics={topics} isPaid={limits.generative} />
+        <main class="kb-main">
+          <div style="padding:26px 0 44px; max-width:680px;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut);">
+              <a href="/" class="kb-link">Help Center</a><span style="color:var(--border2);">/</span><span style="color:var(--textmid);">Privacy Policy</span>
+            </div>
+            <div style="display:flex; gap:22px; margin-top:18px; border-bottom:1px solid var(--border);">
+              <a href="/imprint" class="kb-link" style="font-size:14px; font-weight:600; padding:0 0 11px; color:var(--textmut);">Imprint</a>
+              <span style="font-size:14px; font-weight:600; padding:0 0 11px; color:var(--accentline); border-bottom:2px solid var(--accent);">Privacy Policy</span>
+            </div>
+            <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(26px,3.4vw,32px); letter-spacing:-0.025em; margin:24px 0 0; color:var(--text);">Privacy Policy</h1>
+            <p style="font-size:15px; line-height:1.6; color:var(--textmid); margin:11px 0 0;">How {brand}'s public knowledge base handles the questions and answers it publishes.</p>
+            <div style="display:flex; flex-direction:column; gap:18px; margin-top:24px;">
+              {sections.map((s) => (
+                <div>
+                  <div style="font-family:var(--headfont); font-weight:600; font-size:16px; letter-spacing:-0.01em; color:var(--text);">{s.t}</div>
+                  <p style="font-size:14px; line-height:1.6; color:var(--textmid); margin:6px 0 0;">{s.b}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+      <KbFooter />
+    </Base>
+  )
+}

@@ -130,7 +130,11 @@ export function duplicatesMessage(
       .setDescription(
         'I found similar solved posts — one of these might save you a wait:\n\n' +
           matches
-            .map((m, i) => `**${i + 1}.** [${m.title}](${threadUrl(guildId, m.threadId)})`)
+            .map((m, i) => {
+              const pct = m.kind === 'semantic' ? ` · ${Math.round(m.score * 100)}% match` : '';
+              const where = m.channelName ? ` · #${m.channelName}` : '';
+              return `**${i + 1}.** [${m.title}](${threadUrl(guildId, m.threadId)})${where}${pct}`;
+            })
             .join('\n'),
       ),
     showBranding,
@@ -179,6 +183,26 @@ export function channelFitMessage(
   return { embeds: [embed] };
 }
 
+/** Off-topic guard: posted when a question is confidently in the wrong channel and closed. */
+export function channelGuardMessage(
+  betterChannelId: string | null,
+  showBranding: boolean,
+): BaseMessageOptions {
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR_DUPLICATE)
+      .setTitle('🚫 This looks like the wrong channel')
+      .setDescription(
+        (betterChannelId
+          ? `This question looks off-topic here — it's a much better fit for <#${betterChannelId}>. `
+          : 'This question looks off-topic for this channel. ') +
+          "I've tagged and closed this thread to keep the channel on-topic. Please repost it in the right place.",
+      ),
+    showBranding,
+  );
+  return { embeds: [embed] };
+}
+
 /** Modal that forces the solver to provide an answer (no empty solves). */
 export function buildSolveModal(controlMessageId?: string): ModalBuilder {
   const modal = new ModalBuilder()
@@ -195,6 +219,14 @@ export function buildSolveModal(controlMessageId?: string): ModalBuilder {
   return modal;
 }
 
+/** A "#channel · 96% match" / "#channel · keyword" meta line for one search hit. */
+function matchMeta(r: SearchMatch): string {
+  const parts: string[] = [];
+  if (r.channelName) parts.push(`#${r.channelName}`);
+  parts.push(r.kind === 'semantic' ? `${Math.round(r.score * 100)}% match` : 'keyword');
+  return parts.join(' · ');
+}
+
 export function searchResultsEmbed(
   guildId: string,
   query: string,
@@ -207,7 +239,11 @@ export function searchResultsEmbed(
   } else {
     embed.setDescription(
       results
-        .map((r, i) => `**${i + 1}.** [${r.title}](${threadUrl(guildId, r.threadId)})`)
+        .map(
+          (r, i) =>
+            `**${i + 1}.** [${r.title}](${threadUrl(guildId, r.threadId)})\n` +
+            `   _${matchMeta(r)}_`,
+        )
         .join('\n')
         .slice(0, 4000),
     );

@@ -1,24 +1,33 @@
 ---
+import { tierLimits } from '@dejavue/core';
 import {
   channelGuidelinesOf,
   getDb,
-  getGuildConfig,
   getPublishedThreads,
+  getTopClusters,
   type Thread,
 } from '@dejavue/db';
+import ChannelRail from '../../components/ChannelRail.astro';
 import KbFooter from '../../components/KbFooter.astro';
 import KbNav from '../../components/KbNav.astro';
 import Base from '../../layouts/Base.astro';
+import { brandOf, channelHandle, channelKind } from '../../lib/theme';
 
-const { tenant } = Astro.locals;
+const { tenant, cfg, tier } = Astro.locals;
 const { channel } = Astro.params;
 const origin = new URL(Astro.request.url).origin;
 
 let all: Thread[] = [];
-let cfg: Awaited<ReturnType<typeof getGuildConfig>> = undefined;
+let topics: { name: string; count: number; q: string }[] = [];
+const isPaid = tierLimits(tier).generative;
 if (tenant) {
   all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
-  cfg = await getGuildConfig(getDb(), tenant.guildId);
+  if (isPaid) {
+    const clusters = await getTopClusters(getDb(), tenant.guildId, 6);
+    topics = clusters
+      .filter((c) => c.label || c.representativeText)
+      .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
+  }
 }
 const threads = all.filter((t) => t.channelId === channel);
 const found = !!tenant && threads.length > 0;
@@ -26,73 +35,83 @@ if (!found) Astro.response.status = 404;
 
 const channelName = threads[0]?.channelName ?? 'Channel';
 const guidelines = channel ? channelGuidelinesOf(cfg, channel) : undefined;
-const totalCategories = new Set(all.map((t) => t.channelId)).size;
-const handle = `#${channelName.toLowerCase().replace(/\s+/g, '-')}`;
+const kind = channelKind(cfg, channel ?? '');
+
+const channels = (() => {
+  const m = new Map<string, { id: string; name: string; count: number }>();
+  for (const t of all) {
+    const e = m.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+    e.count += 1;
+    m.set(t.channelId, e);
+  }
+  return [...m.values()].sort((a, b) => b.count - a.count);
+})();
 
 const fmtDate = (d: Date | string | null): string =>
   d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
 const snippetOf = (t: Thread): string => {
-  const body = (t.canonicalSummary || t.acceptedAnswerText || t.questionBody || '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const body = (t.canonicalSummary || t.acceptedAnswerText || t.questionBody || '').replace(/\s+/g, ' ').trim();
   return body.length > 200 ? `${body.slice(0, 200)}…` : body;
 };
-const msgCount = (t: Thread): number => t.transcript?.length ?? 0;
 ---
 
 {
   found ? (
     <Base
-      title={`${channelName} — ${tenant?.slug} Knowledge Base`}
+      title={`${channelName} — ${brandOf(cfg, tenant?.slug ?? undefined)} Knowledge Base`}
       description={`${threads.length} solved answers in ${channelName}.`}
       canonical={`${origin}/c/${channel}`}
     >
-      <div class="kb-page">
-        <KbNav slug={tenant!.slug} compactSearch />
-
-        <div class="kb-pad" style="padding-top:clamp(24px,5vw,32px); padding-bottom:24px;">
-          <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:#9AA0C3;">
-            <a href="/" class="kb-link">Help Center</a><span style="color:#CDD0DE;">/</span><span style="color:#6B6F86;">{channelName}</span>
-          </div>
-          <div style="display:flex; align-items:baseline; gap:14px; margin-top:14px; flex-wrap:wrap;">
-            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(24px,5vw,32px); letter-spacing:-0.025em; margin:0; line-height:1.05;">{channelName}</h1>
-            <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#6D5FE8; white-space:nowrap;">{handle}</span>
-            <span style="font-size:13px; color:#9AA0C3; white-space:nowrap;">· {threads.length} answers</span>
-          </div>
-          {guidelines && (
-            <p style="font-size:15px; color:#6B6F86; margin:12px 0 0; line-height:1.55; white-space:pre-wrap;">{guidelines}</p>
-          )}
-        </div>
-
-        <div class="kb-pad" style="padding-bottom:40px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 2px; border-bottom:1px solid #EDEDF2;">
-            <span style="font-size:13px; color:#9AA0C3;">{threads.length} solved {threads.length === 1 ? 'answer' : 'answers'}</span>
-            <span style="font-size:13px; color:#6B6F86; font-weight:500;">Recent</span>
-          </div>
-          {threads.map((q) => (
-            <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; gap:14px; padding:18px 2px; border-bottom:1px solid #F1F1F6;">
-              <span style="color:#2DD4BF; font-size:15px; margin-top:1px;">✓</span>
-              <div style="flex:1;">
-                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; letter-spacing:-0.01em; color:#1F2235;">{q.title}</div>
-                {snippetOf(q) && (
-                  <div style="font-size:13.5px; color:#8A8EA6; line-height:1.5; margin-top:4px;">{snippetOf(q)}</div>
-                )}
-                <div style="font-size:12px; color:#A2A6BE; margin-top:8px;">Solved{q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}{msgCount(q) > 0 ? ` · ${msgCount(q)} ${msgCount(q) === 1 ? 'message' : 'messages'}` : ''}</div>
+      <KbNav />
+      <div class="kb-inner">
+        <ChannelRail channels={channels} activeChannelId={channel} topics={topics} isPaid={isPaid} />
+        <main class="kb-main">
+            <div style="padding:26px 0 40px;">
+              <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut);">
+                <a href="/" class="kb-link">Help Center</a>
+                <span style="color:var(--border2);">/</span>
+                <span style="color:var(--textmid);">{channelName}</span>
               </div>
-            </a>
-          ))}
-        </div>
+              <div style="display:flex; align-items:baseline; gap:13px; margin-top:14px; flex-wrap:wrap;">
+                <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(26px,3.4vw,32px); letter-spacing:-0.025em; margin:0; line-height:1; color:var(--text);">{channelName}</h1>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accentline);">{channelHandle(channelName)}</span>
+                <span style={`font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px; background:${kind.bg}; color:${kind.fg};`}>{kind.label}</span>
+                <span style="font-size:13px; color:var(--textmut);">· {threads.length} answers</span>
+              </div>
+              {guidelines && (
+                <p style="font-size:15px; color:var(--textmid); margin:11px 0 0; line-height:1.55; white-space:pre-wrap;">{guidelines}</p>
+              )}
 
-        <KbFooter note={`${totalCategories} categories · ${all.length} answers`} />
+              <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 2px 12px; margin-top:14px; border-bottom:1px solid var(--border);">
+                <span style="font-size:13px; color:var(--textmut);">Solved answers</span>
+                <span style="font-size:13px; color:var(--textmid); font-weight:500;">Most recent</span>
+              </div>
+              {threads.map((q) => (
+                <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; gap:14px; padding:17px 2px; border-bottom:1px solid var(--border);">
+                  <span style="color:#2DD4BF; font-size:15px; margin-top:1px;">✓</span>
+                  <div style="flex:1; min-width:0;">
+                    <div style="font-family:var(--headfont); font-weight:600; font-size:16px; letter-spacing:-0.01em; color:var(--text);">{q.title}</div>
+                    {snippetOf(q) && (
+                      <div style="font-size:13.5px; color:var(--textmid); line-height:1.5; margin-top:4px;">{snippetOf(q)}</div>
+                    )}
+                    <div style="font-size:12px; color:var(--textmut); margin-top:8px;">
+                      {q.status === 'solved' ? 'Solved' : 'Indexed'}
+                      {q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}
+                      {(q.transcript?.length ?? 0) > 0 ? ` · ${q.transcript!.length} messages` : ''}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+        </main>
       </div>
+      <KbFooter note={`${channels.length} channels · ${all.length} answers`} />
     </Base>
   ) : (
     <Base title="Channel not found" noindex>
-      <div class="kb-page">
-        <div style="padding:80px 40px; text-align:center;">
-          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.03em;">Channel not found</h1>
-          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;"><a href="/" class="kb-link" style="color:#6D5FE8;">Back to the knowledge base</a></p>
-        </div>
+      <div class="kb-bound" style="padding:80px 40px; text-align:center;">
+        <h1 style="font-family:var(--headfont); font-weight:700; font-size:26px; letter-spacing:-0.03em;">Channel not found</h1>
+        <p style="font-size:15px; color:var(--textmid); margin:12px 0 0;"><a href="/" class="kb-link" style="color:var(--accentline);">Back to the knowledge base</a></p>
       </div>
     </Base>
   )

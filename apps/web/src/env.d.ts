@@ -1,10 +1,23 @@
 /// <reference types="astro/client" />
 
-declare namespace App {
-  interface Locals {
-    /** The subdomain label from the Host header (null on apex / www). */
-    slug: string | null;
-    /** Resolved tenant guild, or null if the slug is unknown / not opted in. */
-    tenant: { guildId: string; slug: string; embeddingModel: string } | null;
+import type { Tier } from '@dejavue/core';
+import type { GuildConfig } from '@dejavue/db';
+
+declare global {
+  namespace App {
+    interface Locals {
+      /** The subdomain label from the Host header (null on apex / www). */
+      slug: string | null;
+      /** Resolved tenant guild, or null if the slug is unknown / not opted in. */
+      tenant: { guildId: string; slug: string; embeddingModel: string } | null;
+      /** The full guild config for the tenant (theme, branding, imprint…), or null. */
+      cfg: GuildConfig | null;
+      /** The tenant's resolved tier (drives semantic search, branding, AI summaries). */
+      tier: Tier;
+      /** Whether to show the "powered by dejavue" branding (false once removed on Plus+). */
+      branded: boolean;
+    }
   }
 }
+
+export {};

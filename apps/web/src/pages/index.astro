@@ -1,11 +1,12 @@
 ---
 import { getEnv } from '@dejavue/core';
-import { channelGuidelinesOf, getDb, getGuildConfig, getPublishedThreads, type Thread } from '@dejavue/db';
+import { channelGuidelinesOf, getDb, getPublishedThreads, type Thread } from '@dejavue/db';
 import Echo from '../components/Echo.astro';
 import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
 import SiteLayout from '../layouts/SiteLayout.astro';
+import { brandOf, channelDot, channelHandle, channelKind } from '../lib/theme';
 
 const { tenant, slug } = Astro.locals;
 const notFound = slug !== null && tenant === null;
@@ -16,11 +17,11 @@ const env = getEnv();
 
 // ---- Tenant KB home data -------------------------------------------------
 let threads: Thread[] = [];
-let cfg: Awaited<ReturnType<typeof getGuildConfig>> = undefined;
+const cfg = Astro.locals.cfg;
 if (tenant) {
   threads = await getPublishedThreads(getDb(), tenant.guildId, 1000);
-  cfg = await getGuildConfig(getDb(), tenant.guildId);
 }
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
 
 const byChannel = new Map<string, { id: string; name: string; count: number }>();
 for (const t of threads) {
@@ -29,8 +30,13 @@ for (const t of threads) {
   byChannel.set(t.channelId, entry);
 }
 const categories = [...byChannel.values()].sort((a, b) => b.count - a.count);
-const mostAsked = threads.slice(0, 6);
-const handle = (name: string): string => `#${name.toLowerCase().replace(/\s+/g, '-')}`;
+const mostAsked = threads.slice(0, 5);
+// Popular-search chips derived from the most recent answers (first few words).
+const chips = mostAsked.slice(0, 4).map((t) => {
+  const words = t.title.replace(/[?.!]/g, '').split(/\s+/).slice(0, 4).join(' ');
+  return { label: words, q: t.title };
+});
+const handle = channelHandle;
 
 // ---- Add-to-Discord install link (marketing) ------------------------------
 const PERMS = (
@@ -67,41 +73,76 @@ const tiers = [
 {
   tenant ? (
     <Base
-      title={`${tenant.slug} — Knowledge Base`}
-      description={`Answers from the ${tenant.slug} community, kept up to date.`}
+      title={`${brand} — Knowledge Base`}
+      description={`Search ${brand}'s solved answers — kept up to date by the community.`}
       canonical={`${origin}/`}
     >
-      <div class="kb-page">
-        <KbNav slug={tenant.slug} />
+      <KbNav />
 
-        {/* hero + search */}
-        <div class="kb-pad" style="padding-top:clamp(36px,6vw,54px); padding-bottom:44px; text-align:center; background:linear-gradient(180deg,#FBFBFE,#FFFFFF);">
-          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(27px,6vw,38px); letter-spacing:-0.03em; margin:0; line-height:1.1;">How can we help?</h1>
-          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;">Answers from the {tenant.slug} community, kept up to date.</p>
-          <form action="/search" method="get" role="search" style="max-width:560px; margin:28px auto 0; display:flex; align-items:center; gap:10px; background:#fff; border:1px solid #DADAE5; border-radius:13px; padding:13px 18px; box-shadow:0 4px 16px rgba(14,15,28,0.05);">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9AA0C3" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
-            <input type="search" name="q" placeholder={`Search ${threads.length} answers…`} aria-label="Search the knowledge base" style="border:0; outline:none; font-size:15px; color:#1F2235; width:100%;" />
-          </form>
+      {/* hero + search */}
+      <div class="kb-hero">
+        <div class="kb-hero-inner">
+            <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(30px,5.2vw,46px); letter-spacing:-0.03em; margin:0; line-height:1.06;">How can we help?</h1>
+            <p style="font-size:clamp(15px,1.6vw,17px); color:var(--textmid); margin:13px 0 0;">Search {brand}'s solved answers — kept up to date by the community.</p>
+            <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:12px; max-width:600px; margin:26px auto 0; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:15px 18px; box-shadow:0 10px 30px rgba(20,21,42,0.07);">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+              <input type="search" name="q" placeholder={`Search ${threads.length} answers…`} aria-label="Search the knowledge base" style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:16px; color:var(--text);" />
+              <button type="submit" style="border:none; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:12.5px; font-weight:600; padding:8px 15px; border-radius:var(--radsm);">Search</button>
+            </form>
+            {chips.length > 0 && (
+              <div style="display:flex; align-items:center; justify-content:center; gap:9px; margin-top:16px; flex-wrap:wrap;">
+                <span style="font-size:12.5px; color:var(--textmut);">Popular:</span>
+                {chips.map((ch) => (
+                  <a href={`/search?q=${encodeURIComponent(ch.q)}`} style="font-size:12.5px; color:var(--accentline); background:var(--accentsoft); padding:5px 11px; border-radius:999px;">{ch.label}</a>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* categories */}
-        <div class="kb-pad" style="padding-top:8px; padding-bottom:12px;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600; margin-bottom:18px;">Browse by channel</div>
+        <div class="kb-home">
+          {/* most asked */}
+          {mostAsked.length > 0 && (
+            <>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin-bottom:13px;">Most asked</div>
+              <div style="border:1px solid var(--border); border-radius:var(--rad); overflow:hidden; background:var(--surface);">
+                {mostAsked.map((q) => (
+                  <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; align-items:center; gap:13px; padding:15px 18px; border-bottom:1px solid var(--border);">
+                    <span style="color:#2DD4BF; font-size:14px;">✓</span>
+                    <span style="font-size:14.5px; color:var(--text); flex:1; font-weight:500;">{q.title}</span>
+                    {q.channelName && (
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--chiptext); background:var(--chipbg); padding:3px 9px; border-radius:999px; white-space:nowrap;">{q.channelName}</span>
+                    )}
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* channels */}
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin:30px 0 13px;">Channels</div>
           {categories.length === 0 ? (
-            <p style="font-size:14px; color:#8A8EA6;">No published answers yet — check back soon.</p>
+            <p style="font-size:14px; color:var(--textmut);">No published answers yet — check back soon.</p>
           ) : (
             <div class="cat-grid">
               {categories.map((c) => {
                 const guidelines = channelGuidelinesOf(cfg, c.id);
+                const kind = channelKind(cfg, c.id);
                 return (
-                  <a href={`/c/${c.id}`} class="kb-card-hover" style="border:1px solid #EAEAF1; border-radius:14px; padding:18px 20px; display:block;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                      <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; letter-spacing:-0.01em; color:#1F2235;">{c.name}</span>
-                      <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#A2A6BE; background:#F4F4F9; padding:3px 9px; border-radius:999px;">{c.count}</span>
+                  <a href={`/c/${c.id}`} class="kb-card-hover" style="border:1px solid var(--border); border-radius:var(--rad); padding:18px 20px; display:block; background:var(--surface);">
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                      <span style="display:flex; align-items:center; gap:9px;">
+                        <span style={`width:9px; height:9px; border-radius:50%; background:${channelDot(c.id)};`}></span>
+                        <span style="font-family:var(--headfont); font-weight:600; font-size:16px; letter-spacing:-0.01em; color:var(--text);">{c.name}</span>
+                      </span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--chiptext); background:var(--chipbg); padding:3px 9px; border-radius:999px;">{c.count}</span>
                     </div>
-                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6D5FE8; margin-top:5px;">{handle(c.name)}</div>
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accentline);">{handle(c.name)}</span>
+                      <span style={`font-size:10px; font-weight:600; padding:2px 8px; border-radius:999px; background:${kind.bg}; color:${kind.fg};`}>{kind.label}</span>
+                    </div>
                     {guidelines && (
-                      <div style="font-size:13px; color:#8A8EA6; margin-top:7px; line-height:1.45;">
+                      <div style="font-size:13.5px; color:var(--textmid); margin-top:7px; line-height:1.45;">
                         {guidelines.length > 130 ? `${guidelines.slice(0, 130)}…` : guidelines}
                       </div>
                     )}
@@ -110,41 +151,16 @@ const tiers = [
               })}
             </div>
           )}
-          <div style="font-size:12.5px; color:#A2A6BE; margin-top:14px; line-height:1.5;">Each monitored Discord channel becomes a category.</div>
         </div>
 
-        {/* most asked */}
-        {mostAsked.length > 0 && (
-          <div class="kb-pad" style="padding-top:30px; padding-bottom:44px;">
-            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#9AA0C3; font-weight:600; margin-bottom:14px;">Recent answers</div>
-            <div style="border:1px solid #EAEAF1; border-radius:14px; overflow:hidden;">
-              {mostAsked.map((q) => (
-                <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; align-items:center; gap:14px; padding:15px 20px; border-bottom:1px solid #F1F1F6;">
-                  <span style="color:#2DD4BF; font-size:14px;">✓</span>
-                  <span style="font-size:14.5px; color:#2A2C3F; flex:1; font-weight:500;">{q.title}</span>
-                  {(q.transcript?.length ?? 0) > 0 && (
-                    <span style="font-size:11px; color:#A2A6BE; white-space:nowrap;">{`${q.transcript!.length} ${q.transcript!.length === 1 ? 'msg' : 'msgs'}`}</span>
-                  )}
-                  {q.channelName && (
-                    <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#9AA0C3; background:#F4F4F9; padding:3px 9px; border-radius:999px; white-space:nowrap;">{q.channelName}</span>
-                  )}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <KbFooter note={`${threads.length} answers indexed`} />
-      </div>
+        <KbFooter note={`Updated daily · ${threads.length} answers indexed`} />
     </Base>
   ) : notFound ? (
     <Base title="Knowledge base not found" noindex>
-      <div class="kb-page">
-        <div class="kb-pad" style="padding-top:80px; padding-bottom:80px; text-align:center;">
-          <Echo size={48} style="margin:0 auto;" />
-          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:28px; letter-spacing:-0.03em; margin:24px 0 0;">Knowledge base not found</h1>
-          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;">This community hasn't set up a public knowledge base.</p>
-        </div>
+      <div class="kb-bound" style="padding-top:80px; padding-bottom:80px; text-align:center;">
+        <Echo size={48} style="margin:0 auto;" />
+        <h1 style="font-family:var(--headfont); font-weight:700; font-size:28px; letter-spacing:-0.03em; margin:24px 0 0;">Knowledge base not found</h1>
+        <p style="font-size:15px; color:var(--textmid); margin:12px 0 0;">This community hasn't set up a public knowledge base.</p>
       </div>
     </Base>
   ) : (

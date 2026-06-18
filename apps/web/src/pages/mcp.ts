@@ -70,7 +70,10 @@ async function search(
   return matches
     .map((m, i) => {
       const a = answers.get(m.rowId);
-      return `${i + 1}. ${m.title}\n${a?.answer || '(no recorded answer)'}\nSource: ${origin}/t/${m.threadId}`;
+      const meta = [m.channelName ? `#${m.channelName}` : null, `${Math.round(m.score * 100)}% match`]
+        .filter(Boolean)
+        .join(' · ');
+      return `${i + 1}. ${m.title} (${meta})\n${a?.answer || '(no recorded answer)'}\nSource: ${origin}/t/${m.threadId}`;
     })
     .join('\n\n');
 }

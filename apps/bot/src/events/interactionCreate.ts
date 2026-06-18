@@ -20,6 +20,12 @@ import {
   solvedWithAnswerNotice,
   threadUrl,
 } from '../lib/embeds';
+import {
+  handleCustomizeButton,
+  handleCustomizeModal,
+  handleCustomizeSelect,
+  isCustomizeInteraction,
+} from '../lib/customize';
 import { applyTag, ensureForumTags, findTagByName, forumParent } from '../lib/forum';
 import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph, safeReply } from '../lib/reply';
@@ -152,9 +158,14 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     } else if (interaction.isMessageContextMenuCommand()) {
       await contextByName.get(interaction.commandName)?.execute(interaction);
     } else if (interaction.isButton()) {
-      await handleButton(interaction);
+      // KB customization hub runs anywhere (not just forum threads), so route it first.
+      if (isCustomizeInteraction(interaction.customId)) await handleCustomizeButton(interaction);
+      else await handleButton(interaction);
+    } else if (interaction.isStringSelectMenu()) {
+      if (isCustomizeInteraction(interaction.customId)) await handleCustomizeSelect(interaction);
     } else if (interaction.isModalSubmit()) {
-      await handleModal(interaction);
+      if (isCustomizeInteraction(interaction.customId)) await handleCustomizeModal(interaction);
+      else await handleModal(interaction);
     }
   } catch (err) {
     log.error({ err }, 'interaction handler failed');

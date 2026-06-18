@@ -1,0 +1,76 @@
+---
+import { tierLimits } from '@dejavue/core';
+import { getDb, getPublishedThreads, getTopClusters } from '@dejavue/db';
+import ChannelRail from '../components/ChannelRail.astro';
+import KbFooter from '../components/KbFooter.astro';
+import KbNav from '../components/KbNav.astro';
+import Base from '../layouts/Base.astro';
+import { brandOf } from '../lib/theme';
+
+const { tenant, cfg, slug, tier } = Astro.locals;
+const notFound = slug !== null && tenant === null;
+if (notFound || !tenant) Astro.response.status = 404;
+const origin = new URL(Astro.request.url).origin;
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
+const limits = tierLimits(tier);
+const im = cfg?.kbImprint ?? {};
+const rows = [
+  { k: 'Operator', v: im.operator || `${brand} Community` },
+  { k: 'Contact', v: im.contact || '—' },
+  { k: 'Represented by', v: im.representedBy || `The ${brand} moderation team` },
+  { k: 'Responsible for content', v: im.responsible || `${brand} Community` },
+];
+
+let channels: { id: string; name: string; count: number }[] = [];
+let topics: { name: string; count: number; q: string }[] = [];
+if (tenant) {
+  const all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
+  const m = new Map<string, { id: string; name: string; count: number }>();
+  for (const t of all) {
+    const e = m.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+    e.count += 1;
+    m.set(t.channelId, e);
+  }
+  channels = [...m.values()].sort((a, b) => b.count - a.count);
+  if (limits.generative) {
+    const clusters = await getTopClusters(getDb(), tenant.guildId, 6);
+    topics = clusters
+      .filter((c) => c.label || c.representativeText)
+      .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
+  }
+}
+---
+
+{
+  tenant && (
+    <Base title={`Imprint — ${brand}`} description={`Legal information for the ${brand} knowledge base.`} canonical={`${origin}/imprint`} noindex>
+      <KbNav />
+      <div class="kb-inner">
+        <ChannelRail channels={channels} activeChannelId={null} topics={topics} isPaid={limits.generative} />
+        <main class="kb-main">
+          <div style="padding:26px 0 44px; max-width:680px;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut);">
+              <a href="/" class="kb-link">Help Center</a><span style="color:var(--border2);">/</span><span style="color:var(--textmid);">Imprint</span>
+            </div>
+            <div style="display:flex; gap:22px; margin-top:18px; border-bottom:1px solid var(--border);">
+              <span style="font-size:14px; font-weight:600; padding:0 0 11px; color:var(--accentline); border-bottom:2px solid var(--accent);">Imprint</span>
+              <a href="/privacy" class="kb-link" style="font-size:14px; font-weight:600; padding:0 0 11px; color:var(--textmut);">Privacy Policy</a>
+            </div>
+            <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(26px,3.4vw,32px); letter-spacing:-0.025em; margin:24px 0 0; color:var(--text);">Imprint</h1>
+            <p style="font-size:15px; line-height:1.6; color:var(--textmid); margin:11px 0 0;">Legal information for the operator of this knowledge base.</p>
+            <div style="margin-top:24px; border:1px solid var(--border); border-radius:var(--rad); overflow:hidden; background:var(--surface);">
+              {rows.map((r) => (
+                <div style="display:flex; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border);">
+                  <span style="flex:0 0 180px; font-size:13.5px; color:var(--textmut);">{r.k}</span>
+                  <span style="flex:1; font-size:13.5px; color:var(--text);">{r.v}</span>
+                </div>
+              ))}
+            </div>
+            <p style="font-size:12.5px; color:var(--textmut); margin-top:14px; line-height:1.55;">This knowledge base is operated by the community above, independently of dejavue. dejavue provides the publishing software only.</p>
+          </div>
+        </main>
+      </div>
+      <KbFooter />
+    </Base>
+  )
+}

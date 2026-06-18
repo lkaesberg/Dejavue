@@ -122,6 +122,27 @@ export async function ensureForumTags(
   return { solvedTagId, unsolvedTagId, duplicateTagId };
 }
 
+/**
+ * Ensure a moderated "wrong-channel" tag exists on the forum, creating it on demand.
+ * Used by the off-topic guard's auto-close (kept off MANAGED_TAGS so guilds that never
+ * enable the guard don't grow an extra tag). Needs the Manage Channels permission.
+ */
+export async function ensureWrongChannelTag(forum: ForumChannel): Promise<string> {
+  const existing = findTagByName(forum, 'wrong-channel');
+  if (existing) return existing;
+  const desired: GuildForumTagData[] = forum.availableTags.map((t) => ({
+    id: t.id,
+    name: t.name,
+    moderated: t.moderated,
+    emoji: t.emoji ? { id: t.emoji.id, name: t.emoji.name } : null,
+  }));
+  desired.push({ name: 'wrong-channel', moderated: true, emoji: { id: null, name: '🚫' } });
+  const updated = await forum.setAvailableTags(desired);
+  const id = findTagByName(updated, 'wrong-channel');
+  if (!id) throw new Error('failed to ensure wrong-channel tag');
+  return id;
+}
+
 /** Apply a tag to a thread (idempotent), respecting the 5-tag forum limit. */
 export async function applyTag(thread: ThreadChannel, tagId: string): Promise<void> {
   if (thread.appliedTags.includes(tagId)) return;

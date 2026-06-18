@@ -4,8 +4,10 @@ import {
   EmbedBuilder,
   type ForumChannel,
   MessageFlags,
+  type NewsChannel,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  type TextChannel,
 } from 'discord.js';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
@@ -18,7 +20,6 @@ import {
   ensureGuildConfig,
   type GenStatus,
   generationStatus,
-  getActiveOtp,
   getDb,
   deleteChannelTopic,
   getFaqEntries,
@@ -27,7 +28,6 @@ import {
   keywordSearch,
   markGenerationStarted,
   setChannelGuidelines,
-  publishExistingSolved,
   resolutionStats,
   type SearchMatch,
   semanticSearch,
@@ -36,6 +36,8 @@ import {
 } from '@dejavue/db';
 import { enqueueBackfill, enqueueClusterGaps, enqueueRegenFaq } from '@dejavue/queue';
 import { refreshAllChannelTopics, refreshChannelTopic } from '../lib/channelFit';
+import { handleCustomize } from '../lib/customize';
+import { scheduleTrackedCapture } from '../lib/trackedChannel';
 import { buildSolveModal, COLOR, searchResultsEmbed, statsEmbed, threadUrl } from '../lib/embeds';
 import { ensureForumTags, forumParent } from '../lib/forum';
 import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
@@ -73,13 +75,29 @@ const data = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
-      .setName('untrack')
-      .setDescription('Stop monitoring a forum channel (admin)')
+      .setName('track')
+      .setDescription('Index a normal text channel as a searchable knowledge base (admin)')
       .addChannelOption((o) =>
         o
           .setName('channel')
-          .setDescription('The forum channel to stop monitoring')
-          .addChannelTypes(ChannelType.GuildForum)
+          .setDescription('The text/announcement channel to index')
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName('untrack')
+      .setDescription('Stop monitoring a forum or tracked text channel (admin)')
+      .addChannelOption((o) =>
+        o
+          .setName('channel')
+          .setDescription('The channel to stop monitoring')
+          .addChannelTypes(
+            ChannelType.GuildForum,
+            ChannelType.GuildText,
+            ChannelType.GuildAnnouncement,
+          )
           .setRequired(true),
       ),
   )
@@ -121,27 +139,34 @@ const data = new SlashCommandBuilder()
         o.setName('enabled').setDescription('Turn the channel-fit check on or off'),
       ),
   )
+  .addSubcommand((s) =>
+    s
+      .setName('guard')
+      .setDescription('Warn/relabel/close off-topic posts vs the channel guidelines (Plus, admin)')
+      .addBooleanOption((o) =>
+        o.setName('enabled').setDescription('Turn the off-topic guard on or off'),
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName('autoclose')
+          .setDescription('Auto-close posts that are clearly in the wrong channel'),
+      )
+      .addStringOption((o) =>
+        o
+          .setName('sensitivity')
+          .setDescription('How readily to flag a post as wrong-channel')
+          .addChoices(
+            { name: 'low — only the most obvious', value: 'low' },
+            { name: 'medium — balanced (default)', value: 'medium' },
+            { name: 'high — flag aggressively', value: 'high' },
+          ),
+      ),
+  )
   .addSubcommand((s) => s.setName('solved').setDescription('Mark the current forum post as solved'))
   .addSubcommand((s) =>
     s
-      .setName('kb')
-      .setDescription('Configure the public knowledge base (admin)')
-      .addStringOption((o) =>
-        o.setName('slug').setDescription('Subdomain label, e.g. "acme" → acme.dejavue.app'),
-      )
-      .addBooleanOption((o) =>
-        o.setName('publish').setDescription('Publish solved posts to the public KB'),
-      ),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName('domain')
-      .setDescription('Set a custom domain for the KB (one-time purchase, admin)')
-      .addStringOption((o) =>
-        o
-          .setName('domain')
-          .setDescription('Your domain, e.g. help.yoursite.com (or "none" to remove)'),
-      ),
+      .setName('customize')
+      .setDescription('Customize the knowledge base — branding, theme, domain, privacy (admin)'),
   )
   .addSubcommand((s) =>
     s.setName('demo').setDescription('Create an example forum with sample questions (admin)'),
@@ -170,10 +195,6 @@ function genStatusLine(st: GenStatus, queued: boolean): string | null {
   if (st.fresh && st.finishedAt) return `_Updated ${sinceLabel(st.finishedAt)} ago._`;
   return null;
 }
-
-const RESERVED_SLUGS = new Set(['www', 'app', 'api', 'docs', 'status', 'admin', 'dejavue', 'mail', 'cdn']);
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
-const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 
 async function resolveForum(interaction: ChatInputCommandInteraction): Promise<ForumChannel | null> {
   const picked = interaction.options.getChannel('channel', true);
@@ -282,6 +303,58 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
   }
 }
 
+async function handleTrack(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply(eph('You need the **Manage Server** permission to track channels.'));
+    return;
+  }
+  if (!interaction.guild) {
+    await interaction.reply(eph('Run this in a server.'));
+    return;
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const picked = interaction.options.getChannel('channel', true);
+  const channel = await interaction.guild.channels.fetch(picked.id).catch(() => null);
+  if (
+    !channel ||
+    (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)
+  ) {
+    await interaction.editReply('Pick a normal **text** or **announcement** channel (not a forum or thread).');
+    return;
+  }
+
+  const db = getDb();
+  const guildId = interaction.guild.id;
+  const cfg = await ensureGuildConfig(db, guildId);
+  const limits = limitsFor(await getGuildTier(guildId));
+  const already = cfg.trackedChannelIds.includes(channel.id);
+  if (!already && cfg.trackedChannelIds.length >= limits.maxTrackedChannels) {
+    await interaction.editReply(
+      upsellPayload({
+        title: 'Upgrade to track more channels',
+        description: `Your plan indexes up to ${limits.maxTrackedChannels} normal channel(s). Upgrade to **Plus** (3), **Pro** (10), or **Max** (unlimited).`,
+        skuId: getEnv().SKU_PLUS,
+      }),
+    );
+    return;
+  }
+
+  const trackedChannelIds = already ? cfg.trackedChannelIds : [...cfg.trackedChannelIds, channel.id];
+  await updateGuildConfig(db, guildId, { trackedChannelIds });
+  // Capture the channel's description as guidelines (shown on the KB) and seed an
+  // initial capture of recent conversation.
+  await setChannelGuidelines(db, guildId, channel.id, (channel as TextChannel).topic ?? null);
+  scheduleTrackedCapture(channel as TextChannel | NewsChannel);
+
+  const cap = Number.isFinite(limits.trackedDocCap) ? String(limits.trackedDocCap) : '∞';
+  await interaction.editReply(
+    `✅ Now indexing <#${channel.id}> as a knowledge base. Recent conversations are captured into searchable ` +
+      `entries that appear on your public KB and in \`/dejavue search\`.\n` +
+      `_Tracked-channel quota: up to **${cap}** indexed conversations — separate from your forum archive. ` +
+      'Turn on publishing in `/dejavue customize` to show them on the website._',
+  );
+}
+
 async function handleUntrack(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply(eph('You need the **Manage Server** permission to change monitored channels.'));
@@ -291,6 +364,20 @@ async function handleUntrack(interaction: ChatInputCommandInteraction): Promise<
   const db = getDb();
   const picked = interaction.options.getChannel('channel', true);
   const cfg = await getGuildConfig(db, guildId);
+
+  // Tracked normal channel?
+  if (cfg?.trackedChannelIds.includes(picked.id)) {
+    const trackedChannelIds = cfg.trackedChannelIds.filter((id) => id !== picked.id);
+    await updateGuildConfig(db, guildId, { trackedChannelIds });
+    await interaction.reply(
+      eph(
+        `✅ Stopped indexing <#${picked.id}>.\n` +
+          '_Already-indexed conversations are kept (so search/KB still work). To remove their public pages, turn off publishing in `/dejavue customize`._',
+      ),
+    );
+    return;
+  }
+
   if (!cfg || !cfg.forumChannelIds.includes(picked.id)) {
     await interaction.reply(eph(`<#${picked.id}> isn't being monitored.`));
     return;
@@ -304,7 +391,7 @@ async function handleUntrack(interaction: ChatInputCommandInteraction): Promise<
   await interaction.reply(
     eph(
       `✅ Stopped monitoring <#${picked.id}> — new posts there won't get duplicate detection or a control message.\n` +
-        '_Already-archived answers are kept (so search/KB still work). To also remove its public pages, unsolve those threads or turn off `/dejavue kb`._',
+        '_Already-archived answers are kept (so search/KB still work). To also remove its public pages, unsolve those threads or turn off publishing in `/dejavue customize`._',
     ),
   );
 }
@@ -328,11 +415,24 @@ async function handleConfig(interaction: ChatInputCommandInteraction): Promise<v
           : '_none — run_ `/dejavue setup`',
       },
       {
+        name: 'Tracked channels',
+        value: cfg?.trackedChannelIds.length
+          ? cfg.trackedChannelIds.map((id) => `<#${id}>`).join(', ')
+          : '_none — run_ `/dejavue track`',
+      },
+      {
         name: 'Public KB',
         value: cfg?.kbPublishOptIn ? `on (\`${cfg.kbSlug ?? '—'}\`)` : 'off',
         inline: true,
       },
       { name: 'Channel-fit check', value: cfg?.channelFitCheck ? 'on' : 'off', inline: true },
+      {
+        name: 'Off-topic guard',
+        value: cfg?.guardEnabled
+          ? `on${cfg.guardAutoClose ? ' (auto-close)' : ''} · ${cfg.guardSensitivity}`
+          : 'off',
+        inline: true,
+      },
       { name: 'Embedding model', value: cfg?.embeddingModel ?? 'bge-small-en-v1.5', inline: true },
     );
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -385,7 +485,7 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
           cfg?.kbPublishOptIn && kbUrl
             ? `on — ${kbUrl} (${published}${kbCap} pages)`
             : cfg?.kbPublishOptIn
-              ? 'on — _set a slug:_ `/dejavue kb slug:<name>`'
+              ? 'on — _set a slug in_ `/dejavue customize`'
               : 'off',
       },
       {
@@ -409,7 +509,7 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
       name: 'MCP server (Max)',
       value: kbUrl
         ? `\`${kbUrl}/mcp\`\nAdd as a Streamable HTTP MCP server in your AI client to query this KB.`
-        : '_set a KB slug first:_ `/dejavue kb slug:<name>`',
+        : '_set a KB slug first in_ `/dejavue customize`',
     });
   }
 
@@ -680,6 +780,79 @@ async function handleFitcheck(interaction: ChatInputCommandInteraction): Promise
   );
 }
 
+async function handleGuard(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply(eph('You need the **Manage Server** permission to configure the guard.'));
+    return;
+  }
+  const guildId = interaction.guildId!;
+  const db = getDb();
+  const limits = limitsFor(await getGuildTier(guildId));
+  // Needs embeddings → rides on the semantic (Plus+) tier, like the fit-check.
+  if (!limits.semanticSearch) {
+    await interaction.reply({
+      ...upsellPayload({
+        title: 'The off-topic guard is a Plus feature',
+        description:
+          'Profiles each channel from its name + posting guidelines and warns — or, with auto-close, ' +
+          'relabels and closes — posts that are clearly in the wrong channel. Upgrade to **Plus**.',
+        skuId: getEnv().SKU_PLUS,
+      }),
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await ensureGuildConfig(db, guildId);
+  const enabled = interaction.options.getBoolean('enabled');
+  const autoclose = interaction.options.getBoolean('autoclose');
+  const sensitivity = interaction.options.getString('sensitivity') as
+    | 'low'
+    | 'medium'
+    | 'high'
+    | null;
+
+  if (enabled === null && autoclose === null && sensitivity === null) {
+    const cfg = await getGuildConfig(db, guildId);
+    await interaction.reply(
+      eph(
+        `Off-topic guard: **${cfg?.guardEnabled ? 'on' : 'off'}**` +
+          ` · auto-close **${cfg?.guardAutoClose ? 'on' : 'off'}**` +
+          ` · sensitivity **${cfg?.guardSensitivity ?? 'medium'}**.\n` +
+          'Pass `enabled:`, `autoclose:`, or `sensitivity:` to change it.',
+      ),
+    );
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const patch: Parameters<typeof updateGuildConfig>[2] = {};
+  if (enabled !== null) patch.guardEnabled = enabled;
+  if (autoclose !== null) patch.guardAutoClose = autoclose;
+  if (sensitivity !== null) patch.guardSensitivity = sensitivity;
+  await updateGuildConfig(db, guildId, patch);
+
+  // Profile every monitored channel up front so the first check has something to compare against.
+  if (enabled === true) {
+    const cfg = await getGuildConfig(db, guildId);
+    if (cfg && interaction.guild) {
+      await refreshAllChannelTopics(interaction.guild, cfg).catch((err) =>
+        log.warn({ err, guildId }, 'failed to build channel topics on guard enable'),
+      );
+    }
+  }
+
+  const cfg = await getGuildConfig(db, guildId);
+  await interaction.editReply(
+    cfg?.guardEnabled
+      ? `✅ Off-topic guard **on** (sensitivity **${cfg.guardSensitivity}**). ` +
+          (cfg.guardAutoClose
+            ? "Posts clearly in the wrong channel are tagged `wrong-channel` and closed."
+            : 'Off-topic posts get a warning with a better-fitting channel. Turn on `autoclose:` to relabel + close.')
+      : 'Off-topic guard **off**.',
+  );
+}
+
 async function handleSolved(interaction: ChatInputCommandInteraction): Promise<void> {
   const channel = interaction.channel;
   if (!channel || !channel.isThread() || !forumParent(channel)) {
@@ -693,115 +866,6 @@ async function handleSolved(interaction: ChatInputCommandInteraction): Promise<v
   }
   // Open the modal so an answer is always provided (or right-click → Mark as Answer).
   await interaction.showModal(buildSolveModal());
-}
-
-async function handleKb(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    await interaction.reply(eph('You need the **Manage Server** permission to configure the KB.'));
-    return;
-  }
-  const guildId = interaction.guildId!;
-  const db = getDb();
-  const limits = limitsFor(await getGuildTier(guildId));
-  const rawSlug = interaction.options.getString('slug');
-  const publish = interaction.options.getBoolean('publish');
-
-  const patch: Parameters<typeof updateGuildConfig>[2] = {};
-  if (rawSlug) {
-    const slug = rawSlug.toLowerCase().trim();
-    if (!SLUG_RE.test(slug) || RESERVED_SLUGS.has(slug)) {
-      await interaction.reply(
-        eph('Invalid slug — use 2–40 lowercase letters, numbers, or hyphens (not a reserved word).'),
-      );
-      return;
-    }
-    patch.kbSlug = slug;
-  }
-  if (publish !== null) patch.kbPublishOptIn = publish;
-
-  await ensureGuildConfig(db, guildId);
-  if (Object.keys(patch).length > 0) await updateGuildConfig(db, guildId, patch);
-
-  // When turning the KB on, retroactively publish already-solved threads (up to cap).
-  let backfilled = 0;
-  if (publish === true) {
-    const limits = limitsFor(await getGuildTier(guildId));
-    backfilled = await publishExistingSolved(db, guildId, limits.kbPageCap);
-  }
-  const cfg = await getGuildConfig(db, guildId);
-
-  const url = cfg?.kbSlug ? `https://${cfg.kbSlug}.${getEnv().KB_BASE_DOMAIN}` : '_set a slug first_';
-  const mcpLine =
-    limits.mcp && cfg?.kbSlug ? `\nMCP server (Max): \`${url}/mcp\` — add as a Streamable HTTP MCP server.` : '';
-  await interaction.reply(
-    eph(
-      `KB publishing: **${cfg?.kbPublishOptIn ? 'on' : 'off'}**\nPublic URL: ${url}${mcpLine}` +
-        `${backfilled ? `\nPublished **${backfilled}** existing solved post(s).` : ''}\n` +
-        '_Usernames are aliased on public pages. Solved posts publish automatically while under your tier cap (Free 10 / Plus 100 / Pro 500 / Max unlimited)._',
-    ),
-  );
-}
-
-async function handleDomain(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    await interaction.reply(eph('You need the **Manage Server** permission to set a custom domain.'));
-    return;
-  }
-  const guildId = interaction.guildId!;
-  const db = getDb();
-  const env = getEnv();
-  const raw = interaction.options.getString('domain');
-
-  if (!raw) {
-    const cfg = await getGuildConfig(db, guildId);
-    await interaction.reply(
-      eph(
-        cfg?.customDomain
-          ? `Custom domain: \`${cfg.customDomain}\` → CNAME it at your Dejavue web host.`
-          : 'No custom domain set. Run `/dejavue domain domain:<host>` (one-time purchase) to add one.',
-      ),
-    );
-    return;
-  }
-
-  const value = raw.toLowerCase().trim();
-  if (value === 'none' || value === 'remove') {
-    await updateGuildConfig(db, guildId, { customDomain: null });
-    await interaction.reply(eph('Custom domain removed.'));
-    return;
-  }
-
-  // Durable one-time purchase grants the capability (not consumed — it's ongoing).
-  const otp = env.SKU_CUSTOM_DOMAIN
-    ? await getActiveOtp(db, guildId, env.SKU_CUSTOM_DOMAIN)
-    : undefined;
-  if (!otp && !env.DEV_FORCE_TIER) {
-    await interaction.reply({
-      ...upsellPayload({
-        title: 'Custom domain',
-        description:
-          'Serve your knowledge base on your own domain (e.g. help.yoursite.com) — a one-time purchase.',
-        skuId: env.SKU_CUSTOM_DOMAIN,
-      }),
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  if (!DOMAIN_RE.test(value) || value.endsWith(env.KB_BASE_DOMAIN)) {
-    await interaction.reply(eph('Invalid domain. Use a hostname you own, e.g. `help.yoursite.com`.'));
-    return;
-  }
-
-  await updateGuildConfig(db, guildId, { customDomain: value });
-  await interaction.reply(
-    eph(
-      `✅ Custom domain set to \`${value}\`.\n` +
-        `1. Add a **CNAME**: \`${value}\` → your Dejavue web host (same target as \`*.${env.KB_BASE_DOMAIN}\`).\n` +
-        '2. Ensure TLS covers it (on-demand certs / Cloudflare for SaaS).\n' +
-        `Your KB will then be reachable at https://${value}`,
-    ),
-  );
 }
 
 async function handleDemo(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -840,8 +904,11 @@ async function handleHelp(interaction: ChatInputCommandInteraction): Promise<voi
         'and turn solved posts into a searchable archive (and a public knowledge base).',
         '',
         '**Get started:** `/dejavue setup #your-forum` (admin).',
+        '**Track a chat channel:** `/dejavue track #channel` indexes a normal channel as a searchable KB.',
         '**Mark answers:** click **Mark as solved**, or right-click the helpful reply → **Apps → Mark as Answer**.',
-        '**Find answers:** `/dejavue search <question>`.',
+        '**Find answers:** `/dejavue search <question>` — shows the channel and a match %.',
+        '**Customize your KB:** `/dejavue customize` — branding, theme, domain & privacy in one place.',
+        '**Keep channels on-topic:** `/dejavue guard` warns or closes off-topic posts.',
         '**See progress:** `/dejavue stats`, `/dejavue analytics`, `/dejavue gaps`, `/dejavue faq`.',
       ].join('\n'),
     );
@@ -858,6 +925,8 @@ export const dejavueCommand: SlashCommand = {
     switch (interaction.options.getSubcommand()) {
       case 'setup':
         return handleSetup(interaction);
+      case 'track':
+        return handleTrack(interaction);
       case 'untrack':
         return handleUntrack(interaction);
       case 'config':
@@ -878,12 +947,12 @@ export const dejavueCommand: SlashCommand = {
         return handleNudges(interaction);
       case 'fitcheck':
         return handleFitcheck(interaction);
+      case 'guard':
+        return handleGuard(interaction);
       case 'solved':
         return handleSolved(interaction);
-      case 'kb':
-        return handleKb(interaction);
-      case 'domain':
-        return handleDomain(interaction);
+      case 'customize':
+        return handleCustomize(interaction);
       case 'demo':
         return handleDemo(interaction);
       case 'help':

@@ -17,21 +17,21 @@ import { getGuildTier, limitsFor } from './tier';
 const log = childLogger({ mod: 'knowledge' });
 
 const DEBOUNCE_MS = 4000;
-// Knowledge threads have no solve point, so they re-capture + re-embed on a
-// quadrupling schedule keyed off the thread's message count: at ~1, 4, 16, 64, … msgs.
-// Early posts (where the topic is still forming) refresh sooner; once a thread is
-// large the content has settled, so re-scans get exponentially rarer and stop
-// entirely past the cap. Growth factor 4 keeps the whole-thread coverage but with
-// ~half as many scans as plain doubling. Avoids re-embedding on every reply.
+// The KB *page* always shows the full chat log (we re-capture the transcript on
+// every message). EMBEDDING for search is what's throttled: re-embed often while a
+// thread is small (the topic is still forming), then exponentially rarer as it grows
+// and settles — on a quadrupling schedule keyed off the message count (~1, 4, 16, 64,
+// …), stopping past the cap. Growth factor 4 = whole-thread coverage, ~half the scans
+// of plain doubling.
 const REEMBED_GROWTH = 4;
 const REEMBED_MAX_MESSAGES = 256;
 
 /** Is this thread due for a (re-)embed given the count at its last embed? */
 export function isReembedDue(currentCount: number, lastEmbedCount: number | null): boolean {
   const last = lastEmbedCount ?? 0;
-  if (last <= 0) return true; // never embedded → always capture the first time
+  if (last <= 0) return true; // never embedded → always index the first time
   if (last >= REEMBED_MAX_MESSAGES) return false; // settled → stop re-scanning
-  return currentCount >= last * REEMBED_GROWTH; // only after the count has doubled
+  return currentCount >= last * REEMBED_GROWTH; // only after the count has quadrupled
 }
 
 /** Threads already scheduled, so threadCreate + messageCreate collapse to one run. */
@@ -92,19 +92,8 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
     }
   }
 
-  // Exponential backoff: skip the expensive transcript re-capture + re-embed unless
-  // the thread has grown enough since the last embed (the cheap upsert above already
-  // kept the title/body fresh). The first capture (lastEmbedMsgCount null) always runs.
-  const msgCount = thread.totalMessageSent ?? thread.messageCount ?? 0;
-  if (!isReembedDue(msgCount, row.lastEmbedMsgCount)) {
-    log.debug(
-      { threadId: thread.id, msgCount, lastEmbed: row.lastEmbedMsgCount },
-      'knowledge thread not yet due for re-embed',
-    );
-    return;
-  }
-
-  // Capture the post body (+ any early replies) for the KB page.
+  // The KB page must always show every message: re-capture the full transcript on
+  // each new message (the 4s debounce collapses bursts so this isn't per-keystroke).
   try {
     const transcript = await fetchTranscript(thread);
     if (transcript.length > 0) await setTranscript(db, row.id, transcript);
@@ -112,7 +101,11 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
     log.warn({ err, threadId: thread.id }, 'failed to capture knowledge transcript');
   }
 
-  // Index for /dejavue search + MCP (the post body is the content — no answer).
+  // Re-index for search/MCP on the quadrupling backoff (frequent while small, rare
+  // once the topic settles) — the embedding barely changes per added reply, so we
+  // don't pay to re-embed on every message even though the transcript above does update.
+  const msgCount = thread.totalMessageSent ?? thread.messageCount ?? 0;
+  if (!isReembedDue(msgCount, row.lastEmbedMsgCount)) return;
   let embedQueued = false;
   try {
     await enqueueEmbedThread({
@@ -127,11 +120,7 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
   } catch (err) {
     log.warn({ err, threadId: thread.id }, 'failed to enqueue knowledge embed');
   }
-
-  // Advance the backoff watermark ONLY when a re-embed was actually enqueued. If the
-  // queue was briefly down we must not move it — otherwise isReembedDue would skip
-  // this thread until its count doubles again (possibly never, past the cap), leaving
-  // the new content unindexed. pg-boss then guarantees the enqueued job eventually runs.
-  // max(.,1) guards against providers that don't report a count.
+  // Advance the watermark only when an embed was actually enqueued (so a brief queue
+  // outage doesn't strand new content unindexed until the count quadruples again).
   if (embedQueued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
 }

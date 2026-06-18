@@ -1,50 +1,50 @@
 ---
+import { brandInitial, brandOf } from '../lib/theme';
 import Echo from './Echo.astro';
+
 interface Props {
-  slug: string;
-  compactSearch?: boolean;
   query?: string;
 }
-const { slug, compactSearch = false, query = '' } = Astro.props;
-const letter = (slug?.[0] ?? 'D').toUpperCase();
+const { query = '' } = Astro.props;
+const { cfg, tenant, branded } = Astro.locals;
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
+const initial = brandInitial(brand);
+const logo = cfg?.kbLogoUrl ?? null;
 ---
 
-<nav style="display:flex; align-items:center; gap:10px 16px; flex-wrap:wrap; padding:14px clamp(16px,4vw,40px); border-bottom:1px solid #EDEDF2;">
-  <a href="/" style="display:flex; align-items:center; gap:12px;">
-    <span
-      style="width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,#3B82F6,#2DD4BF); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#fff;"
-      >{letter}</span
-    >
-    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; color:#0E0F1C;"
-      >{slug}</span
-    >
-    <span style="font-size:13px; color:#9AA0C3;">Help Center</span>
-  </a>
+<header class="kb-header">
+  <div class="kb-bound" style="padding-top:13px; padding-bottom:13px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+    <a href="/" style="display:flex; align-items:center; gap:11px;">
+      {
+        logo ? (
+          <img src={logo} alt={brand} style="width:30px; height:30px; border-radius:var(--radsm); object-fit:cover; display:block;" />
+        ) : (
+          <span style="width:30px; height:30px; border-radius:var(--radsm); background:linear-gradient(135deg,var(--accent),var(--accent2)); display:flex; align-items:center; justify-content:center; font-family:var(--headfont); font-weight:700; font-size:15px; color:#fff;">{initial}</span>
+        )
+      }
+      <span style="font-family:var(--headfont); font-weight:600; font-size:18px; letter-spacing:-0.02em; color:var(--text);">{brand}</span>
+      <span style="font-size:13px; color:var(--textmut); border-left:1px solid var(--border); padding-left:11px;">Help Center</span>
+    </a>
 
-  {
-    compactSearch && (
-      <form
-        action="/search"
-        method="get"
-        role="search"
-        style="flex:1 1 220px; min-width:160px; display:flex; align-items:center; gap:9px; background:#F4F4F9; border:1px solid #E7E7EF; border-radius:10px; padding:8px 13px;"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9AA0C3" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
-        <input
-          type="search"
-          name="q"
-          value={query}
-          placeholder="Search answers…"
-          aria-label="Search answers"
-          style="border:0; background:transparent; outline:none; font-size:13px; color:#1F2235; width:100%;"
-        />
+    <a href="/connect" style="display:inline-flex; align-items:center; gap:7px; font-size:14px; font-weight:500; color:var(--textmid);">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"></path><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+      Connect AI
+    </a>
+
+    <div style="margin-left:auto; display:flex; align-items:center; gap:14px; flex-wrap:nowrap;">
+      <form action="/search" method="get" role="search" style="flex:0 1 280px; min-width:150px; display:flex; align-items:center; gap:9px; background:var(--inputbg); border:1px solid var(--border); border-radius:var(--radsm); padding:9px 13px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
+        <input type="search" name="q" value={query} placeholder="Search answers…" aria-label="Search answers" style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:13.5px; color:var(--text);" />
       </form>
-    )
-  }
-
-  <div style="margin-left:auto; display:flex; align-items:center; gap:7px; color:#9AA0C3;">
-    <Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" showEcho={false} size={15} />
-    <span style="font-size:12px;">powered by</span>
-    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; letter-spacing:-0.02em; color:#54586E;">dejavue</span>
+      {
+        branded && (
+          <div style="display:flex; align-items:center; gap:5px; padding:5px 13px 5px 8px; border:1px solid var(--border); border-radius:999px; white-space:nowrap;">
+            <Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" showEcho={false} size={18} />
+            <span style="font-size:12px; color:var(--textmut);">powered by</span>
+            <span style="font-family:var(--headfont); font-weight:700; font-size:14px; letter-spacing:-0.02em; color:var(--textmid);">dejavue</span>
+          </div>
+        )
+      }
+    </div>
   </div>
-</nav>
+</header>

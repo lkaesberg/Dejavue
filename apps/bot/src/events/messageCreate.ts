@@ -1,9 +1,10 @@
-import type { Message } from 'discord.js';
+import { ChannelType, type Message } from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import { channelMode, getDb, getGuildConfig } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
+import { scheduleTrackedCapture } from '../lib/trackedChannel';
 
 const log = childLogger({ mod: 'event:messageCreate' });
 
@@ -20,6 +21,18 @@ const log = childLogger({ mod: 'event:messageCreate' });
 export async function onMessageCreate(message: Message): Promise<void> {
   if (message.author.bot) return;
   const channel = message.channel;
+
+  // Tracked normal (non-forum) channels: capture conversation segments for the KB.
+  if (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement) {
+    try {
+      const cfg = await getGuildConfig(getDb(), channel.guildId);
+      if (cfg?.trackedChannelIds?.includes(channel.id)) scheduleTrackedCapture(channel);
+    } catch (err) {
+      log.warn({ err, channelId: channel.id }, 'tracked-channel capture failed');
+    }
+    return;
+  }
+
   if (!channel.isThread()) return;
   const forum = forumParent(channel);
   if (!forum) return;

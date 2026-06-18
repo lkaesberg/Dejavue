@@ -1,0 +1,169 @@
+---
+import { tierLimits } from '@dejavue/core';
+import { getDb, getPublishedThreads, getTopClusters } from '@dejavue/db';
+import ChannelRail from '../components/ChannelRail.astro';
+import KbFooter from '../components/KbFooter.astro';
+import KbNav from '../components/KbNav.astro';
+import Base from '../layouts/Base.astro';
+import { brandOf } from '../lib/theme';
+
+const { tenant, cfg, slug, tier } = Astro.locals;
+const notFound = slug !== null && tenant === null;
+if (notFound || !tenant) Astro.response.status = 404;
+
+const origin = new URL(Astro.request.url).origin;
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
+const host = cfg?.customDomain ?? `${tenant?.slug}.dejavue.app`;
+const mcpUrl = `https://${host}/mcp`;
+const nm = `${(cfg?.kbSlug || tenant?.slug || 'kb').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-kb`;
+const limits = tierLimits(tier);
+const unlocked = !!tenant && limits.mcp;
+
+// Rail data (channels + Pro topics), so the page matches the inner-shell layout.
+let channels: { id: string; name: string; count: number }[] = [];
+let topics: { name: string; count: number; q: string }[] = [];
+if (tenant) {
+  const all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
+  const m = new Map<string, { id: string; name: string; count: number }>();
+  for (const t of all) {
+    const e = m.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+    e.count += 1;
+    m.set(t.channelId, e);
+  }
+  channels = [...m.values()].sort((a, b) => b.count - a.count);
+  if (limits.generative) {
+    const clusters = await getTopClusters(getDb(), tenant.guildId, 6);
+    topics = clusters
+      .filter((c) => c.label || c.representativeText)
+      .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
+  }
+}
+
+const programs = [
+  { label: 'Claude Desktop', file: 'claude_desktop_config.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "command": "npx",\n      "args": ["-y", "mcp-remote", "${mcpUrl}"]\n    }\n  }\n}`, note: 'Settings → Developer → Edit Config. mcp-remote bridges the remote HTTP server to Claude Desktop. Restart afterward.' },
+  { label: 'Claude Code', file: 'terminal', code: `claude mcp add --transport http ${nm} ${mcpUrl}`, note: 'Run in your project. Use `claude mcp list` to confirm it connected, then ask a question that hits the KB.' },
+  { label: 'Cursor', file: '~/.cursor/mcp.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "url": "${mcpUrl}"\n    }\n  }\n}`, note: 'Or Settings → MCP → Add new server. Cursor speaks Streamable HTTP natively — no bridge needed.' },
+  { label: 'VS Code', file: '.vscode/mcp.json', code: `{\n  "servers": {\n    "${nm}": {\n      "type": "http",\n      "url": "${mcpUrl}"\n    }\n  }\n}`, note: 'Requires GitHub Copilot agent mode. Open the file and click Start, or run “MCP: Add Server”.' },
+  { label: 'Windsurf', file: '~/.codeium/windsurf/mcp_config.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "serverUrl": "${mcpUrl}"\n    }\n  }\n}`, note: 'Cascade → MCP panel → Refresh after saving. Windsurf uses `serverUrl` for HTTP servers.' },
+  { label: 'Any HTTP client', file: 'Streamable HTTP', code: `POST ${mcpUrl}\nAccept: application/json, text/event-stream\nContent-Type: application/json\n\n# MCP tool\nsearch_knowledge_base(query: string, limit?: number)`, note: 'Any MCP-compatible client that supports the Streamable HTTP transport can connect to the same endpoint.' },
+];
+const steps = [
+  { n: '1', title: 'Add the config', body: 'Drop the block above into your client and save.' },
+  { n: '2', title: 'Reload the client', body: 'Restart or refresh so it picks up the new server.' },
+  { n: '3', title: 'Ask away', body: `Your AI now answers from ${brand}'s solved threads.` },
+];
+---
+
+{
+  tenant && (
+    <Base
+      title={`Connect AI — ${brand}`}
+      description={`Query ${brand}'s knowledge base from Claude, Cursor, VS Code and other MCP clients.`}
+      canonical={`${origin}/connect`}
+      noindex
+    >
+      <style is:global>
+        .mcp-tab { font-size:13px; font-weight:500; padding:8px 14px; border-radius:var(--radsm); cursor:pointer; border:1px solid var(--border); color:var(--textmut); background:transparent; }
+        .mcp-tab.active { border-color:var(--border2); color:var(--text); background:var(--surface); }
+        .mcp-panel[hidden] { display:none; }
+      </style>
+      <KbNav />
+      <div class="kb-inner">
+        <ChannelRail channels={channels} activeChannelId={null} topics={topics} isPaid={limits.generative} />
+        <main class="kb-main">
+          <div style="padding:26px 0 40px;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut);">
+              <a href="/" class="kb-link">Help Center</a><span style="color:var(--border2);">/</span><span style="color:var(--textmid);">Connect AI</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:9px; margin-top:18px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:4px 10px; border-radius:999px;">MAX</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--textmut);">Model Context Protocol</span>
+            </div>
+            <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(26px,3.6vw,34px); letter-spacing:-0.03em; line-height:1.12; margin:14px 0 0; color:var(--text);">Connect your AI to {brand}'s knowledge base</h1>
+            <p style="font-size:15.5px; line-height:1.6; color:var(--textmid); margin:12px 0 0; max-width:620px;">Every solved answer is exposed as a <strong>Streamable HTTP MCP server</strong>. Point Claude, Cursor, VS Code or any MCP client at the endpoint and your AI can answer from questions the community already solved.</p>
+
+            <div style="display:flex; align-items:center; gap:12px; margin-top:20px; flex-wrap:wrap;">
+              <div style="display:flex; align-items:center; gap:10px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radsm); padding:11px 15px;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--textmut);">Endpoint</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:13.5px; color:var(--accentline); font-weight:600;">{host}/mcp</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmid);">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#2DD4BF;">●</span>
+                <span>tool: <span style="font-family:'JetBrains Mono',monospace; color:var(--text);">search_knowledge_base(query, limit?)</span></span>
+              </div>
+            </div>
+
+            {
+              unlocked ? (
+                <div style="margin-top:26px;" id="mcp">
+                  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    {programs.map((p, i) => (
+                      <button type="button" class={`mcp-tab${i === 0 ? ' active' : ''}`} data-tab={String(i)}>{p.label}</button>
+                    ))}
+                  </div>
+
+                  {programs.map((p, i) => (
+                    <div class="mcp-panel" data-panel={String(i)} hidden={i !== 0}>
+                      <div style="margin-top:14px; border-radius:var(--rad); overflow:hidden; border:1px solid #23262F; background:#14161F;">
+                        <div style="display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid #23262F;">
+                          <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#8A90AE;">{p.file}</span>
+                          <button type="button" class="mcp-copy" style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#C7CADF; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); padding:4px 10px; border-radius:7px; cursor:pointer;">Copy</button>
+                        </div>
+                        <pre style="margin:0; padding:18px 16px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.65; color:#E2E5F2; white-space:pre-wrap; word-break:break-word;">{p.code}</pre>
+                      </div>
+                      <div style="font-size:12.5px; color:var(--textmut); margin-top:10px; line-height:1.5;">{p.note}</div>
+                    </div>
+                  ))}
+
+                  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-top:24px;">
+                    {steps.map((st) => (
+                      <div style="border:1px solid var(--border); border-radius:var(--rad); padding:16px 18px; background:var(--surface);">
+                        <div style="display:flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:8px; background:var(--accentsoft); color:var(--accentline); font-family:var(--headfont); font-weight:700; font-size:13px;">{st.n}</div>
+                        <div style="font-family:var(--headfont); font-weight:600; font-size:14.5px; color:var(--text); margin-top:11px;">{st.title}</div>
+                        <div style="font-size:13px; color:var(--textmid); line-height:1.5; margin-top:5px;">{st.body}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style="margin-top:24px; border:1px solid var(--border2); border-radius:var(--rad); background:linear-gradient(160deg,var(--accentsoft),var(--surface)); padding:26px;">
+                  <div style="display:flex; align-items:center; gap:9px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accentline)" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+                    <span style="font-family:var(--headfont); font-weight:600; font-size:16px; color:var(--text);">The MCP server is a Max-tier feature</span>
+                  </div>
+                  <p style="font-size:14px; line-height:1.6; color:var(--textmid); margin:12px 0 0; max-width:560px;">Upgrade to Max to expose this knowledge base as a Streamable HTTP MCP server and let Claude, Cursor, VS Code and other clients query it directly. Setup is a single config block per client.</p>
+                </div>
+              )
+            }
+          </div>
+        </main>
+      </div>
+      <KbFooter note="MCP · Max tier" />
+
+      {unlocked && (
+        <script is:inline>
+          (function () {
+            var root = document.getElementById('mcp');
+            if (!root) return;
+            root.addEventListener('click', function (e) {
+              var tab = e.target.closest('.mcp-tab');
+              if (tab) {
+                var i = tab.getAttribute('data-tab');
+                root.querySelectorAll('.mcp-tab').forEach(function (t) { t.classList.toggle('active', t === tab); });
+                root.querySelectorAll('.mcp-panel').forEach(function (p) { p.hidden = p.getAttribute('data-panel') !== i; });
+                return;
+              }
+              var copy = e.target.closest('.mcp-copy');
+              if (copy) {
+                var pre = copy.closest('.mcp-panel').querySelector('pre');
+                try { navigator.clipboard.writeText(pre.textContent || ''); } catch (err) {}
+                var old = copy.textContent; copy.textContent = 'Copied ✓';
+                setTimeout(function () { copy.textContent = old; }, 1400);
+              }
+            });
+          })();
+        </script>
+      )}
+    </Base>
+  )
+}

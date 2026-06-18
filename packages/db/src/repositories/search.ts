@@ -11,8 +11,11 @@ export interface SearchMatch {
   rowId: string; // thread.id (uuid)
   threadId: string; // discord thread id
   title: string;
+  channelName: string | null; // denormalized parent channel name (for "in #channel")
   status: 'open' | 'solved' | 'unsolved';
-  score: number; // similarity (semantic) or rank (keyword)
+  score: number; // semantic: cosine similarity in [0,1]; keyword: ts_rank (not normalized)
+  /** How `score` should be read by callers: a 0–1 similarity, or an opaque keyword rank. */
+  kind: 'semantic' | 'keyword';
 }
 
 export interface SemanticSearchOptions {
@@ -70,6 +73,7 @@ export async function semanticSearch(
         rowId: thread.id,
         threadId: thread.threadId,
         title: thread.title,
+        channelName: thread.channelName,
         status: thread.status,
         score: similarity,
       })
@@ -79,7 +83,9 @@ export async function semanticSearch(
       .orderBy(distance)
       .limit(limit);
 
-    return rows.filter((r) => r.score >= minSimilarity);
+    return rows
+      .filter((r) => r.score >= minSimilarity)
+      .map((r) => ({ ...r, kind: 'semantic' as const }));
   });
 }
 
@@ -114,6 +120,7 @@ export async function keywordSearch(
       rowId: thread.id,
       threadId: thread.threadId,
       title: thread.title,
+      channelName: thread.channelName,
       status: thread.status,
       score: rank,
     })
@@ -122,5 +129,5 @@ export async function keywordSearch(
     .orderBy(desc(rank))
     .limit(limit);
 
-  return rows;
+  return rows.map((r) => ({ ...r, kind: 'keyword' as const }));
 }

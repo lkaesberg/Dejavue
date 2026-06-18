@@ -19,6 +19,10 @@ export type AnalyticsLevel = 'basic' | 'full';
 export interface TierLimits {
   /** Number of forum channels Dejavue will monitor. */
   maxForumChannels: number;
+  /** Number of tracked *normal* (non-forum) channels indexed as searchable KBs. */
+  maxTrackedChannels: number;
+  /** Cap on indexed conversation segments captured from tracked normal channels. */
+  trackedDocCap: number;
   /** In-Discord searchable archive cap (solved threads indexed for /search). */
   archiveCap: number;
   /** Public web KB published-page cap. */
@@ -47,6 +51,8 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
     case 'max':
       return {
         maxForumChannels: UNLIMITED,
+        maxTrackedChannels: UNLIMITED,
+        trackedDocCap: UNLIMITED,
         archiveCap: UNLIMITED,
         kbPageCap: UNLIMITED,
         semanticSearch: true,
@@ -63,6 +69,8 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
       return {
         // Generous but finite — only Max is unlimited.
         maxForumChannels: 5,
+        maxTrackedChannels: 10,
+        trackedDocCap: 5000,
         archiveCap: 2500,
         kbPageCap: 500,
         semanticSearch: true,
@@ -77,6 +85,8 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
     case 'plus':
       return {
         maxForumChannels: 3,
+        maxTrackedChannels: 3,
+        trackedDocCap: 1000,
         archiveCap: 1500,
         kbPageCap: 100,
         semanticSearch: true,
@@ -92,6 +102,8 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
     default:
       return {
         maxForumChannels: 1,
+        maxTrackedChannels: 1,
+        trackedDocCap: 200,
         archiveCap: 500,
         kbPageCap: 10,
         semanticSearch: false,

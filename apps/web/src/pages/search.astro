@@ -1,92 +1,184 @@
 ---
-import { getDb, searchPublished } from '@dejavue/db';
+import { tierLimits } from '@dejavue/core';
+import {
+  getDb,
+  getPublishedThreads,
+  getTopClusters,
+  type KbSearchResult,
+  searchPublished,
+  searchPublishedSemantic,
+  type Thread,
+} from '@dejavue/db';
+import ChannelRail from '../components/ChannelRail.astro';
 import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
+import { brandOf } from '../lib/theme';
 
-const { tenant, slug } = Astro.locals;
+const { tenant, cfg, slug, tier } = Astro.locals;
 const notFound = slug !== null && tenant === null;
 if (notFound) Astro.response.status = 404;
 
-const origin = new URL(Astro.request.url).origin;
-const query = (new URL(Astro.request.url).searchParams.get('q') ?? '').trim();
+const url = new URL(Astro.request.url);
+const origin = url.origin;
+const query = (url.searchParams.get('q') ?? '').trim();
+const channelFilter = url.searchParams.get('channel') ?? undefined;
+const wantSemantic = url.searchParams.get('semantic') === '1';
 
-let results: Awaited<ReturnType<typeof searchPublished>> = [];
-if (tenant && query) {
-  // A public endpoint must never 500 on an odd query — fall back to no results.
-  try {
-    results = await searchPublished(getDb(), tenant.guildId, query, 30);
-  } catch {
-    results = [];
+const semanticAllowed = tierLimits(tier).semanticSearch;
+const semanticActive = semanticAllowed && wantSemantic;
+
+let results: KbSearchResult[] = [];
+let all: Thread[] = [];
+let topics: { name: string; count: number; q: string }[] = [];
+const isPaid = tierLimits(tier).generative;
+
+if (tenant) {
+  all = await getPublishedThreads(getDb(), tenant.guildId, 1000);
+  if (isPaid) {
+    const clusters = await getTopClusters(getDb(), tenant.guildId, 6);
+    topics = clusters
+      .filter((c) => c.label || c.representativeText)
+      .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
+  }
+  if (query) {
+    // A public endpoint must never 500 on an odd query — fall back gracefully.
+    try {
+      if (semanticActive) {
+        const { embedOne, embeddingModelId } = await import('@dejavue/ai');
+        const vec = await embedOne(query, { mode: 'query', model: tenant.embeddingModel });
+        results = await searchPublishedSemantic(
+          getDb(),
+          tenant.guildId,
+          vec,
+          embeddingModelId(tenant.embeddingModel),
+          30,
+          channelFilter,
+        );
+      } else {
+        results = await searchPublished(getDb(), tenant.guildId, query, 30, channelFilter);
+      }
+    } catch {
+      results = [];
+    }
   }
 }
+
+const channels = (() => {
+  const m = new Map<string, { id: string; name: string; count: number }>();
+  for (const t of all) {
+    const e = m.get(t.channelId) ?? { id: t.channelId, name: t.channelName ?? 'General', count: 0 };
+    e.count += 1;
+    m.set(t.channelId, e);
+  }
+  return [...m.values()].sort((a, b) => b.count - a.count);
+})();
+const filterName = channelFilter ? channels.find((c) => c.id === channelFilter)?.name : undefined;
+const brand = brandOf(cfg, tenant?.slug ?? undefined);
+
+// Build the semantic-toggle href (preserve q + channel).
+const toggleParams = new URLSearchParams();
+if (query) toggleParams.set('q', query);
+if (channelFilter) toggleParams.set('channel', channelFilter);
+if (!semanticActive) toggleParams.set('semantic', '1');
+const toggleHref = `/search?${toggleParams.toString()}`;
+const badgeText = (r: KbSearchResult): string =>
+  r.relevance !== undefined ? `${Math.round(r.relevance * 100)}% match` : 'keyword';
 ---
 
 {
   tenant ? (
     <Base
-      title={query ? `${query} — search · ${tenant.slug}` : `Search — ${tenant.slug}`}
-      description={`Search the ${tenant.slug} knowledge base.`}
+      title={query ? `${query} — search · ${brand}` : `Search — ${brand}`}
+      description={`Search the ${brand} knowledge base.`}
       canonical={`${origin}/search`}
       noindex
     >
-      <div class="kb-page">
-        <KbNav slug={tenant.slug} />
+      <KbNav />
+      <div class="kb-inner">
+        <ChannelRail channels={channels} activeChannelId={channelFilter ?? null} topics={topics} isPaid={isPaid} />
+        <main class="kb-main">
+            <div style="padding:26px 0 40px;">
+              {/* search field */}
+              <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:11px; background:var(--surface); border:1.5px solid var(--accent); border-radius:var(--rad); padding:13px 18px; box-shadow:0 4px 16px rgba(109,95,232,0.1);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+                <input type="search" name="q" value={query} placeholder="Search answers…" aria-label="Search the knowledge base" autofocus style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:16px; color:var(--text);" />
+                {channelFilter && <input type="hidden" name="channel" value={channelFilter} />}
+                {semanticActive && <input type="hidden" name="semantic" value="1" />}
+              </form>
 
-        {/* search field */}
-        <div class="kb-pad" style="padding-top:30px; padding-bottom:18px;">
-          <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:11px; background:#fff; border:1.5px solid #6D5FE8; border-radius:13px; padding:13px 18px; box-shadow:0 4px 16px rgba(109,95,232,0.1);">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6D5FE8" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
-            <input type="search" name="q" value={query} placeholder="Search the knowledge base…" aria-label="Search the knowledge base" autofocus style="border:0; outline:none; font-size:16px; color:#1F2235; flex:1;" />
-          </form>
-          {query !== '' && (
-            <div style="display:flex; align-items:center; gap:10px; margin-top:16px;">
-              <span style="font-size:13px; color:#6B6F86;">{results.length} {results.length === 1 ? 'result' : 'results'}</span>
-              <span style="width:3px; height:3px; border-radius:50%; background:#CDD0DE;"></span>
-              <span style="display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#9AA0C3;"><span style="width:6px; height:6px; border-radius:50%; background:#7C3AED;"></span>Keyword search across published answers</span>
-            </div>
-          )}
-        </div>
-
-        {/* results */}
-        <div class="kb-pad" style="padding-top:6px; padding-bottom:44px;">
-          {query === '' ? (
-            <p style="font-size:14px; color:#8A8EA6; padding:18px 2px;">Type a question above to search the knowledge base.</p>
-          ) : results.length === 0 ? (
-            <p style="font-size:14px; color:#8A8EA6; padding:18px 2px;">No matches for “{query}”.</p>
-          ) : (
-            results.map((r) => (
-              <a href={`/t/${r.threadId}`} class="kb-row" style="display:block; padding:18px 2px; border-bottom:1px solid #F1F1F6;">
-                <div style="display:flex; align-items:flex-start; gap:14px;">
-                  <span style="color:#2DD4BF; font-size:15px; margin-top:2px;">✓</span>
-                  <div style="flex:1;">
-                    <span style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16.5px; letter-spacing:-0.01em; color:#3B36C9;">{r.title}</span>
-                    {r.snippet && (
-                      <div style="font-size:14px; color:#6B6F86; line-height:1.55; margin-top:6px;">{r.snippet}</div>
+              {query !== '' && (
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:15px; flex-wrap:wrap;">
+                  <span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--textmid);">
+                    <span style={`width:7px; height:7px; border-radius:50%; background:${semanticActive ? 'var(--accent)' : 'var(--textmut)'};`}></span>
+                    <span style="font-weight:600; color:var(--text);">{results.length} results</span>
+                    <span style="color:var(--textmut);">· {semanticActive ? 'semantic' : 'keyword'}</span>
+                    {filterName && (
+                      <a href={`/search?q=${encodeURIComponent(query)}`} style="display:inline-flex; align-items:center; gap:5px; background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px;">#{filterName} ✕</a>
                     )}
-                    <div style="display:flex; align-items:center; gap:8px; margin-top:9px;">
-                      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#9AA0C3;">{tenant.slug}.dejavue.app</span>
-                      {r.channel && (
-                        <span style="background:#EEF6FF; color:#2563EB; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px;">{r.channel}</span>
-                      )}
-                    </div>
-                  </div>
+                  </span>
+                  <a href={semanticAllowed ? toggleHref : '#'} style={`display:flex; align-items:center; gap:10px; ${semanticAllowed ? '' : 'cursor:not-allowed; opacity:0.8;'}`}>
+                    <span style="font-size:13px; font-weight:500; color:var(--textmid);">Semantic search</span>
+                    <span style={`position:relative; display:inline-block; width:38px; height:22px; border-radius:999px; background:${semanticActive ? 'var(--accent)' : 'var(--border2)'};`}>
+                      <span style={`position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.3); transform:translateX(${semanticActive ? '16px' : '0px'});`}></span>
+                    </span>
+                    {!semanticAllowed && (
+                      <span style="font-size:9px; font-weight:700; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:2px 7px; border-radius:999px;">PLUS</span>
+                    )}
+                  </a>
                 </div>
-              </a>
-            ))
-          )}
-        </div>
+              )}
+              {query !== '' && (
+                <div style="font-size:12.5px; color:var(--textmut); margin-top:8px; line-height:1.5;">
+                  {semanticActive
+                    ? 'Ranked by meaning — runs an embedding for this search.'
+                    : semanticAllowed
+                      ? 'Exact keyword matching. Flip on Semantic search when a query needs meaning.'
+                      : 'Exact keyword matching. Semantic (meaning-based) search is available on Plus & up.'}
+                </div>
+              )}
 
-        <KbFooter label="Search by" note="Full-text search" />
+              {/* results */}
+              <div style="margin-top:14px;">
+                {query === '' ? (
+                  <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">Type a question above to search the knowledge base.</p>
+                ) : results.length === 0 ? (
+                  <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No matches for “{query}”.</p>
+                ) : (
+                  results.map((r) => (
+                    <a href={`/t/${r.threadId}`} class="kb-row" style="display:block; padding:18px 2px; border-bottom:1px solid var(--border);">
+                      <div style="display:flex; align-items:flex-start; gap:14px;">
+                        <span style="color:#2DD4BF; font-size:15px; margin-top:2px;">✓</span>
+                        <div style="flex:1; min-width:0;">
+                          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px;">
+                            <span style="font-family:var(--headfont); font-weight:600; font-size:16.5px; letter-spacing:-0.01em; color:var(--accentline);">{r.title}</span>
+                            <span style={`font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap; flex-shrink:0; color:${r.relevance !== undefined ? 'var(--accentline)' : 'var(--chiptext)'}; background:${r.relevance !== undefined ? 'var(--accentsoft)' : 'var(--chipbg)'};`}>{badgeText(r)}</span>
+                          </div>
+                          {r.snippet && (
+                            <div style="font-size:14px; color:var(--textmid); line-height:1.55; margin-top:6px;">{r.snippet}</div>
+                          )}
+                          <div style="display:flex; align-items:center; gap:8px; margin-top:9px;">
+                            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--textmut);">{cfg?.customDomain ?? `${tenant.slug}.dejavue.app`}</span>
+                            {r.channel && (
+                              <span style="background:#EEF6FF; color:#2563EB; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px;">{r.channel}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </a>
+                  ))
+                )}
+              </div>
+            </div>
+        </main>
       </div>
+      <KbFooter note={query ? `“${query}”` : 'Search'} />
     </Base>
   ) : (
     <Base title="Knowledge base not found" noindex>
-      <div class="kb-page">
-        <div style="padding:80px 40px; text-align:center;">
-          <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.03em;">Knowledge base not found</h1>
-          <p style="font-size:15px; color:#6B6F86; margin:12px 0 0;">This community hasn't set up a public knowledge base.</p>
-        </div>
+      <div class="kb-bound" style="padding:80px 40px; text-align:center;">
+        <h1 style="font-family:var(--headfont); font-weight:700; font-size:26px; letter-spacing:-0.03em;">Knowledge base not found</h1>
+        <p style="font-size:15px; color:var(--textmid); margin:12px 0 0;">This community hasn't set up a public knowledge base.</p>
       </div>
     </Base>
   )

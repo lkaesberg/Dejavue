@@ -1,5 +1,10 @@
 import { ChannelType, type Client, type ForumChannel, type Guild } from 'discord.js';
-import { childLogger, type FitSuggestion, suggestBetterChannel } from '@dejavue/core';
+import {
+  childLogger,
+  type FitSuggestion,
+  judgeWrongChannel,
+  suggestBetterChannel,
+} from '@dejavue/core';
 import {
   channelFitScores,
   channelMode,
@@ -112,7 +117,7 @@ export async function channelFitReconcile(client: Client): Promise<void> {
     const db = getDb();
     for (const guild of client.guilds.cache.values()) {
       const cfg = await getGuildConfig(db, guild.id);
-      if (!cfg?.channelFitCheck) continue;
+      if (!cfg?.channelFitCheck && !cfg?.guardEnabled) continue;
       await deleteStaleModelTopics(db, guild.id, embeddingModelId(cfg.embeddingModel));
       await ensureChannelTopics(guild, cfg);
     }
@@ -140,4 +145,36 @@ export async function checkChannelFit(
   });
   if (scores.length === 0) return null;
   return suggestBetterChannel(scores, currentChannelId, new Set(questionChannelIds(cfg)));
+}
+
+export interface ChannelAssessment {
+  /** Another channel is a clearly-better home (soft warning). */
+  suggestion: FitSuggestion | null;
+  /** The post is confidently in the *wrong* channel (guard auto-close candidate). */
+  wrong: FitSuggestion | null;
+}
+
+/**
+ * Single-pass fit assessment used by the off-topic guard: returns both the soft
+ * "better fit" suggestion and the stronger "wrong channel" verdict (tuned by the
+ * guild's guard sensitivity), from one score fetch.
+ */
+export async function assessChannel(
+  guildId: string,
+  currentChannelId: string,
+  queryVector: number[],
+  cfg: GuildConfig,
+): Promise<ChannelAssessment> {
+  const { embeddingModelId } = await import('@dejavue/ai');
+  const scores = await channelFitScores(getDb(), {
+    guildId,
+    queryVector,
+    modelId: embeddingModelId(cfg.embeddingModel),
+  });
+  if (scores.length === 0) return { suggestion: null, wrong: null };
+  const candidates = new Set(questionChannelIds(cfg));
+  return {
+    suggestion: suggestBetterChannel(scores, currentChannelId, candidates),
+    wrong: judgeWrongChannel(scores, currentChannelId, cfg.guardSensitivity, candidates),
+  };
 }
