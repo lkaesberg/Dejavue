@@ -5,6 +5,8 @@ import {
   type ThreadChannel,
 } from 'discord.js';
 import type { TranscriptMessage } from '@dejavue/db';
+import type { IngestAttachmentItem } from '@dejavue/queue';
+import { mapAttachments, queueImageRehost } from './attachments';
 
 /** True when this thread is a post inside a forum channel. */
 export function isForumThread(thread: ThreadChannel): boolean {
@@ -177,6 +179,7 @@ export async function fetchTranscript(
   max = 300,
 ): Promise<TranscriptMessage[]> {
   const collected: TranscriptMessage[] = [];
+  const images: IngestAttachmentItem[] = [];
   let before: string | undefined;
   try {
     while (collected.length < max) {
@@ -186,13 +189,16 @@ export async function fetchTranscript(
       if (batch.size === 0) break;
       for (const msg of batch.values()) {
         if (msg.author?.bot) continue;
-        const content = msg.content?.trim();
-        if (!content) continue;
+        const content = msg.content?.trim() ?? '';
+        const { attachments, images: imgs } = mapAttachments(msg.attachments.values());
+        if (!content && attachments.length === 0) continue; // nothing to keep
+        images.push(...imgs);
         collected.push({
           id: msg.id,
           authorId: msg.author.id,
           content,
           createdAt: new Date(msg.createdTimestamp).toISOString(),
+          ...(attachments.length ? { attachments } : {}),
         });
       }
       before = batch.last()?.id; // collection is newest-first, so last() is oldest
@@ -202,5 +208,7 @@ export async function fetchTranscript(
     /* best effort */
   }
   collected.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // Re-host images while their Discord urls are fresh (deduped in the worker).
+  await queueImageRehost(thread.guildId, images);
   return collected.slice(0, max);
 }

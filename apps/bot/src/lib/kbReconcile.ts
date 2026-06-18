@@ -9,6 +9,7 @@ import {
   listGuildsWithKb,
   publishExistingInChannel,
   publishExistingSolved,
+  publishExistingTracked,
 } from '@dejavue/db';
 import { enqueueEmbedThread } from '@dejavue/queue';
 import { getGuildTier, limitsFor } from './tier';
@@ -54,6 +55,15 @@ export async function kbStartupReconcile(_client: Client): Promise<void> {
       // Question channels: publish + embed solved threads only.
       published += await publishExistingSolved(db, cfg.guildId, limits.kbPageCap);
       toEmbed.push(...(await getSolvedThreadsMissingEmbedding(db, cfg.guildId, activeModelId)));
+
+      // Tracked normal channels: publish any captured-but-unpublished segments
+      // (e.g. captured while the KB was off, then turned on) + embed any missing.
+      for (const channelId of cfg.trackedChannelIds) {
+        published += await publishExistingTracked(db, cfg.guildId, channelId);
+        toEmbed.push(
+          ...(await getThreadsMissingEmbeddingInChannel(db, cfg.guildId, channelId, activeModelId)),
+        );
+      }
 
       const seen = new Set<string>();
       for (const t of toEmbed) {

@@ -281,6 +281,43 @@ export async function publishExistingInChannel(
 }
 
 /**
+ * Publish all not-yet-published *tracked-channel* segments in a channel (kind =
+ * 'channel'). Their count is already bounded at capture by `trackedDocCap`, so this
+ * just flips the publish flag — used to retroactively publish segments captured
+ * while the KB was off, then turned on (live capture + startup reconcile).
+ */
+export async function publishExistingTracked(
+  db: Database,
+  guildId: string,
+  channelId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ id: thread.id })
+    .from(thread)
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        eq(thread.channelId, channelId),
+        eq(thread.kind, 'channel'),
+        eq(thread.publishedToKb, false),
+        eq(thread.doNotPublish, false),
+        isNull(thread.duplicateOfThreadId),
+      ),
+    );
+  if (rows.length === 0) return 0;
+  await db
+    .update(thread)
+    .set({ publishedToKb: true, updatedAt: new Date() })
+    .where(
+      inArray(
+        thread.id,
+        rows.map((r) => r.id),
+      ),
+    );
+  return rows.length;
+}
+
+/**
  * Number of threads that occupy a KB page against the tier cap. Must mirror
  * getPublishedThreads' filter — a folded or do-not-publish thread isn't a visible
  * page, so it must not consume the cap.

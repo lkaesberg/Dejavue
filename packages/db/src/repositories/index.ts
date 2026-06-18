@@ -11,3 +11,4 @@ export * from './faq';
 export * from './kb';
 export * from './nudges';
 export * from './channelTopics';
+export * from './attachments';

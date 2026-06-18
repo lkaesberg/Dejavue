@@ -11,7 +11,8 @@ import {
   type TranscriptMessage,
   upsertThread,
 } from '@dejavue/db';
-import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
+import { enqueueEmbedThread, enqueueRevalidateKb, type IngestAttachmentItem } from '@dejavue/queue';
+import { mapAttachments, queueImageRehost } from './attachments';
 import { isReembedDue } from './knowledge';
 import { getGuildTier, limitsFor } from './tier';
 
@@ -50,26 +51,32 @@ export function scheduleTrackedCapture(channel: TrackedChannel): void {
   timer.unref();
 }
 
-async function fetchRecent(channel: TrackedChannel): Promise<SegMsg[]> {
+async function fetchRecent(
+  channel: TrackedChannel,
+): Promise<{ messages: SegMsg[]; images: IngestAttachmentItem[] }> {
   const out: SegMsg[] = [];
+  const images: IngestAttachmentItem[] = [];
   try {
     const batch = await channel.messages.fetch({ limit: FETCH_LIMIT });
     for (const m of batch.values()) {
       if (m.author?.bot) continue;
-      const content = m.content?.trim();
-      if (!content) continue;
+      const content = m.content?.trim() ?? '';
+      const { attachments, images: imgs } = mapAttachments(m.attachments.values());
+      if (!content && attachments.length === 0) continue;
+      images.push(...imgs);
       out.push({
         messageId: m.id,
         authorId: m.author.id,
         content,
         createdAt: new Date(m.createdTimestamp).toISOString(),
+        ...(attachments.length ? { attachments } : {}),
       });
     }
   } catch {
     /* best effort */
   }
   out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return out;
+  return { messages: out, images };
 }
 
 function segmentByGap(msgs: SegMsg[]): SegMsg[][] {
@@ -95,8 +102,14 @@ function titleOf(seg: SegMsg[]): string {
   return first.length > 120 ? `${first.slice(0, 117)}…` : first;
 }
 
-const stripIds = (seg: SegMsg[]): TranscriptMessage[] =>
-  seg.map(({ authorId, content, createdAt }) => ({ authorId, content, createdAt }));
+const toTranscript = (seg: SegMsg[]): TranscriptMessage[] =>
+  seg.map(({ messageId, authorId, content, createdAt, attachments }) => ({
+    id: messageId,
+    authorId,
+    content,
+    createdAt,
+    ...(attachments?.length ? { attachments } : {}),
+  }));
 
 async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
   const db = getDb();
@@ -106,7 +119,10 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
   if (!cfg.trackedChannelIds.includes(channel.id)) return;
   const limits = limitsFor(await getGuildTier(guildId));
 
-  const segments = segmentByGap(await fetchRecent(channel)).filter((s) => s.length >= MIN_SEGMENT_MSGS);
+  const { messages, images } = await fetchRecent(channel);
+  // Re-host images while their Discord urls are fresh (deduped in the worker).
+  await queueImageRehost(guildId, images);
+  const segments = segmentByGap(messages).filter((s) => s.length >= MIN_SEGMENT_MSGS);
   if (segments.length === 0) return;
 
   for (const seg of segments) {
@@ -143,7 +159,7 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
     }
 
     // The KB page must always show every message: re-capture the segment each run.
-    await setTranscript(db, row.id, stripIds(seg)).catch(() => undefined);
+    await setTranscript(db, row.id, toTranscript(seg)).catch(() => undefined);
 
     // Re-index for search on the quadrupling backoff (frequent while the segment is
     // small, rare once it's large and the topic has settled).

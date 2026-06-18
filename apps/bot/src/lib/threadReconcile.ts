@@ -7,11 +7,16 @@ import {
   getGuildConfig,
   listChannelIdsForGuild,
   listThreadIdsByChannel,
+  listThreadLabelsByChannel,
   setChannelGuidelines,
+  setThreadLabels,
   updateChannelName,
   updateGuildConfig,
 } from '@dejavue/db';
-import { ensureForumTags } from './forum';
+import { ensureForumTags, forumParent, threadLabels } from './forum';
+
+const sameLabels = (a: string[], b: string[]): boolean =>
+  a.length === b.length && [...a].sort().join(' ') === [...b].sort().join(' ');
 
 const log = childLogger({ mod: 'thread-reconcile' });
 
@@ -50,11 +55,14 @@ async function reconcileGuild(guild: Guild): Promise<void> {
   // channel that was deleted and already dropped from config (delete-and-recreate).
   const candidates = new Set<string>([
     ...cfg.forumChannelIds,
+    ...cfg.trackedChannelIds,
     ...(await listChannelIdsForGuild(db, guild.id)),
   ]);
 
+  const trackedNormal = new Set(cfg.trackedChannelIds);
   let configChanged = false;
   let forumChannelIds = [...cfg.forumChannelIds];
+  let trackedChannelIds = [...cfg.trackedChannelIds];
   const channelModes = { ...(cfg.channelModes ?? {}) };
 
   for (const channelId of candidates) {
@@ -68,7 +76,11 @@ async function reconcileGuild(guild: Guild): Promise<void> {
         delete channelModes[channelId];
         configChanged = true;
       }
-      if (removed > 0 || tracked.has(channelId)) {
+      if (trackedNormal.has(channelId)) {
+        trackedChannelIds = trackedChannelIds.filter((id) => id !== channelId);
+        configChanged = true;
+      }
+      if (removed > 0 || tracked.has(channelId) || trackedNormal.has(channelId)) {
         log.info({ guildId: guild.id, channelId, removed }, 'reconcile: purged deleted channel');
       }
       continue;
@@ -76,7 +88,25 @@ async function reconcileGuild(guild: Guild): Promise<void> {
 
     // Channel exists. Only prune threads for channels we actively monitor; an
     // existing-but-untracked channel keeps its archived answers (untrack semantics).
-    if (!tracked.has(channelId)) continue;
+    if (!tracked.has(channelId)) {
+      // Tracked normal (text/announcement) channel: heal its name + description so
+      // the KB reflects an offline rename. No tags or per-thread checks here.
+      if (trackedNormal.has(channelId)) {
+        try {
+          const ch = await guild.channels.fetch(channelId);
+          if (
+            ch &&
+            (ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildAnnouncement)
+          ) {
+            await updateChannelName(db, guild.id, channelId, ch.name);
+            await setChannelGuidelines(db, guild.id, channelId, ch.topic ?? null);
+          }
+        } catch {
+          /* best effort */
+        }
+      }
+      continue;
+    }
 
     // Keep tags, the channel name, and post-guidelines current on tracked forums
     // (heals renames / guideline edits that happened while we were offline).
@@ -93,7 +123,12 @@ async function reconcileGuild(guild: Guild): Promise<void> {
 
     // Verify each indexed thread individually — a thread is deleted ONLY on its
     // own 10003, so a partial/failed listing can never mass-prune a live channel.
+    // We fetch each thread once and reuse that fetch to also heal custom labels
+    // (forum tags) edited while the bot was offline.
     const dbIds = await listThreadIdsByChannel(db, guild.id, channelId);
+    const storedLabels = new Map(
+      (await listThreadLabelsByChannel(db, guild.id, channelId)).map((r) => [r.threadId, r.labels]),
+    );
     const stale: string[] = [];
     let checked = 0;
     for (const threadId of dbIds) {
@@ -102,7 +137,23 @@ async function reconcileGuild(guild: Guild): Promise<void> {
         break;
       }
       checked++;
-      if ((await existence(guild, threadId)) === 'missing') stale.push(threadId);
+      let ch;
+      try {
+        ch = await guild.client.channels.fetch(threadId);
+      } catch (err) {
+        // Delete ONLY on a definitive Unknown Channel; every other error is transient.
+        if (err instanceof DiscordAPIError && Number(err.code) === UNKNOWN_CHANNEL) stale.push(threadId);
+        continue;
+      }
+      if (!ch || !ch.isThread()) continue;
+      // Heal labels — only when the forum parent resolves, so a missing parent can't
+      // wrongly clear a thread's labels to empty.
+      if (forumParent(ch)) {
+        const after = threadLabels(ch);
+        if (!sameLabels(storedLabels.get(threadId) ?? [], after)) {
+          await setThreadLabels(db, guild.id, threadId, after).catch(() => undefined);
+        }
+      }
     }
     if (stale.length > 0) {
       const removed = await deleteThreadsByDiscordIds(db, guild.id, stale);
@@ -111,7 +162,7 @@ async function reconcileGuild(guild: Guild): Promise<void> {
   }
 
   if (configChanged) {
-    await updateGuildConfig(db, guild.id, { forumChannelIds, channelModes });
+    await updateGuildConfig(db, guild.id, { forumChannelIds, trackedChannelIds, channelModes });
   }
 }
 

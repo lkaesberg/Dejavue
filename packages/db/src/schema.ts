@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -13,12 +14,34 @@ import {
   vector,
 } from 'drizzle-orm/pg-core';
 
+/** Postgres bytea ⇄ Node Buffer, for re-hosted attachment bytes. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
+
 /**
  * Embedding dimensionality. Both supported CPU models (bge-small-en-v1.5 and
  * multilingual-e5-small) are 384-dim, so model swaps never touch the schema.
  * Changing this is a destructive migration (reindex + re-embed).
  */
 export const EMBEDDING_DIM = 384;
+
+/** An attachment reference stored on a transcript message. */
+export interface TranscriptAttachment {
+  /** Discord attachment id — for images, also the key into the `attachment` table (/a/<id>). */
+  id: string;
+  name: string;
+  /** image → re-hosted (served from /a/<id>); video/file → linked out to `url`. */
+  kind: 'image' | 'video' | 'file';
+  contentType?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  /** Discord CDN url, kept only for video/file chips that link out (images use /a/<id>). */
+  url?: string;
+}
 
 /** One human message in a thread's archived transcript (bot messages excluded). */
 export interface TranscriptMessage {
@@ -27,6 +50,8 @@ export interface TranscriptMessage {
   authorId: string;
   content: string;
   createdAt: string;
+  /** Images/files posted with the message, re-hosted and served from /a/<id>. */
+  attachments?: TranscriptAttachment[];
 }
 
 /** Public KB appearance, set by the admin via `/dejavue customize` (Plus+). */
@@ -368,6 +393,25 @@ export const backfillJob = pgTable(
   (t) => [index('backfill_guild_status_idx').on(t.guildId, t.status)],
 );
 
+// ---------------------------------------------------------------------------
+// Re-hosted attachments — bytes for images/files posted in tracked threads, so the
+// public KB keeps showing them after Discord's signed CDN URLs expire. Keyed by the
+// Discord attachment id; scoped by guild so the serve route never crosses tenants.
+// ---------------------------------------------------------------------------
+export const attachment = pgTable(
+  'attachment',
+  {
+    id: text('id').primaryKey(), // Discord attachment id
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    contentType: text('content_type'),
+    size: integer('size'),
+    data: bytea('data').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('attachment_guild_idx').on(t.guildId)],
+);
+
 export type GuildConfig = typeof guildConfig.$inferSelect;
 export type NewGuildConfig = typeof guildConfig.$inferInsert;
 export type Entitlement = typeof entitlement.$inferSelect;
@@ -382,3 +426,5 @@ export type GenerationEvent = typeof generationEvent.$inferSelect;
 export type FaqEntry = typeof faqEntry.$inferSelect;
 export type KnowledgeGapCluster = typeof knowledgeGapCluster.$inferSelect;
 export type BackfillJob = typeof backfillJob.$inferSelect;
+export type Attachment = typeof attachment.$inferSelect;
+export type NewAttachment = typeof attachment.$inferInsert;

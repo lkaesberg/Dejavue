@@ -95,6 +95,8 @@ const fmtTime = (d: string): string =>
   new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const fmtDate = (d: Date | string | null | undefined): string =>
   d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+const fmtBytes = (n: number | undefined): string =>
+  !n ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
 const jsonLd = thread
   ? {
@@ -198,8 +200,10 @@ const jsonLd = thread
                 <div id="kb-msgs" style="display:flex; flex-direction:column; gap:18px; margin-top:18px;">
                   {transcript.map((m) => {
                     const accepted = !!m.id && m.id === acceptedMessageId;
+                    const atts = m.attachments ?? [];
+                    const filterText = [m.content, ...atts.map((a) => a.name)].join(' ').toLowerCase();
                     return (
-                      <div class="kb-msg" data-msg={m.content.toLowerCase()} style="display:flex; gap:13px;">
+                      <div class="kb-msg" data-msg={filterText} style="display:flex; gap:13px;">
                         <div style={`width:34px; height:34px; border-radius:50%; background:${avatarOf(m.authorId).bg}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>{avatarOf(m.authorId).initial}</div>
                         <div style="flex:1; min-width:0;">
                           <div style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">
@@ -209,7 +213,38 @@ const jsonLd = thread
                               <span style="display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:#0F9B82; background:#E6FAF5; padding:2px 8px; border-radius:999px;">✓ Accepted answer</span>
                             )}
                           </div>
-                          <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`}>{m.content}</div>
+                          {m.content && (
+                            <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`}>{m.content}</div>
+                          )}
+                          {atts.length > 0 && (
+                            <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+                              {atts.map((a) =>
+                                a.kind === 'image' ? (
+                                  <a href={`/a/${a.id}`} target="_blank" rel="noopener">
+                                    <img
+                                      class="kb-att-img"
+                                      src={`/a/${a.id}`}
+                                      data-fb={a.url ?? ''}
+                                      alt={a.name}
+                                      loading="lazy"
+                                      style="max-width:min(100%,460px); height:auto; border-radius:var(--radsm); border:1px solid var(--border); display:block;"
+                                    />
+                                  </a>
+                                ) : (
+                                  <a
+                                    href={a.url ?? '#'}
+                                    target="_blank"
+                                    rel="noopener"
+                                    style="display:inline-flex; align-items:center; gap:9px; width:fit-content; max-width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radsm); padding:9px 13px; font-size:13px; color:var(--text);"
+                                  >
+                                    <span style="font-size:15px;">{a.kind === 'video' ? '▶' : '📎'}</span>
+                                    <span style="font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">{a.name}</span>
+                                    {a.size ? <span style="color:var(--textmut); font-size:12px; white-space:nowrap;">{fmtBytes(a.size)}</span> : null}
+                                  </a>
+                                ),
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -284,6 +319,12 @@ const jsonLd = thread
       {transcript.length > 0 && (
         <script is:inline>
           (function () {
+            // If a re-hosted image 404s (re-host failed), fall back to the Discord url.
+            document.querySelectorAll('img.kb-att-img').forEach(function (img) {
+              var fb = function () { img.onerror = null; if (img.dataset.fb) img.src = img.dataset.fb; };
+              img.onerror = fb;
+              if (img.complete && img.naturalWidth === 0) fb();
+            });
             var input = document.getElementById('kb-msg-filter');
             if (!input) return;
             var list = document.getElementById('kb-msgs');

@@ -4,6 +4,7 @@ import {
   type BackfillForumJob,
   type ClusterGapsJob,
   type EmbedThreadJob,
+  type IngestAttachmentJob,
   QUEUES,
   type QueueName,
   type RegenFaqJob,
@@ -51,6 +52,23 @@ export async function enqueueBackfill(job: BackfillForumJob): Promise<void> {
 export async function enqueueRevalidateKb(job: RevalidateKbJob): Promise<void> {
   const boss = await startBoss();
   await boss.send(QUEUES.REVALIDATE_KB, job, { singletonKey: `${job.guildId}:${job.threadId}` });
+}
+
+export async function enqueueIngestAttachment(job: IngestAttachmentJob): Promise<void> {
+  if (job.items.length === 0) return;
+  const boss = await startBoss();
+  // One short job per attachment: keeps any single job well under pg-boss's expiry
+  // (a serial batch of many downloads could time out), and singletonKey collapses
+  // duplicate enqueues of the same attachment from repeated re-archival.
+  await Promise.all(
+    job.items.map((item) =>
+      boss.send(
+        QUEUES.INGEST_ATTACHMENT,
+        { guildId: job.guildId, items: [item] },
+        { singletonKey: `att:${item.id}` },
+      ),
+    ),
+  );
 }
 
 // --------------------------------------------------------------------------

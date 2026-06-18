@@ -308,6 +308,18 @@ export async function listThreadIdsByChannel(
   return rows.map((r) => r.threadId);
 }
 
+/** Each indexed thread's stored labels in a channel (to heal offline tag edits on boot). */
+export async function listThreadLabelsByChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+): Promise<{ threadId: string; labels: string[] }[]> {
+  return db
+    .select({ threadId: thread.threadId, labels: thread.labels })
+    .from(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)));
+}
+
 /** Keep the denormalized channel name on threads current after a forum rename. */
 export async function updateChannelName(
   db: Database,

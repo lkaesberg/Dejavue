@@ -96,6 +96,9 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
 
   packages/ai:
     dependencies:

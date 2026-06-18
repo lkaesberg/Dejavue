@@ -4,6 +4,7 @@ import {
   type BackfillForumJob,
   type ClusterGapsJob,
   type EmbedThreadJob,
+  type IngestAttachmentJob,
   type NudgeStaleJob,
   QUEUES,
   type RegenFaqJob,
@@ -17,6 +18,7 @@ import {
 import { handleBackfillForum } from './jobs/backfillForum';
 import { handleClusterGaps } from './jobs/clusterGaps';
 import { handleEmbedThread } from './jobs/embedThread';
+import { handleIngestAttachment } from './jobs/ingestAttachment';
 import { handleNudgeStale } from './jobs/nudgeStale';
 import { handleRegenFaq } from './jobs/regenFaq';
 import { handleRevalidateKb } from './jobs/revalidateKb';
@@ -32,6 +34,7 @@ async function main(): Promise<void> {
   await work<RegenFaqJob>(QUEUES.REGEN_FAQ, handleRegenFaq);
   await work<NudgeStaleJob>(QUEUES.NUDGE_STALE, handleNudgeStale);
   await work<RevalidateKbJob>(QUEUES.REVALIDATE_KB, handleRevalidateKb);
+  await work<IngestAttachmentJob>(QUEUES.INGEST_ATTACHMENT, handleIngestAttachment);
   // Backfill is long-running; cap concurrency to 1 to be gentle on Discord REST.
   await work<BackfillForumJob>(QUEUES.BACKFILL_FORUM, handleBackfillForum, { batchSize: 1 });
 

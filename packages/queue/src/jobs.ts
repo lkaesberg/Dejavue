@@ -16,6 +16,8 @@ export const QUEUES = {
   BACKFILL_FORUM: 'backfill-forum',
   /** Revalidate a public KB page after solve / edit / unsolve / delete. */
   REVALIDATE_KB: 'revalidate-kb',
+  /** Download + re-host message attachments while the Discord CDN url is still fresh. */
+  INGEST_ATTACHMENT: 'ingest-attachment',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -57,4 +59,18 @@ export interface RevalidateKbJob {
   guildId: string;
   threadId: string;
   action: 'publish' | 'unpublish';
+}
+
+/** One attachment to re-host (the Discord url is fresh at enqueue time). */
+export interface IngestAttachmentItem {
+  id: string;
+  url: string;
+  name: string;
+  contentType?: string | null;
+  size?: number | null;
+}
+
+export interface IngestAttachmentJob {
+  guildId: string;
+  items: IngestAttachmentItem[];
 }

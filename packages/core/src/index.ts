@@ -6,3 +6,4 @@ export * from './logger';
 export * from './cluster';
 export * from './channelFit';
 export * from './passphrase';
+export * from './media';

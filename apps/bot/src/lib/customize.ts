@@ -29,6 +29,7 @@ import {
   type KbImprint,
   type KbTheme,
   publishExistingSolved,
+  publishExistingTracked,
   updateGuildConfig,
 } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
@@ -319,6 +320,10 @@ export async function handleCustomizeButton(interaction: ButtonInteraction): Pro
       await publishExistingSolved(db, guildId, limits.kbPageCap).catch((err) =>
         log.warn({ err, guildId }, 'publish-existing on enable failed'),
       );
+      // Also publish any already-captured tracked-channel segments.
+      for (const channelId of cfg.trackedChannelIds) {
+        await publishExistingTracked(db, guildId, channelId).catch(() => undefined);
+      }
     }
     await enqueueRevalidateKb({ guildId, threadId: 'all', action: next ? 'publish' : 'unpublish' }).catch(
       () => undefined,
