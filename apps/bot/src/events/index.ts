@@ -11,6 +11,7 @@ import { onInteraction } from './interactionCreate';
 import { onMessageCreate } from './messageCreate';
 import { onThreadCreate } from './threadCreate';
 import { onThreadDelete } from './threadDelete';
+import { onThreadUpdate } from './threadUpdate';
 
 const RECONCILE_INTERVAL_MS = 60 * 60 * 1000;
 const DELETION_RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -33,6 +34,9 @@ export function registerEvents(client: Client): void {
 
   client.on(Events.ThreadCreate, (thread, newlyCreated) => {
     void onThreadCreate(thread, newlyCreated);
+  });
+  client.on(Events.ThreadUpdate, (oldThread, newThread) => {
+    void onThreadUpdate(oldThread, newThread);
   });
   client.on(Events.ThreadDelete, (thread) => {
     void onThreadDelete(thread);
