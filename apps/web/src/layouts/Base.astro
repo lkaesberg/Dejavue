@@ -4,7 +4,7 @@
 // each set their own inner max-width, while content sits in a 1120/1180 bound. CSS
 // custom properties are emitted from the tenant's `/dejavue customize` settings
 // (see lib/theme.ts), so the whole site re-skins per guild.
-import { themeVars } from '../lib/theme';
+import { ACCENTS, brandInitial, brandOf, themeVars } from '../lib/theme';
 
 interface Props {
   title: string;
@@ -13,11 +13,27 @@ interface Props {
   noindex?: boolean;
 }
 const { title, description, canonical, noindex } = Astro.props;
-const vars = themeVars(Astro.locals.cfg);
+const cfg = Astro.locals.cfg;
+const vars = themeVars(cfg);
+
+// Favicon = the KB's logo. With no uploaded logo, fall back to a branded square (accent
+// gradient + brand initial) that matches the nav's logo placeholder.
+const xmlEscape = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const ac = ACCENTS[cfg?.kbAccent ?? 'indigo'] ?? ACCENTS.indigo!;
+const initial = xmlEscape(brandInitial(brandOf(cfg, Astro.locals.tenant?.slug ?? undefined)));
+const faviconSvg =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+  `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${ac.a}"/><stop offset="1" stop-color="${ac.b}"/></linearGradient></defs>` +
+  '<rect width="64" height="64" rx="14" fill="url(#g)"/>' +
+  `<text x="32" y="34" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="34" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="central">${initial}</text>` +
+  '</svg>';
+const faviconHref = cfg?.kbLogoUrl ?? `data:image/svg+xml,${encodeURIComponent(faviconSvg)}`;
 
 const css = `
   *, *::before, *::after { box-sizing: border-box; }
   body.kb-theme { ${vars}; margin:0; width:100%; overflow-x:hidden; min-height:100vh;
+    display:flex; flex-direction:column;
     font-family:'Inter', system-ui, sans-serif; color:var(--text); background:var(--bg); }
   body.kb-theme a { color: inherit; text-decoration: none; }
   input { font-family: inherit; }
@@ -25,7 +41,9 @@ const css = `
 
   /* Full-bleed bars with a shared inner bound. */
   .kb-header { position:sticky; top:0; z-index:50; background:var(--bg); border-bottom:1px solid var(--border); }
-  .kb-foot { border-top:1px solid var(--border); background:var(--footerbg); margin-top:8px; }
+  /* margin-top:auto makes the footer (the last flex child of the column body) stick to
+     the bottom on short pages, and sit flush after content on long ones. */
+  .kb-foot { border-top:1px solid var(--border); background:var(--footerbg); margin-top:auto; }
   .kb-bound { max-width:1180px; margin:0 auto; padding-left:clamp(18px,4vw,36px); padding-right:clamp(18px,4vw,36px); }
 
   /* Home: full-bleed hero + bounded content. */
@@ -56,6 +74,7 @@ const css = `
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <link rel="icon" href={faviconHref} />
     {description && <meta name="description" content={description} />}
     {canonical && <link rel="canonical" href={canonical} />}
     {noindex && <meta name="robots" content="noindex" />}

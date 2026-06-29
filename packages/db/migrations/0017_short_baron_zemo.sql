@@ -1,0 +1,1 @@
+ALTER TABLE "guild_config" ADD COLUMN "dedup_sensitivity" text DEFAULT 'medium' NOT NULL;

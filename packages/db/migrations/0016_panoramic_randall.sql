@@ -1,0 +1,1 @@
+ALTER TABLE "guild_config" ALTER COLUMN "kb_publish_opt_in" SET DEFAULT true;

@@ -71,11 +71,11 @@ describe('deriveTier', () => {
 });
 
 describe('tierLimits', () => {
-  it('caps the public KB at 10 / 100 / 500 / unlimited', () => {
-    expect(tierLimits('free').kbPageCap).toBe(10);
-    expect(tierLimits('plus').kbPageCap).toBe(100);
-    expect(tierLimits('pro').kbPageCap).toBe(500);
-    expect(tierLimits('max').kbPageCap).toBe(Number.POSITIVE_INFINITY);
+  it('caps the total index at 300 / 3k / 30k / unlimited messages', () => {
+    expect(tierLimits('free').indexCap).toBe(300);
+    expect(tierLimits('plus').indexCap).toBe(3_000);
+    expect(tierLimits('pro').indexCap).toBe(30_000);
+    expect(tierLimits('max').indexCap).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('caps forum channels at 1 / 3 / 5 / unlimited', () => {
@@ -85,24 +85,15 @@ describe('tierLimits', () => {
     expect(tierLimits('max').maxForumChannels).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('caps the searchable archive at 500 / 1,500 / 2,500 / unlimited', () => {
-    expect(tierLimits('free').archiveCap).toBe(500);
-    expect(tierLimits('plus').archiveCap).toBe(1500);
-    expect(tierLimits('pro').archiveCap).toBe(2500);
-    expect(tierLimits('max').archiveCap).toBe(Number.POSITIVE_INFINITY);
-  });
-
   it('reserves unlimited caps for max only', () => {
     for (const t of ['free', 'plus', 'pro'] as const) {
       const l = tierLimits(t);
       expect(Number.isFinite(l.maxForumChannels)).toBe(true);
-      expect(Number.isFinite(l.archiveCap)).toBe(true);
-      expect(Number.isFinite(l.kbPageCap)).toBe(true);
+      expect(Number.isFinite(l.indexCap)).toBe(true);
     }
     const max = tierLimits('max');
     expect(max.maxForumChannels).toBe(Number.POSITIVE_INFINITY);
-    expect(max.archiveCap).toBe(Number.POSITIVE_INFINITY);
-    expect(max.kbPageCap).toBe(Number.POSITIVE_INFINITY);
+    expect(max.indexCap).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('reserves MCP for the max tier only', () => {

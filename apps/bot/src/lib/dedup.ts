@@ -24,9 +24,11 @@ import { getGuildTier, limitsFor } from './tier';
 const log = childLogger({ mod: 'dedup' });
 
 const DEBOUNCE_MS = 4000;
-// bge-small cosine for genuine paraphrases sits ~0.65–0.85, so keep the bar
-// modest enough to catch reworded duplicates without flagging unrelated posts.
-const SEMANTIC_MIN_SIMILARITY = 0.72;
+// How readily to flag a reworded post as a duplicate, by the guild's chosen
+// sensitivity (/dejavue settings). bge-small cosine for genuine paraphrases sits
+// ~0.65–0.85: 'low' only catches near-identical reposts, 'high' flags loosely-related
+// ones too, 'medium' (default) is the balanced bar.
+const DEDUP_THRESHOLDS = { low: 0.8, medium: 0.65, high: 0.5 } as const;
 
 /** Threads we've already scheduled, so threadCreate + messageCreate collapse to one run. */
 const scheduled = new Set<string>();
@@ -170,7 +172,7 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
       guildId,
       queryVector,
       limit: 3,
-      minSimilarity: SEMANTIC_MIN_SIMILARITY,
+      minSimilarity: DEDUP_THRESHOLDS[cfg?.dedupSensitivity ?? 'medium'],
       excludeThreadId: thread.id,
       modelId: embeddingModelId(cfg?.embeddingModel),
     });

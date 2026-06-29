@@ -1,36 +1,57 @@
 import type { ThreadChannel } from 'discord.js';
+import { embedContentHash } from '@dejavue/ai';
 import { childLogger } from '@dejavue/core';
 import {
   channelMode,
-  countPublished,
+  countIndexedMessagesInChannel,
+  ensureChannelSync,
   ensureGuildConfig,
   getDb,
+  getThreadByDiscordId,
+  markChannelStale,
+  markChannelSynced,
   setLastEmbedMsgCount,
   setPublished,
   setThreadLabels,
   setTranscript,
+  type TranscriptMessage,
   upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
 import { fetchStarterWithRetry, fetchTranscript, forumParent, threadLabels } from './forum';
-import { getGuildTier, limitsFor } from './tier';
+import { atIndexCap } from './tier';
 
 const log = childLogger({ mod: 'knowledge' });
 
 const DEBOUNCE_MS = 4000;
 // The KB *page* always shows the full chat log (we re-capture the transcript on
-// every message). EMBEDDING for search is what's throttled: re-embed often while a
-// thread is small (the topic is still forming), then exponentially rarer as it grows
-// and settles — on a quadrupling schedule keyed off the message count (~1, 4, 16, 64,
-// …), stopping past the cap. Growth factor 4 = whole-thread coverage, ~half the scans
-// of plain doubling.
+// every message). EMBEDDING for search re-runs whenever the embed-source text changes
+// (an edit/delete/answer change — see embedContentHash) and, while a thread is still
+// forming, on a quadrupling growth schedule keyed off the message count (~1, 4, 16, 64,
+// …) so a long, settled thread isn't re-scanned on every reply.
 const REEMBED_GROWTH = 4;
 const REEMBED_MAX_MESSAGES = 256;
 
-/** Is this thread due for a (re-)embed given the count at its last embed? */
-export function isReembedDue(currentCount: number, lastEmbedCount: number | null): boolean {
+/**
+ * Is this thread due for a (re-)embed?
+ *
+ * Growth follows a backoff: re-embed on the first index, then progressively rarer as the
+ * thread grows (~1, 4, 16, 64, …), stopping once it's settled — so an active thread isn't
+ * re-embedded on every message.
+ *
+ * Edits/deletes still propagate: when the embed-source text changed (`hashDirty`) WITHOUT
+ * the thread growing (count didn't increase — a message was edited or removed), we
+ * re-embed immediately regardless of the backoff. Pure growth never trips this branch, so
+ * it stays on the backoff cadence.
+ */
+export function isReembedDue(
+  currentCount: number,
+  lastEmbedCount: number | null,
+  hashDirty = false,
+): boolean {
   const last = lastEmbedCount ?? 0;
   if (last <= 0) return true; // never embedded → always index the first time
+  if (hashDirty && currentCount <= last) return true; // in-place change (edit/delete)
   if (last >= REEMBED_MAX_MESSAGES) return false; // settled → stop re-scanning
   return currentCount >= last * REEMBED_GROWTH; // only after the count has quadrupled
 }
@@ -39,10 +60,10 @@ export function isReembedDue(currentCount: number, lastEmbedCount: number | null
 const scheduled = new Set<string>();
 
 /**
- * Knowledge channels are a pure archive: every new thread is captured, indexed,
- * and (opt-in) published to the public KB — no unsolved tag, control message, or
- * duplicate reminder. Debounced + idempotent-by-thread-id like dedup, so the
- * starter message has time to arrive and both event triggers collapse to one run.
+ * Knowledge channels are a pure archive: every new thread is captured, indexed, and
+ * published to the public KB — no unsolved tag, control message, or duplicate
+ * reminder. Debounced + idempotent-by-thread-id so the starter message has time to
+ * arrive and both event triggers collapse to one run.
  */
 export function scheduleKnowledgeArchive(thread: ThreadChannel): void {
   if (scheduled.has(thread.id)) return;
@@ -65,6 +86,13 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
   // The channel's mode could have changed during the debounce window.
   if (channelMode(cfg, forum.id) !== 'knowledge') return;
 
+  const existing = await getThreadByDiscordId(db, guildId, thread.id);
+  // Stop indexing NEW threads once at the unified index cap (existing keep updating).
+  if (!existing && (await atIndexCap(guildId))) {
+    await markChannelStale(db, guildId, forum.id, 'forum', 'cap');
+    return;
+  }
+
   const body = await fetchStarterWithRetry(thread);
   const row = await upsertThread(db, {
     guildId,
@@ -77,17 +105,12 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
     status: 'open',
   });
 
-  // Publish to the public KB (opt-in + page cap). This runs on every archive,
-  // independent of the re-embed backoff below, so a thread is published promptly
-  // once the guild opts in or the page cap frees up — even between re-embed
-  // checkpoints. Skipped when already published (idempotent, avoids re-revalidating).
-  if (cfg.kbPublishOptIn && !row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
+  // Everything indexed is auto-published (the public site itself is gated by
+  // kbPublishOptIn + passphrase, but the row is always marked published).
+  if (!row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
     try {
-      const limits = limitsFor(await getGuildTier(guildId));
-      if ((await countPublished(db, guildId)) < limits.kbPageCap) {
-        await setPublished(db, guildId, thread.id, true);
-        await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });
-      }
+      await setPublished(db, guildId, thread.id, true);
+      await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });
     } catch (err) {
       log.warn({ err, threadId: thread.id }, 'failed to publish knowledge thread');
     }
@@ -95,35 +118,50 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
 
   // The KB page must always show every message: re-capture the full transcript on
   // each new message (the 4s debounce collapses bursts so this isn't per-keystroke).
+  let captured: TranscriptMessage[] = [];
   try {
-    const transcript = await fetchTranscript(thread);
-    if (transcript.length > 0) await setTranscript(db, row.id, transcript);
+    captured = await fetchTranscript(thread);
+    if (captured.length > 0) await setTranscript(db, row.id, captured);
   } catch (err) {
     log.warn({ err, threadId: thread.id }, 'failed to capture knowledge transcript');
   }
   // Keep custom forum labels current for the KB + filtering.
   await setThreadLabels(db, guildId, thread.id, threadLabels(thread)).catch(() => undefined);
 
-  // Re-index for search/MCP on the quadrupling backoff (frequent while small, rare
-  // once the topic settles) — the embedding barely changes per added reply, so we
-  // don't pay to re-embed on every message even though the transcript above does update.
-  const msgCount = thread.totalMessageSent ?? thread.messageCount ?? 0;
-  if (!isReembedDue(msgCount, row.lastEmbedMsgCount)) return;
-  let embedQueued = false;
-  try {
-    await enqueueEmbedThread({
-      threadRowId: row.id,
-      guildId,
-      modelId: cfg.embeddingModel,
-      title: row.title,
-      question: row.questionBody,
-      answer: null,
-    });
-    embedQueued = true;
-  } catch (err) {
-    log.warn({ err, threadId: thread.id }, 'failed to enqueue knowledge embed');
+  // Re-index for search/MCP when the embed-source text changed (edit/delete) or on the
+  // growth backoff. If the capture failed, compare against the stored transcript so a
+  // transient empty read doesn't look like a content change.
+  const transcript = captured.length > 0 ? captured : (row.transcript ?? []);
+  // Count from the captured human messages (decreases on delete, so the edit/delete
+  // branch in isReembedDue fires), not the lifetime totalMessageSent.
+  const msgCount = transcript.length;
+  const dirty =
+    row.embedContentHash !==
+    embedContentHash({ title: row.title, questionBody: row.questionBody, transcript });
+  if (isReembedDue(msgCount, row.lastEmbedMsgCount, dirty)) {
+    let embedQueued = false;
+    try {
+      await enqueueEmbedThread({
+        threadRowId: row.id,
+        guildId,
+        modelId: cfg.embeddingModel,
+        title: row.title,
+        question: row.questionBody,
+        answer: null,
+      });
+      embedQueued = true;
+    } catch (err) {
+      log.warn({ err, threadId: thread.id }, 'failed to enqueue knowledge embed');
+    }
+    // Advance the watermark only when an embed was actually enqueued (so a brief queue
+    // outage doesn't strand new content unindexed until the count quadruples again).
+    if (embedQueued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
   }
-  // Advance the watermark only when an embed was actually enqueued (so a brief queue
-  // outage doesn't strand new content unindexed until the count quadruples again).
-  if (embedQueued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
+
+  // Keep per-channel freshness current for the /dejavue setup hub (don't clobber a reindex).
+  const sync = await ensureChannelSync(db, guildId, forum.id, 'forum');
+  if (sync.state !== 'reindexing') {
+    const count = await countIndexedMessagesInChannel(db, guildId, forum.id);
+    await markChannelSynced(db, guildId, forum.id, 'forum', null, count);
+  }
 }

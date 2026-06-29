@@ -8,6 +8,7 @@ import {
   type NudgeStaleJob,
   QUEUES,
   type RegenFaqJob,
+  type ReindexChannelJob,
   type RevalidateKbJob,
   schedule,
   startBoss,
@@ -21,6 +22,7 @@ import { handleEmbedThread } from './jobs/embedThread';
 import { handleIngestAttachment } from './jobs/ingestAttachment';
 import { handleNudgeStale } from './jobs/nudgeStale';
 import { handleRegenFaq } from './jobs/regenFaq';
+import { handleReindexChannel } from './jobs/reindexChannel';
 import { handleRevalidateKb } from './jobs/revalidateKb';
 import { handleSummarizeThread } from './jobs/summarizeThread';
 
@@ -37,6 +39,8 @@ async function main(): Promise<void> {
   await work<IngestAttachmentJob>(QUEUES.INGEST_ATTACHMENT, handleIngestAttachment);
   // Backfill is long-running; cap concurrency to 1 to be gentle on Discord REST.
   await work<BackfillForumJob>(QUEUES.BACKFILL_FORUM, handleBackfillForum, { batchSize: 1 });
+  // Reindex is also long-running (paginates full history + re-embeds); same cap.
+  await work<ReindexChannelJob>(QUEUES.REINDEX_CHANNEL, handleReindexChannel, { batchSize: 1 });
 
   // Hourly stale-question sweep (Plus+). Other generative jobs are on-demand.
   await schedule(QUEUES.NUDGE_STALE, '0 * * * *');

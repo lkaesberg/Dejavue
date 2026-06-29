@@ -8,6 +8,7 @@ import {
   QUEUES,
   type QueueName,
   type RegenFaqJob,
+  type ReindexChannelJob,
   type RevalidateKbJob,
   type SummarizeThreadJob,
 } from './jobs';
@@ -47,6 +48,12 @@ export async function enqueueRegenFaq(job: RegenFaqJob): Promise<void> {
 export async function enqueueBackfill(job: BackfillForumJob): Promise<void> {
   const boss = await startBoss();
   await boss.send(QUEUES.BACKFILL_FORUM, job, { singletonKey: job.backfillJobId });
+}
+
+export async function enqueueReindexChannel(job: ReindexChannelJob): Promise<void> {
+  const boss = await startBoss();
+  // One in-flight worker per job row even if enqueued twice (command + auto-gap).
+  await boss.send(QUEUES.REINDEX_CHANNEL, job, { singletonKey: job.reindexJobId });
 }
 
 export async function enqueueRevalidateKb(job: RevalidateKbJob): Promise<void> {

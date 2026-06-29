@@ -1,5 +1,5 @@
 import { getEnv, type Tier, type TierLimits, type TierSkus, tierLimits } from '@dejavue/core';
-import { getDb, resolveGuildTier } from '@dejavue/db';
+import { countIndexedMessages, getDb, resolveGuildTier } from '@dejavue/db';
 
 interface CacheEntry {
   tier: Tier;
@@ -36,4 +36,14 @@ export function invalidateTier(guildId: string): void {
 
 export function limitsFor(tier: Tier): TierLimits {
   return tierLimits(tier, getEnv().PRO_MONTHLY_QUOTA);
+}
+
+/**
+ * Is the guild at or over its unified index cap (total indexed messages)? When true,
+ * capture paths stop indexing NEW content (existing entries keep updating).
+ */
+export async function atIndexCap(guildId: string): Promise<boolean> {
+  const limits = limitsFor(await getGuildTier(guildId));
+  if (!Number.isFinite(limits.indexCap)) return false;
+  return (await countIndexedMessages(getDb(), guildId)) >= limits.indexCap;
 }

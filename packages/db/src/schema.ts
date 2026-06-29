@@ -52,6 +52,8 @@ export interface TranscriptMessage {
   createdAt: string;
   /** Images/files posted with the message, re-hosted and served from /a/<id>. */
   attachments?: TranscriptAttachment[];
+  /** Total reaction count — high-reaction messages are prioritized for embedding. */
+  reactions?: number;
 }
 
 /** Public KB appearance, set by the admin via `/dejavue customize` (Plus+). */
@@ -99,6 +101,15 @@ export const backfillStatus = pgEnum('backfill_status', [
   'failed',
 ]);
 export const clusterStatus = pgEnum('cluster_status', ['open', 'resolved', 'dismissed']);
+// Per-channel index freshness. 'never' = not yet indexed; 'synced' = up to date;
+// 'stale' = known to be behind reality (a gap/edit/delete/cap); 'reindexing' = a
+// full rescan is in flight.
+export const channelSyncState = pgEnum('channel_sync_state', [
+  'never',
+  'synced',
+  'stale',
+  'reindexing',
+]);
 
 const emptyTextArray = sql`'{}'::text[]`;
 
@@ -138,8 +149,9 @@ export const guildConfig = pgTable('guild_config', {
   nudgeEnabled: boolean('nudge_enabled').notNull().default(false),
   nudgeAfterHours: integer('nudge_after_hours').notNull().default(24),
   nudgeHelperRoleId: text('nudge_helper_role_id'),
-  // Public web KB
-  kbPublishOptIn: boolean('kb_publish_opt_in').notNull().default(false),
+  // Public web KB — on by default; set a slug in /dejavue customize to go live, or turn
+  // it off / add a passphrase there. Everything indexed is auto-published within it.
+  kbPublishOptIn: boolean('kb_publish_opt_in').notNull().default(true),
   kbSlug: text('kb_slug').unique(),
   // Custom domain for the public KB (one-time purchase). e.g. help.acme.com
   customDomain: text('custom_domain').unique(),
@@ -156,6 +168,12 @@ export const guildConfig = pgTable('guild_config', {
   guardAutoClose: boolean('guard_auto_close').notNull().default(false),
   guardSensitivity: text('guard_sensitivity').$type<GuardSensitivity>().notNull().default('medium'),
   wrongChannelTagId: text('wrong_channel_tag_id'),
+  // How readily a new post is suggested as a duplicate of an existing one (semantic
+  // dedup, Plus+). Maps to a cosine-similarity bar — see apps/bot/src/lib/dedup.ts.
+  dedupSensitivity: text('dedup_sensitivity').$type<GuardSensitivity>().notNull().default('medium'),
+  // When a question is solved, delete the bot's control/prompt message (declutter)
+  // instead of editing it into a "solved" notice. Default on.
+  removeSolvedPrompt: boolean('remove_solved_prompt').notNull().default(true),
   // ---- Tracked normal (non-forum) channels: indexed as searchable KB content with
   // a quota separate from the forum archive. A flat list of text/announcement channel ids.
   trackedChannelIds: text('tracked_channel_ids').array().notNull().default(emptyTextArray),
@@ -231,6 +249,11 @@ export const thread = pgTable(
     // channels have no solve point, so they re-embed on a doubling schedule keyed
     // off this — frequent early, then exponentially rarer as the topic settles.
     lastEmbedMsgCount: integer('last_embed_msg_count'),
+    // Hash of the embed-source text (buildEmbeddingText output) at the last successful
+    // embed. When the recomputed hash differs (edit/delete/answer change), the vector is
+    // stale and a re-embed is forced regardless of the count backoff. NULL = never embedded
+    // (treated as dirty).
+    embedContentHash: text('embed_content_hash'),
     publishedToKb: boolean('published_to_kb').notNull().default(false),
     doNotPublish: boolean('do_not_publish').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -291,6 +314,38 @@ export const channelTopic = pgTable(
   (t) => [
     uniqueIndex('channel_topic_guild_channel_model_idx').on(t.guildId, t.channelId, t.modelId),
     index('channel_topic_guild_idx').on(t.guildId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Per-channel index freshness — one row per monitored forum / tracked normal
+// channel. Powers "is this up to date?" in /dejavue status, gap detection, and the
+// once-per-hour auto-reindex throttle. The watermark (lastIndexedMessageId) is the
+// newest Discord message id we've folded in; snowflakes are monotonic so freshness
+// is a BigInt compare.
+// ---------------------------------------------------------------------------
+export const channelSync = pgTable(
+  'channel_sync',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    kind: text('kind').$type<ThreadKind>().notNull(),
+    state: channelSyncState('state').notNull().default('never'),
+    lastIndexedMessageId: text('last_indexed_message_id'),
+    // Cached sum of this channel's indexed transcript message counts (feeds status +
+    // the unified index cap without scanning every transcript on hot paths).
+    indexedMessageCount: integer('indexed_message_count').notNull().default(0),
+    lastReindexAt: timestamp('last_reindex_at', { withTimezone: true }),
+    // Newest message id the last reindex run actually covered (proves "up to date").
+    lastReindexThrough: text('last_reindex_through'),
+    // 'gap' | 'edit' | 'delete' | 'cap' — why we last marked it stale.
+    staleReason: text('stale_reason'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('channel_sync_guild_channel_idx').on(t.guildId, t.channelId),
+    index('channel_sync_guild_idx').on(t.guildId),
   ],
 );
 
@@ -394,6 +449,44 @@ export const backfillJob = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Reindex jobs — a durable, resumable full rescan of a channel that (unlike
+// backfill, which only imports) also RE-EMBEDS everything and PRUNES content
+// Discord no longer returns. Triggered by /dejavue reindex and by auto gap
+// detection. statusChannelId/statusMessageId point at the one live progress
+// message the worker continuously edits.
+// ---------------------------------------------------------------------------
+export const reindexJob = pgTable(
+  'reindex_job',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    // 'forum' = a monitored forum channel; 'tracked' = a tracked normal text channel.
+    kind: text('kind').$type<'forum' | 'tracked'>().notNull(),
+    status: backfillStatus('status').notNull().default('pending'),
+    // Prune is only safe after the full listing completes, so the phase is tracked.
+    phase: text('phase')
+      .$type<'listing' | 'indexing' | 'pruning' | 'done'>()
+      .notNull()
+      .default('listing'),
+    cursor: text('cursor'), // archived-thread (forum) or message (tracked) pagination cursor
+    processedThreadIds: text('processed_thread_ids').array().notNull().default(emptyTextArray),
+    total: integer('total').notNull().default(0),
+    processed: integer('processed').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    removed: integer('removed').notNull().default(0),
+    statusChannelId: text('status_channel_id'),
+    statusMessageId: text('status_message_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('reindex_guild_status_idx').on(t.guildId, t.status),
+    index('reindex_guild_channel_idx').on(t.guildId, t.channelId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Re-hosted attachments — bytes for images/files posted in tracked threads, so the
 // public KB keeps showing them after Discord's signed CDN URLs expire. Keyed by the
 // Discord attachment id; scoped by guild so the serve route never crosses tenants.
@@ -426,5 +519,9 @@ export type GenerationEvent = typeof generationEvent.$inferSelect;
 export type FaqEntry = typeof faqEntry.$inferSelect;
 export type KnowledgeGapCluster = typeof knowledgeGapCluster.$inferSelect;
 export type BackfillJob = typeof backfillJob.$inferSelect;
+export type ReindexJob = typeof reindexJob.$inferSelect;
+export type NewReindexJob = typeof reindexJob.$inferInsert;
+export type ChannelSync = typeof channelSync.$inferSelect;
+export type NewChannelSync = typeof channelSync.$inferInsert;
 export type Attachment = typeof attachment.$inferSelect;
 export type NewAttachment = typeof attachment.$inferInsert;

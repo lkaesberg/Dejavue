@@ -12,7 +12,6 @@ import {
   publishExistingTracked,
 } from '@dejavue/db';
 import { enqueueEmbedThread } from '@dejavue/queue';
-import { getGuildTier, limitsFor } from './tier';
 
 const log = childLogger({ mod: 'kb-reconcile' });
 
@@ -36,7 +35,6 @@ export async function kbStartupReconcile(_client: Client): Promise<void> {
 
   for (const cfg of guilds) {
     try {
-      const limits = limitsFor(await getGuildTier(cfg.guildId));
       // Scope "needs embedding" to the active model, so flipping the embedding
       // provider/model re-embeds everything with the new model on next startup.
       const activeModelId = embeddingModelId(cfg.embeddingModel);
@@ -46,14 +44,14 @@ export async function kbStartupReconcile(_client: Client): Promise<void> {
       // Knowledge channels: publish + embed every thread, regardless of status.
       for (const channelId of cfg.forumChannelIds) {
         if (channelMode(cfg, channelId) !== 'knowledge') continue;
-        published += await publishExistingInChannel(db, cfg.guildId, channelId, limits.kbPageCap);
+        published += await publishExistingInChannel(db, cfg.guildId, channelId);
         toEmbed.push(
           ...(await getThreadsMissingEmbeddingInChannel(db, cfg.guildId, channelId, activeModelId)),
         );
       }
 
       // Question channels: publish + embed solved threads only.
-      published += await publishExistingSolved(db, cfg.guildId, limits.kbPageCap);
+      published += await publishExistingSolved(db, cfg.guildId);
       toEmbed.push(...(await getSolvedThreadsMissingEmbedding(db, cfg.guildId, activeModelId)));
 
       // Tracked normal channels: publish any captured-but-unpublished segments

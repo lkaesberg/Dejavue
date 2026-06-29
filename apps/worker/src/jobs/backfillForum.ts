@@ -2,8 +2,7 @@ import { buildEmbeddingText, embed, embeddingModelId } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
   channelMode,
-  countByStatus,
-  countPublished,
+  countIndexedMessages,
   getBackfillJob,
   getDb,
   getGuildConfig,
@@ -50,7 +49,6 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   const solvedTagId = cfg?.solvedTagId ?? undefined;
   const limits = await guildLimits(bf.guildId);
   const mode = channelMode(cfg, bf.channelId);
-  const optedIn = cfg?.kbPublishOptIn ?? false;
   const processed = new Set(bf.processedThreadIds);
 
   // Collect active + paginated archived threads for the forum.
@@ -80,10 +78,8 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   all.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
   await updateBackfillJob(db, bf.id, { total: all.length });
 
-  // Tier limits: stop importing at the archive cap; stop publishing at the KB cap.
-  const counts = await countByStatus(db, bf.guildId);
-  let archiveCount = counts.open + counts.solved + counts.unsolved;
-  let publishedCount = optedIn ? await countPublished(db, bf.guildId) : 0;
+  // Tier limit: stop importing once at the unified index cap.
+  let indexedMessages = await countIndexedMessages(db, bf.guildId);
   // Threads already imported + embedded with the active model are skipped, so
   // re-running (e.g. setup again, or after a tier upgrade) is cheap and only
   // processes new history.
@@ -97,7 +93,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
 
   for (const t of all) {
     if (processed.has(t.id) || alreadyDone.has(t.id)) continue;
-    if (archiveCount >= limits.archiveCap) {
+    if (indexedMessages >= limits.indexCap) {
       cappedOut = true;
       break;
     }
@@ -113,7 +109,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
         opUserId: starter?.author?.id ?? null,
         status: isSolved ? 'solved' : 'open',
       });
-      archiveCount++;
+      indexedMessages++;
 
       let vector: number[] | undefined;
       // Backfill only has the starter message (no full transcript), so the
@@ -154,16 +150,12 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
       if (isDup) {
         // A folded copy never stands alone on the KB.
         await setPublished(db, bf.guildId, t.id, false);
-      } else if (optedIn && publishedCount < limits.kbPageCap) {
-        // Publish so older inactive threads show on the KB (mode-aware, capped).
-        const shouldPublish = mode === 'knowledge' || isSolved;
-        if (shouldPublish) {
-          await setPublished(db, bf.guildId, t.id, true);
-          publishedCount++;
-          await enqueueRevalidateKb({ guildId: bf.guildId, threadId: t.id, action: 'publish' }).catch(
-            () => undefined,
-          );
-        }
+      } else if (mode === 'knowledge' || isSolved) {
+        // Auto-publish everything online. Open questions stay private until solved.
+        await setPublished(db, bf.guildId, t.id, true);
+        await enqueueRevalidateKb({ guildId: bf.guildId, threadId: t.id, action: 'publish' }).catch(
+          () => undefined,
+        );
       }
 
       processedCount++;
@@ -191,7 +183,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   // Consume any legacy durable backfill entitlement once the job durably completes.
   if (bf.entitlementId) await markEntitlementConsumed(db, bf.entitlementId);
   log.info(
-    { jobId: bf.id, processed: processedCount, failed, total: all.length, cappedOut, published: publishedCount },
+    { jobId: bf.id, processed: processedCount, failed, total: all.length, cappedOut, indexedMessages },
     'backfill complete',
   );
 }

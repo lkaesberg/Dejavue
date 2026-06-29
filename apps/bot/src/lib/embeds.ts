@@ -36,7 +36,8 @@ export function controlMessage(showBranding: boolean): BaseMessageOptions {
       .setTitle('Got your answer?')
       .setDescription(
         'When this is resolved, hit **Mark as solved** below — or right-click the reply that helped → **Apps → Mark as Answer**. ' +
-          'Solved posts get archived and become searchable with `/dejavue search`.',
+          'Solved posts get archived and become searchable with `/dejavue search`. ' +
+          '_This prompt disappears once solved._',
       ),
     showBranding,
   );

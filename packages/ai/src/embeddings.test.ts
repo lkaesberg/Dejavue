@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEmbeddingText } from './embeddings';
+import { buildEmbeddingText, embedContentHash } from './embeddings';
 
 describe('buildEmbeddingText', () => {
   it('falls back to title + question + answer when there is no transcript', () => {
@@ -74,5 +74,44 @@ describe('buildEmbeddingText', () => {
 
   it('returns an empty string when there is nothing to embed', () => {
     expect(buildEmbeddingText({ title: '', transcript: [] })).toBe('');
+  });
+
+  it('selects start, end, and high-value (most-reacted) messages', () => {
+    const transcript = Array.from({ length: 12 }, (_, i) => ({
+      content: `m${i}`,
+      reactions: i === 6 ? 9 : 0,
+    }));
+    const parts = buildEmbeddingText({ title: 'T', transcript }).split('\n\n');
+    // start window
+    expect(parts).toContain('m0');
+    expect(parts).toContain('m2');
+    // end window
+    expect(parts).toContain('m9');
+    expect(parts).toContain('m11');
+    // high-value middle message (9 reactions) is pulled in despite being mid-thread
+    expect(parts).toContain('m6');
+    // a low-value middle message in no window is left out
+    expect(parts).not.toContain('m4');
+  });
+});
+
+describe('embedContentHash (stale-vector detection)', () => {
+  it('is stable for identical embed-source content', () => {
+    const src = { title: 'T', questionBody: 'Q', transcript: [{ content: 'a' }, { content: 'b' }] };
+    expect(embedContentHash(src)).toBe(embedContentHash({ ...src }));
+  });
+
+  it('changes when content within the embed window changes (edit/delete propagates)', () => {
+    const base = embedContentHash({ title: 'T', transcript: [{ content: 'a' }, { content: 'b' }] });
+    const edited = embedContentHash({ title: 'T', transcript: [{ content: 'a' }, { content: 'B!' }] });
+    expect(edited).not.toBe(base);
+  });
+
+  it('ignores edits to middle messages outside the start/end/high-value windows', () => {
+    const mk = (c5: string) =>
+      Array.from({ length: 12 }, (_, i) => ({ content: i === 5 ? c5 : `m${i}`, reactions: 0 }));
+    expect(embedContentHash({ title: 'T', transcript: mk('m5') })).toBe(
+      embedContentHash({ title: 'T', transcript: mk('m5-edited') }),
+    );
   });
 });

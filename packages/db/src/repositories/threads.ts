@@ -105,8 +105,9 @@ export async function countSolved(db: Database, guildId: string): Promise<number
 }
 
 /**
- * Count indexed conversation segments captured from tracked normal channels
- * (separate from the forum archive). Used to enforce the tier's `trackedDocCap`.
+ * Count indexed conversation segments captured from tracked normal channels.
+ * (Kept for analytics/status; the index cap is now message-based — see
+ * `countIndexedMessages`.)
  */
 export async function countTracked(db: Database, guildId: string): Promise<number> {
   const [row] = await db
@@ -114,6 +115,55 @@ export async function countTracked(db: Database, guildId: string): Promise<numbe
     .from(thread)
     .where(and(eq(thread.guildId, guildId), eq(thread.kind, 'channel')));
   return row?.count ?? 0;
+}
+
+// Messages an online thread contributes to the index: its transcript length, but at
+// least 1 (a backfilled thread has only the question and no captured transcript yet).
+const indexMsgCount = sql<number>`coalesce(sum(greatest(case when jsonb_typeof(${thread.transcript}) = 'array' then jsonb_array_length(${thread.transcript}) else 0 end, 1)), 0)::int`;
+
+/**
+ * The single source of truth for the unified index cap: total messages across all
+ * online (published) forum + tracked content in a guild. Published = in the index =
+ * what the cap limits; this naturally excludes duplicates and do-not-publish rows
+ * (both unpublished) and unsolved question threads (published only on solve).
+ */
+export async function countIndexedMessages(db: Database, guildId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: indexMsgCount })
+    .from(thread)
+    .where(and(eq(thread.guildId, guildId), eq(thread.publishedToKb, true)));
+  return row?.count ?? 0;
+}
+
+/** Per-channel indexed message count (feeds channel_sync.indexedMessageCount + status). */
+export async function countIndexedMessagesInChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ count: indexMsgCount })
+    .from(thread)
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        eq(thread.channelId, channelId),
+        eq(thread.publishedToKb, true),
+      ),
+    );
+  return row?.count ?? 0;
+}
+
+/** Record the content hash of the embed-source text at the last successful embed. */
+export async function setEmbedContentHash(
+  db: Database,
+  threadRowId: string,
+  hash: string,
+): Promise<void> {
+  await db
+    .update(thread)
+    .set({ embedContentHash: hash, updatedAt: new Date() })
+    .where(eq(thread.id, threadRowId));
 }
 
 /** Fetch title + accepted answer for a set of thread row ids (for AI drafting). */

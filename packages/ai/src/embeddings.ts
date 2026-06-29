@@ -155,51 +155,111 @@ export interface EmbedSource {
   title: string;
   questionBody?: string | null;
   acceptedAnswerText?: string | null;
-  transcript?: { content: string }[] | null;
+  transcript?: { content: string; reactions?: number }[] | null;
 }
 
-const QUESTION_WINDOW = 3; // the OP + the next couple of replies
+const QUESTION_WINDOW = 3; // start: the OP + the next couple of replies
 const ANSWER_WINDOW = 1; // the accepted answer ± its neighbours
+const TAIL_WINDOW = 3; // end: the closing messages
+const HIGH_VALUE_COUNT = 3; // the most-reacted messages (high-signal middle content)
+// Truncate any single message so one giant post can't crowd out the start/end/high-value
+// balance, and cap the whole passage below embed()'s hard MAX_CHARS so the truncation
+// there (which would blindly cut the tail) effectively never fires.
+const PER_MESSAGE_CHARS = 1000;
+const MAX_PASSAGE_CHARS = 7000;
 
-/**
- * Build the passage text to embed for a thread. When a transcript is present we
- * include context *around the question* (the opening messages) and *around the
- * answer* (the accepted answer plus its neighbours), which gives retrieval more
- * signal than the bare question + answer — and means knowledge-channel threads
- * (which have no single answer) still get their surrounding discussion indexed.
- * Falls back to title + question + answer when no transcript was captured.
- */
-export function buildEmbeddingText(src: EmbedSource): string {
-  const msgs = (src.transcript ?? []).map((m) => (m.content ?? '').trim()).filter(Boolean);
-  const parts: string[] = [];
-  if (src.title) parts.push(src.title);
+function clampMsg(s: string): string {
+  return s.length > PER_MESSAGE_CHARS ? `${s.slice(0, PER_MESSAGE_CHARS - 1)}…` : s;
+}
 
-  if (msgs.length > 0) {
-    parts.push(...msgs.slice(0, QUESTION_WINDOW));
-    const answer = (src.acceptedAnswerText ?? '').trim();
-    if (answer) {
-      const idx = findAnswerIndex(msgs, answer);
-      if (idx >= 0) parts.push(...msgs.slice(Math.max(0, idx - ANSWER_WINDOW), idx + ANSWER_WINDOW + 1));
-      else parts.push(answer);
-    } else if (msgs.length > QUESTION_WINDOW) {
-      // No accepted answer (knowledge / unresolved): include the tail too.
-      parts.push(...msgs.slice(-(ANSWER_WINDOW + 1)));
-    }
-  } else {
-    if (src.questionBody) parts.push(src.questionBody);
-    if (src.acceptedAnswerText) parts.push(src.acceptedAnswerText);
-  }
-
-  // De-dup while preserving order (windows can overlap), then join.
+/** De-dup (preserving order), truncate long messages, and cap the total passage size. */
+function assemble(parts: string[]): string {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const p of parts) {
-    if (p && !seen.has(p)) {
-      seen.add(p);
-      out.push(p);
-    }
+  let used = 0;
+  for (const raw of parts) {
+    const p = clampMsg((raw ?? '').trim());
+    if (!p || seen.has(p)) continue;
+    if (used + p.length + 2 > MAX_PASSAGE_CHARS) break;
+    seen.add(p);
+    out.push(p);
+    used += p.length + 2;
   }
   return out.join('\n\n');
+}
+
+/**
+ * Build the passage text to embed for a thread. Rather than the first 8000 chars (which
+ * would lose the middle and end), we select a balanced, high-signal subset:
+ *   - the **start** (opening messages — what the thread is about),
+ *   - the **end** (how it concluded),
+ *   - the most **high-value** messages (by reaction count — the community's signal of
+ *     what mattered, anywhere in the thread), and
+ *   - for solved Q&A, the **accepted answer** plus its neighbours.
+ * Each message is truncated and the whole passage is capped, so the three sources stay
+ * balanced. Falls back to title + question + answer when no transcript was captured.
+ */
+export function buildEmbeddingText(src: EmbedSource): string {
+  const title = (src.title ?? '').trim();
+  const msgs = (src.transcript ?? []).map((m) => ({
+    content: (m.content ?? '').trim(),
+    reactions: m.reactions ?? 0,
+  }));
+  const hasContent = msgs.some((m) => m.content);
+
+  // No transcript: fall back to title + question + answer.
+  if (!hasContent) {
+    return assemble([title, (src.questionBody ?? '').trim(), (src.acceptedAnswerText ?? '').trim()]);
+  }
+
+  const contents = msgs.map((m) => m.content);
+  const chosen = new Set<number>();
+  const add = (i: number): void => {
+    if (i >= 0 && i < msgs.length && contents[i]) chosen.add(i);
+  };
+
+  // Start window.
+  for (let i = 0; i < QUESTION_WINDOW; i++) add(i);
+  // End window.
+  for (let i = msgs.length - TAIL_WINDOW; i < msgs.length; i++) add(i);
+
+  // Accepted answer ± neighbours (or the raw answer if it isn't a transcript message).
+  const answer = (src.acceptedAnswerText ?? '').trim();
+  let extraAnswer = '';
+  if (answer) {
+    const idx = findAnswerIndex(contents, answer);
+    if (idx >= 0) for (let j = idx - ANSWER_WINDOW; j <= idx + ANSWER_WINDOW; j++) add(j);
+    else extraAnswer = answer;
+  }
+
+  // High-value: the most-reacted messages, wherever they are in the thread.
+  const topReacted = msgs
+    .map((m, i) => ({ i, reactions: m.reactions }))
+    .filter((m) => m.reactions > 0 && contents[m.i])
+    .sort((a, b) => b.reactions - a.reactions)
+    .slice(0, HIGH_VALUE_COUNT);
+  for (const m of topReacted) add(m.i);
+
+  // Assemble in chronological order (title + answer-not-in-transcript first).
+  const ordered = [...chosen].sort((a, b) => a - b).map((i) => contents[i] ?? '');
+  return assemble([title, extraAnswer, ...ordered]);
+}
+
+/**
+ * A stable, fast (non-crypto) hash of the embed-source text — FNV-1a, hex. Stored on
+ * the thread at embed time; when it changes (an edit/delete/answer change alters the
+ * passage), the vector is stale and a re-embed is forced. Comparing the *embed input*
+ * (not the raw transcript) means cosmetic churn outside the question/answer windows
+ * doesn't trigger needless re-embeds.
+ */
+export function embedContentHash(src: EmbedSource): string {
+  const text = buildEmbeddingText(src);
+  let h = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193); // FNV prime
+  }
+  return (h >>> 0).toString(16);
 }
 
 export type EmbedMode = 'query' | 'passage';

@@ -16,7 +16,6 @@ import {
   duplicateResolvedNotice,
   SOLVE_BUTTON_ID,
   SOLVE_MODAL_PREFIX,
-  solvedNotice,
   solvedWithAnswerNotice,
   threadUrl,
 } from '../lib/embeds';
@@ -26,6 +25,7 @@ import {
   handleCustomizeSelect,
   isCustomizeInteraction,
 } from '../lib/customize';
+import { handleHubButton, handleHubRoleSelect, handleHubSelect, isHubInteraction } from '../lib/hubs';
 import { applyTag, ensureForumTags, findTagByName, forumParent } from '../lib/forum';
 import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph, safeReply } from '../lib/reply';
@@ -129,23 +129,18 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
 
   const answer = interaction.fields.getTextInputValue('answer').trim();
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  // The control message id is encoded in the modal customId; solveThread removes
+  // (or, if disabled, marks) that prompt once solved.
+  const controlMessageId = interaction.customId.slice(SOLVE_MODAL_PREFIX.length).replace(/^:/, '');
   await solveThread(channel, {
     answerText: answer,
     answerAuthorId: interaction.user.id,
     solverId: interaction.user.id,
+    controlMessageId: controlMessageId || undefined,
   });
 
   const showBranding = await showBrandingFor(channel.guildId);
   await channel.send(solvedWithAnswerNotice(answer, interaction.user.id, showBranding)).catch(() => undefined);
-
-  // Update the originating control message (id encoded in the modal customId) to "solved".
-  const controlMessageId = interaction.customId.slice(SOLVE_MODAL_PREFIX.length).replace(/^:/, '');
-  if (controlMessageId) {
-    const msg = await channel.messages.fetch(controlMessageId).catch(() => null);
-    await msg
-      ?.edit(solvedNotice({ showBranding, solverId: interaction.user.id, answerAuthorId: interaction.user.id }))
-      .catch(() => undefined);
-  }
 
   await closeThread(channel);
   await interaction.editReply('✅ Marked solved and archived.');
@@ -158,11 +153,15 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     } else if (interaction.isMessageContextMenuCommand()) {
       await contextByName.get(interaction.commandName)?.execute(interaction);
     } else if (interaction.isButton()) {
-      // KB customization hub runs anywhere (not just forum threads), so route it first.
+      // Hubs (customize / settings / setup / insights) run anywhere, so route them first.
       if (isCustomizeInteraction(interaction.customId)) await handleCustomizeButton(interaction);
+      else if (isHubInteraction(interaction.customId)) await handleHubButton(interaction);
       else await handleButton(interaction);
     } else if (interaction.isStringSelectMenu()) {
       if (isCustomizeInteraction(interaction.customId)) await handleCustomizeSelect(interaction);
+      else if (isHubInteraction(interaction.customId)) await handleHubSelect(interaction);
+    } else if (interaction.isRoleSelectMenu()) {
+      if (isHubInteraction(interaction.customId)) await handleHubRoleSelect(interaction);
     } else if (interaction.isModalSubmit()) {
       if (isCustomizeInteraction(interaction.customId)) await handleCustomizeModal(interaction);
       else await handleModal(interaction);

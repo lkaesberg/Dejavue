@@ -7,3 +7,5 @@ export * from './cluster';
 export * from './channelFit';
 export * from './passphrase';
 export * from './media';
+export * from './segment';
+export * from './progress';

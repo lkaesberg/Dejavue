@@ -1,25 +1,56 @@
 import { clusterLabel, embeddingModelId } from '@dejavue/ai';
-import { childLogger, getEnv, greedyCluster } from '@dejavue/core';
+import { childLogger, genProgressEmbed, getEnv, greedyCluster } from '@dejavue/core';
 import {
   checkQuota,
   commitGeneration,
   getDb,
   getGuildEmbeddingPoints,
+  getTopClusters,
   markGenerationFinished,
   type NewClusterInput,
   replaceClusters,
 } from '@dejavue/db';
 import type { ClusterGapsJob } from '@dejavue/queue';
+import { LiveProgress } from '../lib/progress';
 import { guildGenerationQuota } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:cluster-gaps' });
 const SIM_THRESHOLD = 0.82;
 const LABEL_TOP_N = 5;
 
+/** Render the current top clusters into the live message (final state). */
+async function renderClusters(guildId: string, live: LiveProgress): Promise<void> {
+  const clusters = await getTopClusters(getDb(), guildId, 10);
+  const body = clusters
+    .map((c) => {
+      const first = c.memberThreadIds[0];
+      const title = c.label ?? c.representativeText ?? 'topic';
+      return first
+        ? `• [${title}](https://discord.com/channels/${guildId}/${first}) — ${c.size} asks`
+        : `• ${title} — ${c.size} asks`;
+    })
+    .join('\n');
+  await live.finalize(genProgressEmbed({ kind: 'cluster', phase: 'done', body }));
+}
+
 /** Cluster a guild's recurring questions and label the largest clusters (Pro). */
 export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
   const db = getDb();
   const env = getEnv();
+  const live = job.progress ? new LiveProgress(job.progress) : null;
+  live?.update(genProgressEmbed({ kind: 'cluster', phase: 'working', note: 'grouping questions…' }));
+  try {
+    await clusterGaps(job, db, env);
+  } finally {
+    if (live) await renderClusters(job.guildId, live).catch(() => undefined);
+  }
+}
+
+async function clusterGaps(
+  job: ClusterGapsJob,
+  db: ReturnType<typeof getDb>,
+  env: ReturnType<typeof getEnv>,
+): Promise<void> {
   const baseQuota = await guildGenerationQuota(job.guildId);
   const points = await getGuildEmbeddingPoints(db, job.guildId, embeddingModelId());
   if (points.length < 4) {

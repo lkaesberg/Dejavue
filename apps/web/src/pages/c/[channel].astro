@@ -6,6 +6,7 @@ import {
   getPublishedThreads,
   getTopClusters,
   type Thread,
+  type TranscriptMessage,
 } from '@dejavue/db';
 import ChannelRail from '../../components/ChannelRail.astro';
 import KbFooter from '../../components/KbFooter.astro';
@@ -54,11 +55,61 @@ const channels = (() => {
 })();
 
 const fmtDate = (d: Date | string | null): string =>
-  d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+  d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
 const snippetOf = (t: Thread): string => {
   const body = (t.canonicalSummary || t.acceptedAnswerText || t.questionBody || '').replace(/\s+/g, ' ').trim();
   return body.length > 200 ? `${body.slice(0, 200)}…` : body;
 };
+
+// Tracked normal channels (kind 'channel') offer a second "Chat" view: the whole
+// conversation in chronological order, instead of the gap-grouped segment entries.
+const isTracked = !!cfg?.trackedChannelIds?.includes(channel ?? '');
+const view = url.searchParams.get('view') === 'chat' && isTracked ? 'chat' : 'grouped';
+
+const chatMsgs: TranscriptMessage[] =
+  view === 'chat'
+    ? (() => {
+        const seen = new Set<string>();
+        const merged: TranscriptMessage[] = [];
+        for (const t of threads) {
+          for (const m of t.transcript ?? []) {
+            const key = m.id ?? `${m.authorId}:${m.createdAt}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(m);
+          }
+        }
+        merged.sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0));
+        return merged;
+      })()
+    : [];
+
+// Privacy-preserving speaker aliases, stable across the whole channel.
+const AVATAR_BGS = [
+  'linear-gradient(135deg,#4F46E5,#7C3AED)',
+  'linear-gradient(135deg,#0EA5E9,#2563EB)',
+  'linear-gradient(135deg,#F0883E,#E0632C)',
+  'linear-gradient(135deg,#10B981,#0F9B82)',
+  'linear-gradient(135deg,#EC4899,#BE185D)',
+];
+const memberAlias = new Map<string, { name: string; bg: string }>();
+for (const m of chatMsgs) {
+  if (memberAlias.has(m.authorId)) continue;
+  const n = memberAlias.size + 1;
+  memberAlias.set(m.authorId, { name: `Member ${n}`, bg: AVATAR_BGS[(n - 1) % AVATAR_BGS.length]! });
+}
+const aliasOf = (id: string): string => memberAlias.get(id)?.name ?? 'Member';
+const avatarBgOf = (id: string): string => memberAlias.get(id)?.bg ?? AVATAR_BGS[0]!;
+const fmtTime = (d: string): string =>
+  new Date(d).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+const fmtBytes = (n: number | undefined): string =>
+  !n ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 ---
 
 {
@@ -88,16 +139,18 @@ const snippetOf = (t: Thread): string => {
                 <p style="font-size:15px; color:var(--textmid); margin:11px 0 0; line-height:1.55; white-space:pre-wrap;">{guidelines}</p>
               )}
 
-              {/* search within this channel */}
-              <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:10px; margin-top:18px; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:11px 15px;">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
-                <input type="search" name="q" placeholder={`Search in ${channelName}…`} aria-label={`Search in ${channelName}`} style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:14px; color:var(--text);" />
-                <input type="hidden" name="channel" value={channel} />
-                <button type="submit" style="border:none; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:12px; font-weight:600; padding:7px 13px; border-radius:var(--radsm);">Search</button>
-              </form>
+              {/* search within this channel (chat view gets a compact one in the sticky bar) */}
+              {view !== 'chat' && (
+                <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:10px; margin-top:18px; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:11px 15px;">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+                  <input type="search" name="q" placeholder={`Search in ${channelName}…`} aria-label={`Search in ${channelName}`} style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:14px; color:var(--text);" />
+                  <input type="hidden" name="channel" value={channel} />
+                  <button type="submit" style="border:none; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:12px; font-weight:600; padding:7px 13px; border-radius:var(--radsm);">Search</button>
+                </form>
+              )}
 
-              {/* label filter */}
-              {allLabels.length > 0 && (
+              {/* label filter (segment entries only — not the raw message stream) */}
+              {view !== 'chat' && allLabels.length > 0 && (
                 <div style="display:flex; align-items:center; gap:8px; margin-top:14px; flex-wrap:wrap;">
                   <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Labels</span>
                   <a href={`/c/${channel}`} style={`font-size:12px; font-weight:600; padding:4px 11px; border-radius:999px; ${!labelParam ? 'background:var(--accent); color:#fff;' : 'background:var(--chipbg); color:var(--chiptext);'}`}>All</a>
@@ -107,38 +160,136 @@ const snippetOf = (t: Thread): string => {
                 </div>
               )}
 
-              <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 2px 12px; margin-top:14px; border-bottom:1px solid var(--border);">
-                <span style="font-size:13px; color:var(--textmut);">{shown.length} {shown.length === 1 ? 'answer' : 'answers'}{labelParam ? ` · ${labelParam}` : ''}</span>
-                <span style="font-size:13px; color:var(--textmid); font-weight:500;">Most recent</span>
-              </div>
-              {shown.map((q) => (
-                <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; gap:14px; padding:17px 2px; border-bottom:1px solid var(--border);">
-                  <span style="color:#2DD4BF; font-size:15px; margin-top:1px;">✓</span>
-                  <div style="flex:1; min-width:0;">
-                    <div style="font-family:var(--headfont); font-weight:600; font-size:16px; letter-spacing:-0.01em; color:var(--text);">{q.title}</div>
-                    {snippetOf(q) && (
-                      <div style="font-size:13.5px; color:var(--textmid); line-height:1.5; margin-top:4px;">{snippetOf(q)}</div>
+              {/* Tracked channels offer a chronological "chat" view next to the grouped one. */}
+              {isTracked && (
+                <div style="display:flex; align-items:center; gap:8px; margin-top:16px; flex-wrap:wrap;">
+                  <a href={`/c/${channel}`} style={`font-size:12px; font-weight:600; padding:5px 13px; border-radius:999px; ${view === 'grouped' ? 'background:var(--accent); color:#fff;' : 'background:var(--chipbg); color:var(--chiptext);'}`}>Conversations</a>
+                  <a href={`/c/${channel}?view=chat`} style={`font-size:12px; font-weight:600; padding:5px 13px; border-radius:999px; ${view === 'chat' ? 'background:var(--accent); color:#fff;' : 'background:var(--chipbg); color:var(--chiptext);'}`}>Chat view</a>
+                  <span style="font-size:12px; color:var(--textmut);">{view === 'chat' ? 'Every message, in order' : 'Grouped by conversation (20-min gaps)'}</span>
+                </div>
+              )}
+
+              {view === 'chat' ? (
+                <div style="margin-top:12px;">
+                  {/* compact sticky toolbar: count + channel search + live message filter */}
+                  <div style="position:sticky; top:56px; z-index:10; background:var(--bg); display:flex; align-items:center; gap:9px; padding:9px 2px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+                    <span style="font-size:12.5px; color:var(--textmut); white-space:nowrap;">{`${chatMsgs.length} ${chatMsgs.length === 1 ? 'message' : 'messages'}`}</span>
+                    <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:7px; flex:1; min-width:130px; background:var(--surface); border:1px solid var(--border2); border-radius:var(--radsm); padding:5px 10px;">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+                      <input type="search" name="q" placeholder={`Search ${channelName}…`} aria-label={`Search in ${channelName}`} style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:13px; color:var(--text);" />
+                      <input type="hidden" name="channel" value={channel} />
+                    </form>
+                    {chatMsgs.length > 0 && (
+                      <div style="display:flex; align-items:center; gap:7px; background:var(--inputbg); border:1px solid var(--border); border-radius:var(--radsm); padding:5px 10px;">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.4" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="6" y1="12" x2="18" y2="12" /><line x1="10" y1="18" x2="14" y2="18" /></svg>
+                        <input id="kb-msg-filter" type="search" placeholder="Filter…" aria-label="Filter messages" style="border:none; outline:none; background:transparent; font-size:12.5px; color:var(--text); width:110px;" />
+                      </div>
                     )}
-                    <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
-                      <span style="font-size:12px; color:var(--textmut);">
-                        {q.status === 'solved' ? 'Solved' : 'Indexed'}
-                        {q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}
-                        {(q.transcript?.length ?? 0) > 0 ? ` · ${q.transcript!.length} messages` : ''}
-                      </span>
-                      {(q.labels ?? []).map((l) => (
-                        <span style="font-size:11px; font-weight:500; padding:2px 8px; border-radius:999px; background:var(--accentsoft); color:var(--accentline);">{l}</span>
-                      ))}
-                    </div>
                   </div>
-                </a>
-              ))}
-              {shown.length === 0 && (
-                <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No answers with the label “{labelParam}”.</p>
+                  <div id="kb-msgs" style="display:flex; flex-direction:column; gap:16px; padding-top:18px;">
+                    {chatMsgs.map((m) => {
+                      const filterText = [m.content, aliasOf(m.authorId), ...(m.attachments ?? []).map((a) => a.name)]
+                        .join(' ')
+                        .toLowerCase();
+                      return (
+                        <div class="kb-msg" data-msg={filterText} style="display:flex; gap:13px;">
+                          <div style={`width:34px; height:34px; border-radius:50%; background:${avatarBgOf(m.authorId)}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>M</div>
+                          <div style="flex:1; min-width:0;">
+                            <div style="display:flex; align-items:center; gap:9px; flex-wrap:wrap;">
+                              <span style="font-weight:600; font-size:14px; color:var(--text);">{aliasOf(m.authorId)}</span>
+                              <span style="font-size:12px; color:var(--textmut);">{fmtTime(m.createdAt)}</span>
+                            </div>
+                            {m.content && (
+                              <div style="font-size:14px; line-height:1.6; color:var(--textmid); margin-top:4px; white-space:pre-wrap;">{m.content}</div>
+                            )}
+                            {(m.attachments ?? []).length > 0 && (
+                              <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+                                {(m.attachments ?? []).map((a) =>
+                                  a.kind === 'image' ? (
+                                    <a href={`/a/${a.id}`} target="_blank" rel="noopener">
+                                      <img class="kb-att-img" src={`/a/${a.id}`} data-fb={a.url ?? ''} alt={a.name} loading="lazy" style="max-width:min(100%,460px); height:auto; border-radius:var(--radsm); border:1px solid var(--border); display:block;" />
+                                    </a>
+                                  ) : (
+                                    <a href={a.url ?? '#'} target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:9px; width:fit-content; max-width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radsm); padding:9px 13px; font-size:13px; color:var(--text);">
+                                      <span style="font-size:15px;">{a.kind === 'video' ? '▶' : '📎'}</span>
+                                      <span style="font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">{a.name}</span>
+                                      {a.size ? <span style="color:var(--textmut); font-size:12px; white-space:nowrap;">{fmtBytes(a.size)}</span> : null}
+                                    </a>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div id="kb-msg-empty" hidden style="font-size:13px; color:var(--textmut); padding:12px 2px;">No messages match your filter.</div>
+                  {chatMsgs.length === 0 && (
+                    <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No messages indexed yet.</p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 2px 12px; margin-top:14px; border-bottom:1px solid var(--border);">
+                    <span style="font-size:13px; color:var(--textmut);">{shown.length} {shown.length === 1 ? 'answer' : 'answers'}{labelParam ? ` · ${labelParam}` : ''}</span>
+                    <span style="font-size:13px; color:var(--textmid); font-weight:500;">Most recent</span>
+                  </div>
+                  {shown.map((q) => (
+                    <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; gap:14px; padding:17px 2px; border-bottom:1px solid var(--border);">
+                      <span style="color:#2DD4BF; font-size:15px; margin-top:1px;">✓</span>
+                      <div style="flex:1; min-width:0;">
+                        <div style="font-family:var(--headfont); font-weight:600; font-size:16px; letter-spacing:-0.01em; color:var(--text);">{q.title}</div>
+                        {snippetOf(q) && (
+                          <div style="font-size:13.5px; color:var(--textmid); line-height:1.5; margin-top:4px;">{snippetOf(q)}</div>
+                        )}
+                        <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                          <span style="font-size:12px; color:var(--textmut);">
+                            {q.status === 'solved' ? 'Solved' : 'Indexed'}
+                            {q.solvedAt ? ` · ${fmtDate(q.solvedAt)}` : ''}
+                            {(q.transcript?.length ?? 0) > 0 ? ` · ${q.transcript!.length} messages` : ''}
+                          </span>
+                          {(q.labels ?? []).map((l) => (
+                            <span style="font-size:11px; font-weight:500; padding:2px 8px; border-radius:999px; background:var(--accentsoft); color:var(--accentline);">{l}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                  {shown.length === 0 && (
+                    <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No answers with the label “{labelParam}”.</p>
+                  )}
+                </>
               )}
             </div>
         </main>
       </div>
       <KbFooter note={`${channels.length} channels · ${all.length} answers`} />
+      {view === 'chat' && (
+        <script is:inline>
+          (function () {
+            document.querySelectorAll('img.kb-att-img').forEach(function (img) {
+              var fb = function () { img.onerror = null; if (img.dataset.fb) img.src = img.dataset.fb; };
+              img.onerror = fb;
+              if (img.complete && img.naturalWidth === 0) fb();
+            });
+            var input = document.getElementById('kb-msg-filter');
+            if (!input) return;
+            var list = document.getElementById('kb-msgs');
+            var empty = document.getElementById('kb-msg-empty');
+            input.addEventListener('input', function () {
+              var q = input.value.trim().toLowerCase();
+              var shown = 0;
+              list.querySelectorAll('.kb-msg').forEach(function (el) {
+                var hit = !q || (el.getAttribute('data-msg') || '').indexOf(q) !== -1;
+                el.style.display = hit ? 'flex' : 'none';
+                if (hit) shown++;
+              });
+              if (empty) empty.hidden = shown !== 0;
+            });
+          })();
+        </script>
+      )}
     </Base>
   ) : (
     <Base title="Channel not found" noindex>

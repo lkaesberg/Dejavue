@@ -81,7 +81,7 @@ export async function runDemo(guild: Guild): Promise<DemoResult> {
     type: ChannelType.GuildForum,
     topic: 'Dejavue demo — ask questions here and watch duplicate detection + the solved archive in action.',
     availableTags: [{ name: 'solved' }, { name: 'unsolved' }],
-    reason: 'Dejavue /dejavue demo',
+    reason: 'Dejavue demo',
   })) as ForumChannel;
 
   const solvedTagId = forum.availableTags.find((t) => t.name === 'solved')?.id;

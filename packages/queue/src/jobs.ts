@@ -18,6 +18,8 @@ export const QUEUES = {
   REVALIDATE_KB: 'revalidate-kb',
   /** Download + re-host message attachments while the Discord CDN url is still fresh. */
   INGEST_ATTACHMENT: 'ingest-attachment',
+  /** Full rescan of a channel: re-embed everything + prune deleted content (durable). */
+  REINDEX_CHANNEL: 'reindex-channel',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -43,12 +45,26 @@ export interface NudgeStaleJob {
   guildId?: string;
 }
 
+/** Points at the one live message a worker continuously edits with progress. */
+export interface ProgressTarget {
+  channelId: string;
+  messageId: string;
+}
+
 export interface ClusterGapsJob {
   guildId: string;
+  /** When set, the worker renders progress + the final list into this message. */
+  progress?: ProgressTarget;
 }
 
 export interface RegenFaqJob {
   guildId: string;
+  progress?: ProgressTarget;
+}
+
+/** All mutable state lives in the reindex_job row; the payload just points at it. */
+export interface ReindexChannelJob {
+  reindexJobId: string;
 }
 
 export interface BackfillForumJob {

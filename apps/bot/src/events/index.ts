@@ -9,6 +9,7 @@ import { onChannelUpdate } from './channelUpdate';
 import { onEntitlementCreate, onEntitlementDelete, onEntitlementUpdate } from './entitlements';
 import { onInteraction } from './interactionCreate';
 import { onMessageCreate } from './messageCreate';
+import { onMessageDelete, onMessageDeleteBulk, onMessageUpdate } from './messageMutations';
 import { onThreadCreate } from './threadCreate';
 import { onThreadDelete } from './threadDelete';
 import { onThreadUpdate } from './threadUpdate';
@@ -49,6 +50,15 @@ export function registerEvents(client: Client): void {
   });
   client.on(Events.MessageCreate, (message) => {
     void onMessageCreate(message);
+  });
+  client.on(Events.MessageUpdate, (oldMessage, newMessage) => {
+    void onMessageUpdate(oldMessage, newMessage);
+  });
+  client.on(Events.MessageDelete, (message) => {
+    void onMessageDelete(message);
+  });
+  client.on(Events.MessageBulkDelete, (messages, channel) => {
+    void onMessageDeleteBulk(messages, channel);
   });
   client.on(Events.InteractionCreate, (interaction) => {
     void onInteraction(interaction);

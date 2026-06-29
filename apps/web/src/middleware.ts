@@ -47,17 +47,18 @@ export const onRequest = defineMiddleware(async (context, next) => {
     context.locals.tier = tier;
     context.locals.branded = !tierLimits(tier).removeBranding;
 
-    // Private KB passphrase gate.
+    // Private KB passphrase gate. The cookie token is bound to the current passphrase
+    // hash, so changing the passphrase instantly revokes every already-unlocked visitor.
+    // /mcp is exempt: AI clients can't use the browser cookie, so the MCP route does its
+    // own header-based auth (Authorization: Bearer <passphrase>) — see pages/mcp.ts.
     if (guild.kbPassphraseHash) {
       const url = new URL(context.request.url);
-      const cookieName = gateCookieName(guild.guildId);
-      const unlocked = isUnlocked(context.cookies.get(cookieName)?.value, guild.guildId);
 
       if (url.pathname === '/unlock' && context.request.method === 'POST') {
         const form = await context.request.formData();
         const passphrase = String(form.get('passphrase') ?? '');
         if (verifyPassphrase(passphrase, guild.kbPassphraseHash)) {
-          context.cookies.set(cookieName, gateToken(guild.guildId), {
+          context.cookies.set(gateCookieName(guild.guildId), gateToken(guild.guildId, guild.kbPassphraseHash), {
             httpOnly: true,
             sameSite: 'lax',
             path: '/',
@@ -72,11 +73,26 @@ export const onRequest = defineMiddleware(async (context, next) => {
         });
       }
 
-      if (!unlocked) {
-        return new Response(gateHtml(guild, { error: false, branded: context.locals.branded }), {
-          status: 200,
-          headers: { 'content-type': 'text/html; charset=utf-8' },
-        });
+      if (url.pathname !== '/mcp') {
+        const unlocked = isUnlocked(
+          context.cookies.get(gateCookieName(guild.guildId))?.value,
+          guild.guildId,
+          guild.kbPassphraseHash,
+        );
+        if (!unlocked) {
+          // Browser API routes (e.g. the summary stream) carry the cookie; if it's
+          // missing return a clear 401 JSON rather than the HTML gate.
+          if (url.pathname.startsWith('/api/')) {
+            return new Response(
+              JSON.stringify({ error: 'This knowledge base is private — a passphrase is required.' }),
+              { status: 401, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          return new Response(gateHtml(guild, { error: false, branded: context.locals.branded }), {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+          });
+        }
       }
     }
   }

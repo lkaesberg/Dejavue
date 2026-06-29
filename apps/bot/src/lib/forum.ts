@@ -193,12 +193,15 @@ export async function fetchTranscript(
         const { attachments, images: imgs } = mapAttachments(msg.attachments.values());
         if (!content && attachments.length === 0) continue; // nothing to keep
         images.push(...imgs);
+        let reactions = 0;
+        for (const r of msg.reactions.cache.values()) reactions += r.count;
         collected.push({
           id: msg.id,
           authorId: msg.author.id,
           content,
           createdAt: new Date(msg.createdTimestamp).toISOString(),
           ...(attachments.length ? { attachments } : {}),
+          ...(reactions ? { reactions } : {}),
         });
       }
       before = batch.last()?.id; // collection is newest-first, so last() is oldest

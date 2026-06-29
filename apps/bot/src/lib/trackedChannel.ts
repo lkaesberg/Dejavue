@@ -1,20 +1,45 @@
-import type { NewsChannel, TextChannel } from 'discord.js';
-import { childLogger } from '@dejavue/core';
 import {
-  countTracked,
+  ChannelType,
+  EmbedBuilder,
+  type NewsChannel,
+  type TextChannel,
+  type ThreadChannel,
+} from 'discord.js';
+import { embedContentHash } from '@dejavue/ai';
+import {
+  childLogger,
+  MIN_SEGMENT_MSGS,
+  reindexProgressEmbed,
+  segmentByGap,
+  segmentTitle,
+} from '@dejavue/core';
+import {
+  claimReindex,
+  countIndexedMessagesInChannel,
+  createReindexJob,
+  ensureChannelSync,
   ensureGuildConfig,
+  getActiveReindexJob,
   getDb,
   getThreadByDiscordId,
+  markChannelStale,
+  markChannelSynced,
   setLastEmbedMsgCount,
   setPublished,
   setTranscript,
   type TranscriptMessage,
   upsertThread,
 } from '@dejavue/db';
-import { enqueueEmbedThread, enqueueRevalidateKb, type IngestAttachmentItem } from '@dejavue/queue';
+import {
+  enqueueEmbedThread,
+  enqueueReindexChannel,
+  enqueueRevalidateKb,
+  type IngestAttachmentItem,
+} from '@dejavue/queue';
 import { mapAttachments, queueImageRehost } from './attachments';
+import { fetchTranscript } from './forum';
 import { isReembedDue } from './knowledge';
-import { getGuildTier, limitsFor } from './tier';
+import { atIndexCap } from './tier';
 
 const log = childLogger({ mod: 'tracked' });
 
@@ -23,13 +48,21 @@ const log = childLogger({ mod: 'tracked' });
  * there's no thread per topic, so we split the channel's recent messages into
  * conversation segments (a >20-minute silence starts a new one) and index each
  * segment as its own KB entry, keyed by the id of its first message. Segments
- * re-embed on the same growth backoff as knowledge threads, and count against a
- * tracked-docs quota that is separate from the forum archive.
+ * re-embed when their content changes; everything indexed is auto-published and
+ * counts against the guild's single total-message index cap.
+ *
+ * The live (debounced) capture only scans the most recent window. When that reveals
+ * the channel is missing history (a gap), we flip it to "stale" and kick a throttled
+ * full reindex (apps/worker/src/jobs/reindexChannel.ts) which rescans everything and
+ * prunes deleted content.
  */
 const DEBOUNCE_MS = 5000;
-const SEGMENT_GAP_MS = 20 * 60 * 1000;
-const MIN_SEGMENT_MSGS = 2; // skip one-off chatter
 const FETCH_LIMIT = 100;
+// How far back the live capture pages the MAIN channel. Bounded so a huge channel
+// doesn't re-scan forever each run — the full reindex job lifts this bound.
+const MAX_MAIN_MESSAGES = 300;
+// At most one auto-reindex per channel per hour (locked decision: throttled).
+const REINDEX_THROTTLE_MS = 60 * 60 * 1000;
 
 type TrackedChannel = TextChannel | NewsChannel;
 
@@ -51,65 +84,119 @@ export function scheduleTrackedCapture(channel: TrackedChannel): void {
   timer.unref();
 }
 
+const threadScheduled = new Set<string>();
+
+/** Debounced capture of a thread that lives inside a tracked normal channel. */
+export function scheduleTrackedThread(thread: ThreadChannel): void {
+  if (threadScheduled.has(thread.id)) return;
+  threadScheduled.add(thread.id);
+  const timer = setTimeout(() => {
+    void captureTrackedThread(thread)
+      .catch((err) => log.warn({ err, threadId: thread.id }, 'tracked thread capture failed'))
+      .finally(() => threadScheduled.delete(thread.id));
+  }, DEBOUNCE_MS);
+  timer.unref();
+}
+
 async function fetchRecent(
   channel: TrackedChannel,
-): Promise<{ messages: SegMsg[]; images: IngestAttachmentItem[] }> {
+): Promise<{ messages: SegMsg[]; images: IngestAttachmentItem[]; hitLimit: boolean; ok: boolean }> {
   const out: SegMsg[] = [];
   const images: IngestAttachmentItem[] = [];
+  let before: string | undefined;
+  let hitLimit = false;
+  let ok = true;
   try {
-    const batch = await channel.messages.fetch({ limit: FETCH_LIMIT });
-    for (const m of batch.values()) {
-      if (m.author?.bot) continue;
-      const content = m.content?.trim() ?? '';
-      const { attachments, images: imgs } = mapAttachments(m.attachments.values());
-      if (!content && attachments.length === 0) continue;
-      images.push(...imgs);
-      out.push({
-        messageId: m.id,
-        authorId: m.author.id,
-        content,
-        createdAt: new Date(m.createdTimestamp).toISOString(),
-        ...(attachments.length ? { attachments } : {}),
-      });
+    // Page back through the main channel so the whole conversation is captured.
+    while (out.length < MAX_MAIN_MESSAGES) {
+      const batch = await channel.messages.fetch(
+        before ? { limit: FETCH_LIMIT, before } : { limit: FETCH_LIMIT },
+      );
+      if (batch.size === 0) break;
+      for (const m of batch.values()) {
+        if (m.author?.bot) continue;
+        const content = m.content?.trim() ?? '';
+        const { attachments, images: imgs } = mapAttachments(m.attachments.values());
+        if (!content && attachments.length === 0) continue;
+        images.push(...imgs);
+        let reactions = 0;
+        for (const r of m.reactions.cache.values()) reactions += r.count;
+        out.push({
+          messageId: m.id,
+          authorId: m.author.id,
+          content,
+          createdAt: new Date(m.createdTimestamp).toISOString(),
+          ...(attachments.length ? { attachments } : {}),
+          ...(reactions ? { reactions } : {}),
+        });
+      }
+      before = batch.last()?.id; // newest-first, so last() is the oldest in the batch
+      if (!before || batch.size < FETCH_LIMIT) break;
+      if (out.length >= MAX_MAIN_MESSAGES) {
+        hitLimit = true; // stopped at the window cap — there may be older history
+        break;
+      }
     }
   } catch {
-    /* best effort */
+    ok = false; // transient: never prune / never claim a gap on a failed fetch
   }
   out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return { messages: out, images };
-}
-
-function segmentByGap(msgs: SegMsg[]): SegMsg[][] {
-  const segments: SegMsg[][] = [];
-  let current: SegMsg[] = [];
-  let lastTs = 0;
-  for (const m of msgs) {
-    const ts = Date.parse(m.createdAt);
-    if (current.length && ts - lastTs > SEGMENT_GAP_MS) {
-      segments.push(current);
-      current = [];
-    }
-    current.push(m);
-    lastTs = ts;
-  }
-  if (current.length) segments.push(current);
-  return segments;
-}
-
-function titleOf(seg: SegMsg[]): string {
-  const first = (seg[0]?.content ?? '').replace(/\s+/g, ' ').trim();
-  if (!first) return 'Conversation';
-  return first.length > 120 ? `${first.slice(0, 117)}…` : first;
+  return { messages: out, images, hitLimit, ok };
 }
 
 const toTranscript = (seg: SegMsg[]): TranscriptMessage[] =>
-  seg.map(({ messageId, authorId, content, createdAt, attachments }) => ({
+  seg.map(({ messageId, authorId, content, createdAt, attachments, reactions }) => ({
     id: messageId,
     authorId,
     content,
     createdAt,
     ...(attachments?.length ? { attachments } : {}),
+    ...(reactions ? { reactions } : {}),
   }));
+
+/** Newer-of two snowflake message ids (monotonic), null-safe. */
+function newerId(a: string | null | undefined, b: string | null | undefined): string | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return BigInt(a) >= BigInt(b) ? a : b;
+}
+
+/**
+ * Kick a throttled, durable full reindex of a tracked channel and post the single
+ * live-progress message the worker will keep editing. No-op if one is already in
+ * flight or the per-channel hourly throttle hasn't elapsed.
+ */
+async function triggerTrackedReindex(channel: TrackedChannel): Promise<void> {
+  const db = getDb();
+  const guildId = channel.guildId;
+  if (await getActiveReindexJob(db, guildId, channel.id)) return;
+  await ensureChannelSync(db, guildId, channel.id, 'channel');
+  if (!(await claimReindex(db, guildId, channel.id, REINDEX_THROTTLE_MS))) return;
+
+  let statusMessageId: string | null = null;
+  try {
+    const e = reindexProgressEmbed({
+      channelLabel: `<#${channel.id}>`,
+      kind: 'tracked',
+      phase: 'queued',
+      auto: true,
+    });
+    const msg = await channel.send({
+      embeds: [new EmbedBuilder().setTitle(e.title).setDescription(e.description).setColor(e.color)],
+    });
+    statusMessageId = msg.id;
+  } catch {
+    /* missing Send Messages — the reindex still runs, just without a live message */
+  }
+  const job = await createReindexJob(db, {
+    guildId,
+    channelId: channel.id,
+    kind: 'tracked',
+    statusChannelId: channel.id,
+    statusMessageId,
+  });
+  await enqueueReindexChannel({ reindexJobId: job.id });
+}
 
 async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
   const db = getDb();
@@ -117,13 +204,26 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
   const cfg = await ensureGuildConfig(db, guildId);
   // The channel may have been untracked during the debounce window.
   if (!cfg.trackedChannelIds.includes(channel.id)) return;
-  const limits = limitsFor(await getGuildTier(guildId));
+  const sync = await ensureChannelSync(db, guildId, channel.id, 'channel');
 
-  const { messages, images } = await fetchRecent(channel);
+  const { messages, images, hitLimit, ok } = await fetchRecent(channel);
   // Re-host images while their Discord urls are fresh (deduped in the worker).
   await queueImageRehost(guildId, images);
+
+  // Also capture the channel's threads (sub-conversations) as their own KB entries.
+  try {
+    const active = await channel.threads.fetchActive();
+    for (const t of active.threads.values()) scheduleTrackedThread(t);
+  } catch {
+    /* needs Read Message History on threads; best effort */
+  }
+
   const segments = segmentByGap(messages).filter((s) => s.length >= MIN_SEGMENT_MSGS);
-  if (segments.length === 0) return;
+
+  // Stop indexing NEW content once at the unified index cap (existing rows keep
+  // updating). Computed once per run (a guild-wide transcript sum is not free).
+  const atCap = await atIndexCap(guildId);
+  let cappedOut = false;
 
   for (const seg of segments) {
     const first = seg[0];
@@ -131,12 +231,8 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
     const threadId = first.messageId;
     const existing = await getThreadByDiscordId(db, guildId, threadId);
 
-    // Quota: only the *creation* of new segments is capped (existing rows keep updating).
-    if (
-      !existing &&
-      Number.isFinite(limits.trackedDocCap) &&
-      (await countTracked(db, guildId)) >= limits.trackedDocCap
-    ) {
+    if (!existing && atCap) {
+      cappedOut = true;
       continue;
     }
 
@@ -146,24 +242,29 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
       channelName: channel.name,
       kind: 'channel',
       threadId,
-      title: titleOf(seg),
+      title: segmentTitle(first.content),
       questionBody: first.content,
       opUserId: first.authorId,
       status: 'open',
     });
 
-    // Publish to the public KB (opt-in). The tracked quota is enforced at creation above.
-    if (cfg.kbPublishOptIn && !row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
+    // Everything indexed is online (auto-publish). The public site itself is still
+    // gated by kbPublishOptIn + the passphrase, but the row is always marked published.
+    if (!row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
       await setPublished(db, guildId, threadId, true).catch(() => undefined);
       await enqueueRevalidateKb({ guildId, threadId, action: 'publish' }).catch(() => undefined);
     }
 
     // The KB page must always show every message: re-capture the segment each run.
-    await setTranscript(db, row.id, toTranscript(seg)).catch(() => undefined);
+    const transcript = toTranscript(seg);
+    await setTranscript(db, row.id, transcript).catch(() => undefined);
 
-    // Re-index for search on the quadrupling backoff (frequent while the segment is
-    // small, rare once it's large and the topic has settled).
-    if (!isReembedDue(seg.length, row.lastEmbedMsgCount)) continue;
+    // Re-embed when the embed-source text changed since the last embed (edit/delete),
+    // or on the growth backoff while the segment is still forming.
+    const dirty =
+      row.embedContentHash !==
+      embedContentHash({ title: row.title, questionBody: row.questionBody, transcript });
+    if (!isReembedDue(seg.length, row.lastEmbedMsgCount, dirty)) continue;
     let queued = false;
     try {
       await enqueueEmbedThread({
@@ -180,4 +281,101 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
     }
     if (queued) await setLastEmbedMsgCount(db, row.id, Math.max(seg.length, 1));
   }
+
+  // Update freshness. A transient fetch failure must not move the watermark or claim
+  // a gap (mirrors the reconcile 10003-only safety invariant).
+  if (!ok) return;
+  const newestId = messages.at(-1)?.messageId ?? null;
+  const oldestId = messages[0]?.messageId ?? null;
+  const count = await countIndexedMessagesInChannel(db, guildId, channel.id);
+
+  // Gap = we're missing history between our watermark and what we just fetched, OR
+  // this is the first index of a channel with more history than one window.
+  let hasGap = false;
+  if (sync.lastIndexedMessageId == null) hasGap = hitLimit;
+  else if (oldestId && BigInt(oldestId) > BigInt(sync.lastIndexedMessageId)) hasGap = true;
+
+  if (cappedOut) {
+    await markChannelStale(db, guildId, channel.id, 'channel', 'cap');
+  } else if (hasGap) {
+    await markChannelStale(db, guildId, channel.id, 'channel', 'gap');
+    await triggerTrackedReindex(channel);
+  } else {
+    await markChannelSynced(
+      db,
+      guildId,
+      channel.id,
+      'channel',
+      newerId(newestId, sync.lastIndexedMessageId),
+      count,
+    );
+  }
+}
+
+/**
+ * Capture one thread that lives inside a tracked normal channel as a single KB
+ * entry — its whole conversation — grouped under the parent channel's category.
+ */
+async function captureTrackedThread(thread: ThreadChannel): Promise<void> {
+  const db = getDb();
+  const guildId = thread.guildId;
+  const parent = thread.parent;
+  if (
+    !parent ||
+    (parent.type !== ChannelType.GuildText && parent.type !== ChannelType.GuildAnnouncement)
+  ) {
+    return;
+  }
+  const cfg = await ensureGuildConfig(db, guildId);
+  if (!cfg.trackedChannelIds.includes(parent.id)) return; // untracked during debounce
+
+  const threadId = thread.id;
+  const existing = await getThreadByDiscordId(db, guildId, threadId);
+  // Stop indexing NEW content at the unified index cap (existing rows keep updating).
+  if (!existing && (await atIndexCap(guildId))) return;
+
+  // fetchTranscript also re-hosts any images posted in the thread.
+  const transcript = await fetchTranscript(thread);
+  const first = transcript[0];
+  const title = thread.name?.trim() || segmentTitle(first?.content);
+
+  const row = await upsertThread(db, {
+    guildId,
+    channelId: parent.id, // group under the parent channel, like the main-channel segments
+    channelName: parent.name,
+    kind: 'channel',
+    threadId,
+    title,
+    questionBody: first?.content ?? '',
+    opUserId: thread.ownerId ?? first?.authorId ?? null,
+    status: 'open',
+  });
+
+  if (!row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
+    await setPublished(db, guildId, threadId, true).catch(() => undefined);
+    await enqueueRevalidateKb({ guildId, threadId, action: 'publish' }).catch(() => undefined);
+  }
+
+  if (transcript.length > 0) await setTranscript(db, row.id, transcript).catch(() => undefined);
+
+  const msgCount = transcript.length;
+  const dirty =
+    row.embedContentHash !==
+    embedContentHash({ title: row.title, questionBody: row.questionBody, transcript });
+  if (!isReembedDue(msgCount, row.lastEmbedMsgCount, dirty)) return;
+  let queued = false;
+  try {
+    await enqueueEmbedThread({
+      threadRowId: row.id,
+      guildId,
+      modelId: cfg.embeddingModel,
+      title: row.title,
+      question: row.questionBody,
+      answer: null,
+    });
+    queued = true;
+  } catch (err) {
+    log.warn({ err, threadId }, 'tracked thread embed enqueue failed');
+  }
+  if (queued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
 }

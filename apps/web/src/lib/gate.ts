@@ -5,8 +5,10 @@ import { brandOf, brandInitial, themeVars } from './theme';
 
 // A private knowledge base is protected by one shared passphrase (set in
 // `/dejavue customize`). On unlock we set a signed, HttpOnly cookie so the visitor
-// stays in without re-entering it. The cookie is an HMAC over the guild id, so it
-// can't be forged and is scoped to this tenant.
+// stays in without re-entering it. The cookie is an HMAC over the guild id AND the
+// current passphrase hash, so it can't be forged, is scoped to this tenant, and —
+// critically — every existing cookie is invalidated the moment the admin changes the
+// passphrase (the expected token changes, so old cookies no longer match).
 
 function secret(): string {
   return getEnv().KB_REVALIDATE_SECRET || 'dejavue-insecure-dev-secret';
@@ -16,13 +18,17 @@ export function gateCookieName(guildId: string): string {
   return `dvkb_${guildId}`;
 }
 
-export function gateToken(guildId: string): string {
-  return createHmac('sha256', secret()).update(guildId).digest('hex');
+export function gateToken(guildId: string, passphraseHash: string): string {
+  return createHmac('sha256', secret()).update(`${guildId}:${passphraseHash}`).digest('hex');
 }
 
-export function isUnlocked(cookieValue: string | undefined, guildId: string): boolean {
+export function isUnlocked(
+  cookieValue: string | undefined,
+  guildId: string,
+  passphraseHash: string,
+): boolean {
   if (!cookieValue) return false;
-  const expected = gateToken(guildId);
+  const expected = gateToken(guildId, passphraseHash);
   const a = Buffer.from(cookieValue);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
@@ -52,15 +58,15 @@ export function gateHtml(cfg: GuildConfig, opts: { error?: boolean; branded: boo
 <style>
   :root, body { ${vars} }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:'Inter',sans-serif; background:radial-gradient(720px 460px at 50% -8%, var(--hero1), var(--bg) 72%); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:48px 24px; }
+  body { margin:0; font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:48px 24px; }
   .card { width:430px; max-width:100%; text-align:center; }
-  .logo { width:64px; height:64px; border-radius:16px; margin:0 auto; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-family:var(--headfont); font-weight:700; font-size:30px; box-shadow:0 12px 30px rgba(124,58,237,0.3); }
+  .logo { width:64px; height:64px; border-radius:16px; margin:0 auto; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-family:var(--headfont); font-weight:700; font-size:30px; }
   h1 { font-family:var(--headfont); font-weight:700; font-size:28px; letter-spacing:-0.025em; margin:22px 0 0; }
   p { font-size:15px; line-height:1.55; color:var(--textmid); margin:11px 0 0; }
   form { margin-top:24px; }
-  .field { display:flex; align-items:center; gap:11px; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:14px 16px; box-shadow:0 4px 18px rgba(20,21,42,0.05); }
+  .field { display:flex; align-items:center; gap:11px; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:14px 16px; }
   input { flex:1; border:none; outline:none; background:transparent; font-family:'JetBrains Mono',monospace; font-size:15px; letter-spacing:0.04em; color:var(--text); }
-  button { width:100%; margin-top:14px; border:none; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:15px; font-weight:600; padding:14px; border-radius:var(--rad); box-shadow:0 10px 26px rgba(124,58,237,0.3); }
+  button { width:100%; margin-top:14px; border:none; cursor:pointer; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-size:15px; font-weight:600; padding:14px; border-radius:var(--rad); }
 </style></head>
 <body><div class="card">
   <div class="logo">${initial}</div>

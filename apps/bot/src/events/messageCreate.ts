@@ -5,7 +5,7 @@ import { scheduleDedup } from '../lib/dedup';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
 import { scheduleQuestionArchive } from '../lib/solve';
-import { scheduleTrackedCapture } from '../lib/trackedChannel';
+import { scheduleTrackedCapture, scheduleTrackedThread } from '../lib/trackedChannel';
 
 const log = childLogger({ mod: 'event:messageCreate' });
 
@@ -35,6 +35,23 @@ export async function onMessageCreate(message: Message): Promise<void> {
   }
 
   if (!channel.isThread()) return;
+
+  // A thread inside a tracked normal channel → capture it as its own KB entry
+  // (sub-conversation), grouped under the parent channel.
+  const parent = channel.parent;
+  if (
+    parent &&
+    (parent.type === ChannelType.GuildText || parent.type === ChannelType.GuildAnnouncement)
+  ) {
+    try {
+      const cfg = await getGuildConfig(getDb(), channel.guildId);
+      if (cfg?.trackedChannelIds?.includes(parent.id)) scheduleTrackedThread(channel);
+    } catch (err) {
+      log.warn({ err, threadId: channel.id }, 'tracked-thread capture failed');
+    }
+    return;
+  }
+
   const forum = forumParent(channel);
   if (!forum) return;
 

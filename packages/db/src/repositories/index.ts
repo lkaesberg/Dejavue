@@ -5,6 +5,8 @@ export * from './search';
 export * from './entitlements';
 export * from './quota';
 export * from './backfill';
+export * from './reindex';
+export * from './channelSync';
 export * from './analytics';
 export * from './clusters';
 export * from './faq';

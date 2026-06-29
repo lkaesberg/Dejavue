@@ -21,12 +21,13 @@ export interface TierLimits {
   maxForumChannels: number;
   /** Number of tracked *normal* (non-forum) channels indexed as searchable KBs. */
   maxTrackedChannels: number;
-  /** Cap on indexed conversation segments captured from tracked normal channels. */
-  trackedDocCap: number;
-  /** In-Discord searchable archive cap (solved threads indexed for /search). */
-  archiveCap: number;
-  /** Public web KB published-page cap. */
-  kbPageCap: number;
+  /**
+   * Single cap on the TOTAL number of indexed messages across all forum + tracked
+   * content. Everything indexed is auto-published, so there is no separate archive
+   * vs published vs tracked cap — just one ceiling on index size. At the cap we stop
+   * indexing new content (existing entries keep working).
+   */
+  indexCap: number;
   /** Semantic (embedding) dedup + search, vs keyword-only. */
   semanticSearch: boolean;
   /** Stale-question nudges. */
@@ -52,9 +53,7 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
       return {
         maxForumChannels: UNLIMITED,
         maxTrackedChannels: UNLIMITED,
-        trackedDocCap: UNLIMITED,
-        archiveCap: UNLIMITED,
-        kbPageCap: UNLIMITED,
+        indexCap: UNLIMITED,
         semanticSearch: true,
         nudges: true,
         analytics: 'full',
@@ -70,9 +69,7 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
         // Generous but finite — only Max is unlimited.
         maxForumChannels: 5,
         maxTrackedChannels: 10,
-        trackedDocCap: 5000,
-        archiveCap: 2500,
-        kbPageCap: 500,
+        indexCap: 30_000,
         semanticSearch: true,
         nudges: true,
         analytics: 'full',
@@ -86,9 +83,7 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
       return {
         maxForumChannels: 3,
         maxTrackedChannels: 3,
-        trackedDocCap: 1000,
-        archiveCap: 1500,
-        kbPageCap: 100,
+        indexCap: 3_000,
         semanticSearch: true,
         nudges: true,
         analytics: 'full',
@@ -103,9 +98,7 @@ export function tierLimits(tier: Tier, proMonthlyQuota = 300): TierLimits {
       return {
         maxForumChannels: 1,
         maxTrackedChannels: 1,
-        trackedDocCap: 200,
-        archiveCap: 500,
-        kbPageCap: 10,
+        indexCap: 300,
         semanticSearch: false,
         nudges: false,
         analytics: 'basic',

@@ -1,4 +1,4 @@
-import { getEnv, tierLimits } from '@dejavue/core';
+import { getEnv, tierLimits, verifyPassphrase } from '@dejavue/core';
 import { getDb, getKbAnswersByRowIds, resolveGuildTier, semanticSearch } from '@dejavue/db';
 import type { APIRoute } from 'astro';
 
@@ -10,7 +10,7 @@ const SERVER = { name: 'dejavue-kb', version: '0.1.0' };
 const DEFAULT_PROTOCOL = '2025-06-18';
 const CORS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type, mcp-protocol-version, mcp-session-id',
+  'access-control-allow-headers': 'content-type, authorization, mcp-protocol-version, mcp-session-id',
   'access-control-allow-methods': 'POST, OPTIONS',
 };
 
@@ -88,6 +88,21 @@ export const GET: APIRoute = () =>
 export const POST: APIRoute = async ({ locals, request }) => {
   const tenant = locals.tenant;
   if (!tenant) return new Response('Not found', { status: 404, headers: CORS });
+
+  // Private KB: authenticate with the passphrase as a bearer token. AI clients can't
+  // use the browser cookie gate, so MCP carries the passphrase in an Authorization header.
+  const passphraseHash = locals.cfg?.kbPassphraseHash;
+  if (passphraseHash) {
+    const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+    if (!verifyPassphrase(token, passphraseHash)) {
+      return new Response(
+        JSON.stringify({
+          error: 'This knowledge base is private. Send your passphrase as `Authorization: Bearer <passphrase>`.',
+        }),
+        { status: 401, headers: { 'content-type': 'application/json', ...CORS } },
+      );
+    }
+  }
 
   const env = getEnv();
   const tier =

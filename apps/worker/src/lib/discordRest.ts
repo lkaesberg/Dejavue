@@ -52,6 +52,76 @@ export async function fetchStarterMessage(threadId: string): Promise<RawMessage 
   }
 }
 
-export async function postMessage(channelId: string, content: string): Promise<void> {
-  await rest().post(`/channels/${channelId}/messages`, { body: { content } });
+/** Fetch a channel's basic info (used to keep the denormalized channel name current). */
+export async function fetchChannelInfo(channelId: string): Promise<{ name?: string } | null> {
+  try {
+    return (await rest().get(`/channels/${channelId}`)) as { name?: string };
+  } catch {
+    return null;
+  }
+}
+
+export async function postMessage(channelId: string, content: string): Promise<string | null> {
+  const res = (await rest().post(`/channels/${channelId}/messages`, { body: { content } })) as {
+    id?: string;
+  };
+  return res?.id ?? null;
+}
+
+/** Discord message embed (raw REST shape). */
+export interface RawEmbed {
+  title?: string;
+  description?: string;
+  color?: number;
+}
+
+/**
+ * Edit a message we previously posted — the live-progress mechanism. REST works
+ * past the 15-minute interaction-token window, so a long reindex can keep updating
+ * one message. Best-effort: a 404 (user deleted it) is the caller's to swallow.
+ */
+export async function patchMessage(
+  channelId: string,
+  messageId: string,
+  body: { content?: string; embeds?: RawEmbed[] },
+): Promise<void> {
+  await rest().patch(`/channels/${channelId}/messages/${messageId}`, { body });
+}
+
+export async function deleteMessage(channelId: string, messageId: string): Promise<void> {
+  await rest().delete(`/channels/${channelId}/messages/${messageId}`);
+}
+
+export interface RawChannelMessage {
+  id: string;
+  content: string;
+  author?: { id: string; bot?: boolean };
+  timestamp: string;
+  attachments?: {
+    id: string;
+    url: string;
+    filename: string;
+    content_type?: string;
+    size?: number;
+    width?: number;
+    height?: number;
+  }[];
+  reactions?: { count: number }[];
+}
+
+/**
+ * Page a normal text channel's history (newest-first, 100 at a time). Mirrors the
+ * bot's channel.messages.fetch loop but over REST so the worker can rescan a tracked
+ * channel's FULL history without a gateway.
+ */
+export async function fetchChannelMessages(
+  channelId: string,
+  before?: string,
+): Promise<RawChannelMessage[]> {
+  const query = new URLSearchParams({ limit: '100' });
+  if (before) query.set('before', before);
+  const res = (await rest().get(`/channels/${channelId}/messages`, {
+    query,
+  })) as RawChannelMessage[];
+  return res ?? [];
 }

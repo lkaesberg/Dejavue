@@ -35,7 +35,7 @@ import {
 import { enqueueRevalidateKb } from '@dejavue/queue';
 import { COLOR } from './embeds';
 import { eph } from './reply';
-import { getGuildTier, limitsFor } from './tier';
+import { getGuildTier } from './tier';
 import { upsellPayload } from './upsell';
 
 const log = childLogger({ mod: 'cmd:customize' });
@@ -138,7 +138,7 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
     .addFields(
       { name: 'Brand name', value: brand, inline: true },
       { name: 'Public URL', value: cfg.customDomain ? `https://${cfg.customDomain}` : url, inline: true },
-      { name: 'Publishing', value: cfg.kbPublishOptIn ? '✅ on' : '⛔ off', inline: true },
+      { name: 'Public site', value: cfg.kbPublishOptIn ? '✅ on' : '⛔ off', inline: true },
       { name: 'Privacy', value: cfg.kbPassphraseHash ? '🔒 passphrase' : '🌐 public', inline: true },
       { name: 'Theme', value: labelFor(THEME_OPTS, cfg.kbTheme), inline: true },
       { name: 'Accent', value: labelFor(ACCENT_OPTS, cfg.kbAccent), inline: true },
@@ -152,7 +152,7 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
     new ButtonBuilder().setCustomId(ID.imprint).setLabel('Imprint…').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(ID.publish)
-      .setLabel(cfg.kbPublishOptIn ? 'Unpublish' : 'Publish')
+      .setLabel(cfg.kbPublishOptIn ? 'Turn site off' : 'Turn site on')
       .setEmoji(cfg.kbPublishOptIn ? '⛔' : '🌍')
       .setStyle(cfg.kbPublishOptIn ? ButtonStyle.Secondary : ButtonStyle.Success),
   );
@@ -187,10 +187,11 @@ function detailsModal(cfg: GuildConfig): ModalBuilder {
       row(
         new TextInputBuilder()
           .setCustomId('slug')
-          .setLabel('Subdomain slug (e.g. helio → helio.dejavue.app)')
+          .setLabel('Subdomain slug')
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
           .setMaxLength(40)
+          .setPlaceholder('e.g. helio → helio.dejavue.app')
           .setValue(cfg.kbSlug ?? ''),
       ),
       row(
@@ -205,11 +206,15 @@ function detailsModal(cfg: GuildConfig): ModalBuilder {
       row(
         new TextInputBuilder()
           .setCustomId('passphrase')
-          .setLabel('Passphrase (blank = public)')
+          .setLabel('Passphrase')
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
           .setMaxLength(128)
-          .setPlaceholder(cfg.kbPassphraseHash ? '•••••• (set — leave blank to keep)' : 'Leave blank for a public KB'),
+          .setPlaceholder(
+            cfg.kbPassphraseHash
+              ? '•••••• set — blank keeps it · type "none" to make public'
+              : 'Set a passphrase to make the KB private (blank = public)',
+          ),
       ),
       row(
         new TextInputBuilder()
@@ -316,11 +321,11 @@ export async function handleCustomizeButton(interaction: ButtonInteraction): Pro
     const next = !cfg.kbPublishOptIn;
     await updateGuildConfig(db, guildId, { kbPublishOptIn: next });
     if (next) {
-      const limits = limitsFor(await getGuildTier(guildId));
-      await publishExistingSolved(db, guildId, limits.kbPageCap).catch((err) =>
+      // Turning the public site on. Everything indexed is auto-published already, but
+      // flip any legacy unpublished rows so older content shows up too.
+      await publishExistingSolved(db, guildId).catch((err) =>
         log.warn({ err, guildId }, 'publish-existing on enable failed'),
       );
-      // Also publish any already-captured tracked-channel segments.
       for (const channelId of cfg.trackedChannelIds) {
         await publishExistingTracked(db, guildId, channelId).catch(() => undefined);
       }
@@ -372,11 +377,13 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
       }
     }
 
-    const passphrase = interaction.fields.getTextInputValue('passphrase');
-    if (passphrase.trim()) patch.kbPassphraseHash = hashPassphrase(passphrase.trim());
-    else if (passphrase === '') {
-      // Empty field clears the gate (makes the KB public again).
+    // Blank = KEEP the current passphrase (so editing other fields can't accidentally
+    // make a private KB public). An explicit "none"/"remove"/"public" clears the gate.
+    const passphrase = interaction.fields.getTextInputValue('passphrase').trim();
+    if (['none', 'remove', 'public', 'off'].includes(passphrase.toLowerCase())) {
       patch.kbPassphraseHash = null;
+    } else if (passphrase) {
+      patch.kbPassphraseHash = hashPassphrase(passphrase);
     }
 
     if (errors.length) {

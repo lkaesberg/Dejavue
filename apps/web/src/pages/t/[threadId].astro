@@ -8,7 +8,6 @@ import {
   getTopClusters,
   type Thread,
 } from '@dejavue/db';
-import { enqueueSummarize } from '@dejavue/queue';
 import ChannelRail from '../../components/ChannelRail.astro';
 import KbFooter from '../../components/KbFooter.astro';
 import KbNav from '../../components/KbNav.astro';
@@ -59,19 +58,10 @@ const channelName = thread?.channelName ?? '';
 const hasContent = !!(acceptedAnswer || thread?.questionBody);
 const brand = brandOf(cfg, tenant?.slug ?? undefined);
 
-// Lazy AI summary: enqueue on first view (generative tier, none yet); the worker
-// fills it in and the client polls + streams it into the card.
-let summaryPending = false;
-if (thread && tenant && !summary && hasContent && limits.generative) {
-  summaryPending = true;
-  await enqueueSummarize({
-    threadRowId: thread.id,
-    guildId: tenant.guildId,
-    question: thread.title,
-    answer: acceptedAnswer || thread.questionBody || thread.title,
-  }).catch(() => undefined);
-}
-
+// Lazy AI summary: generated + streamed token-by-token on first view via SSE (see the
+// bottom script + /api/summary/[id].stream). The card shows for Pro/Max whenever there's
+// content to summarize; with no stored summary yet it streams in live, then persists.
+const summaryPending = !!(thread && tenant && !summary && hasContent && limits.generative);
 const showSummaryCard = limits.generative && (!!summary || summaryPending);
 const isSolved = thread?.status === 'solved';
 const bestAnswer = acceptedAnswer || summary || (thread?.questionBody ?? '');
@@ -92,9 +82,15 @@ const avatarOf = (id: string): { initial: string; bg: string } =>
     ? { initial: 'O', bg: 'linear-gradient(135deg,#F0883E,#E0632C)' }
     : { initial: 'H', bg: 'linear-gradient(135deg,#4F46E5,#7C3AED)' };
 const fmtTime = (d: string): string =>
-  new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  new Date(d).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 const fmtDate = (d: Date | string | null | undefined): string =>
-  d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+  d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
 const fmtBytes = (n: number | undefined): string =>
   !n ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
@@ -349,20 +345,23 @@ const jsonLd = thread
             var el = document.getElementById('kb-summary');
             if (!el || el.getAttribute('data-pending') !== 'true') return;
             var id = el.getAttribute('data-thread');
-            var tries = 0;
-            var iv = setInterval(function () {
-              if (++tries > 24) { clearInterval(iv); return; }
-              fetch('/api/summary/' + encodeURIComponent(id) + '.json')
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) {
-                  if (d && d.ready && d.summary) {
-                    el.textContent = d.summary;
-                    el.removeAttribute('data-pending');
-                    clearInterval(iv);
-                  }
-                })
-                .catch(function () {});
-            }, 2500);
+            var started = false;
+            var es = new EventSource('/api/summary/' + encodeURIComponent(id) + '.stream');
+            es.onmessage = function (e) {
+              try {
+                var d = JSON.parse(e.data);
+                if (d && d.delta) {
+                  if (!started) { el.textContent = ''; started = true; }
+                  el.textContent += d.delta;
+                }
+              } catch (_) {}
+            };
+            es.addEventListener('done', function () {
+              es.close();
+              el.removeAttribute('data-pending');
+              if (!started && !el.textContent.trim()) el.textContent = 'No summary available.';
+            });
+            es.onerror = function () { es.close(); };
           })();
         </script>
       )}

@@ -240,18 +240,15 @@ export async function searchPublishedSemantic(
 
 /**
  * Publish all not-yet-published threads in a (knowledge) channel regardless of
- * solved status — newest first, up to the tier's page cap. Returns count added.
+ * solved status. Everything indexed is auto-published (the only ceiling is the
+ * unified index cap, enforced at capture time), so this flips every eligible row.
+ * Returns count added.
  */
 export async function publishExistingInChannel(
   db: Database,
   guildId: string,
   channelId: string,
-  cap: number,
 ): Promise<number> {
-  const alreadyPublished = await countPublished(db, guildId);
-  if (Number.isFinite(cap) && alreadyPublished >= cap) return 0;
-  const remaining = Number.isFinite(cap) ? cap - alreadyPublished : null;
-
   const rows = await db
     .select({ id: thread.id })
     .from(thread)
@@ -263,9 +260,7 @@ export async function publishExistingInChannel(
         eq(thread.doNotPublish, false),
         isNull(thread.duplicateOfThreadId),
       ),
-    )
-    .orderBy(sql`${thread.createdAt} desc nulls last`)
-    .limit(remaining ?? 1_000_000);
+    );
 
   if (rows.length === 0) return 0;
   await db
@@ -352,17 +347,10 @@ export async function setPublished(
 
 /**
  * Retroactively publish already-solved threads (e.g. when a guild first enables
- * the KB), newest first, up to the tier's page cap. Returns how many were added.
+ * the KB). Everything indexed is auto-published, so this flips every eligible
+ * solved row. Returns how many were added.
  */
-export async function publishExistingSolved(
-  db: Database,
-  guildId: string,
-  cap: number,
-): Promise<number> {
-  const alreadyPublished = await countPublished(db, guildId);
-  if (Number.isFinite(cap) && alreadyPublished >= cap) return 0;
-  const remaining = Number.isFinite(cap) ? cap - alreadyPublished : null;
-
+export async function publishExistingSolved(db: Database, guildId: string): Promise<number> {
   const rows = await db
     .select({ id: thread.id })
     .from(thread)
@@ -374,9 +362,7 @@ export async function publishExistingSolved(
         eq(thread.doNotPublish, false),
         isNull(thread.duplicateOfThreadId), // never retroactively publish a folded duplicate
       ),
-    )
-    .orderBy(sql`${thread.solvedAt} desc nulls last`)
-    .limit(remaining ?? 1_000_000);
+    );
 
   if (rows.length === 0) return 0;
   await db

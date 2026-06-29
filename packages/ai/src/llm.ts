@@ -59,6 +59,44 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   };
 }
 
+/**
+ * Streaming chat completion. Calls `onDelta` with each text chunk as it arrives and
+ * resolves with the full text + token usage once the stream ends. Used for the live
+ * KB summary (token-by-token in the browser).
+ */
+export async function chatStream(
+  opts: ChatOptions,
+  onDelta: (text: string) => void,
+): Promise<ChatResult> {
+  const model = opts.model ?? getEnv().OPENROUTER_MODEL;
+  const stream = await client().chat.completions.create({
+    model,
+    messages: [
+      ...(opts.system ? [{ role: 'system' as const, content: opts.system }] : []),
+      { role: 'user' as const, content: opts.user },
+    ],
+    max_tokens: opts.maxTokens ?? 700,
+    temperature: opts.temperature ?? 0.3,
+    stream: true,
+    stream_options: { include_usage: true },
+  });
+  let text = '';
+  let promptTokens = 0;
+  let completionTokens = 0;
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) {
+      text += delta;
+      onDelta(delta);
+    }
+    if (chunk.usage) {
+      promptTokens = chunk.usage.prompt_tokens ?? 0;
+      completionTokens = chunk.usage.completion_tokens ?? 0;
+    }
+  }
+  return { text, promptTokens, completionTokens, model };
+}
+
 const DRAFT_SYSTEM =
   'You are a community support assistant. Using ONLY the provided past solved answers, ' +
   "draft a concise answer to the user's question. If the sources do not clearly answer it, " +
@@ -183,6 +221,17 @@ export async function summarizeThread(input: {
     model: input.model,
     maxTokens: 180,
   });
+}
+
+/** Streaming variant of summarizeThread — emits the recap token-by-token. */
+export async function summarizeThreadStream(
+  input: { context: string; model?: string },
+  onDelta: (text: string) => void,
+): Promise<ChatResult> {
+  return chatStream(
+    { system: SUMMARY_SYSTEM, user: input.context, model: input.model, maxTokens: 180 },
+    onDelta,
+  );
 }
 
 /** Name a cluster of recurring questions with a short canonical title (Pro). */

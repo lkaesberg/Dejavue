@@ -1,7 +1,7 @@
 import type { Message, ThreadChannel } from 'discord.js';
+import { embedContentHash } from '@dejavue/ai';
 import { childLogger } from '@dejavue/core';
 import {
-  countPublished,
   ensureGuildConfig,
   getDb,
   getThreadByDiscordId,
@@ -10,10 +10,12 @@ import {
   setThreadLabels,
   setThreadStatus,
   setTranscript,
-  upsertThread,
   type Thread,
+  type TranscriptMessage,
+  upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
+import { SOLVE_BUTTON_ID, solvedNotice } from './embeds';
 import {
   applyTag,
   fetchTranscript,
@@ -67,13 +69,39 @@ export function scheduleQuestionArchive(thread: ThreadChannel): void {
 async function captureQuestionTranscript(thread: ThreadChannel): Promise<void> {
   const db = getDb();
   const row = await ensureThreadRow(thread);
+  let captured: TranscriptMessage[] = [];
   try {
-    const transcript = await fetchTranscript(thread);
-    if (transcript.length > 0) await setTranscript(db, row.id, transcript);
+    captured = await fetchTranscript(thread);
+    if (captured.length > 0) await setTranscript(db, row.id, captured);
   } catch (err) {
     log.warn({ err, threadId: thread.id }, 'failed to capture question transcript');
   }
   await setThreadLabels(db, thread.guildId, thread.id, threadLabels(thread)).catch(() => undefined);
+
+  // A solved post is embedded; if an edit/delete changed its content, re-embed so
+  // search stays accurate. (Unsolved posts aren't embedded until solve.)
+  if (row.status === 'solved') {
+    const transcript = captured.length > 0 ? captured : (row.transcript ?? []);
+    const dirty =
+      row.embedContentHash !==
+      embedContentHash({
+        title: row.title,
+        questionBody: row.questionBody,
+        acceptedAnswerText: row.acceptedAnswerText,
+        transcript,
+      });
+    if (dirty) {
+      const cfg = await ensureGuildConfig(db, thread.guildId);
+      await enqueueEmbedThread({
+        threadRowId: row.id,
+        guildId: thread.guildId,
+        modelId: cfg.embeddingModel,
+        title: row.title,
+        question: row.questionBody,
+        answer: row.acceptedAnswerText,
+      }).catch((err) => log.warn({ err, threadId: thread.id }, 'failed to re-embed edited thread'));
+    }
+  }
 }
 
 /** Apply the per-forum "unsolved" tag to a freshly created post (never to a solved one). */
@@ -98,6 +126,51 @@ export interface SolveOptions {
   answerText?: string;
   answerAuthorId?: string;
   solverId: string;
+  /** The "mark as solved" control message id, when the caller already knows it (modal path). */
+  controlMessageId?: string;
+}
+
+/** Find the bot's control/prompt message in a thread by its solve button. */
+async function findControlMessage(thread: ThreadChannel): Promise<Message | null> {
+  try {
+    // The control message is posted right after the starter, so the first page suffices.
+    const msgs = await thread.messages.fetch({ after: thread.id, limit: 20 });
+    for (const m of msgs.values()) {
+      if (!m.author.bot) continue;
+      for (const row of m.components) {
+        const comps = (row as { components?: { customId?: string | null }[] }).components ?? [];
+        if (comps.some((c) => c.customId === SOLVE_BUTTON_ID)) return m;
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+  return null;
+}
+
+/**
+ * Resolve the "select the answer" control prompt once a thread is solved: delete it
+ * (default — declutters the thread) or, if the guild turned that off, edit it into a
+ * "solved" notice.
+ */
+async function resolveControlPrompt(
+  thread: ThreadChannel,
+  removeSolvedPrompt: boolean,
+  opts: SolveOptions,
+): Promise<void> {
+  const msg = opts.controlMessageId
+    ? await thread.messages.fetch(opts.controlMessageId).catch(() => null)
+    : await findControlMessage(thread);
+  if (!msg) return;
+  if (removeSolvedPrompt) {
+    await msg.delete().catch(() => undefined);
+    return;
+  }
+  const showBranding = !limitsFor(await getGuildTier(thread.guildId)).removeBranding;
+  const answerAuthorId = opts.answer?.author.id ?? opts.answerAuthorId ?? opts.solverId;
+  await msg
+    .edit(solvedNotice({ showBranding, solverId: opts.solverId, answerAuthorId }))
+    .catch(() => undefined);
 }
 
 /** Swap solved/unsolved tags, persist the accepted answer, archive + index + (opt-in) publish. */
@@ -143,8 +216,6 @@ export async function solveThread(
   // Capture the thread's custom forum labels for the KB + filtering.
   await setThreadLabels(db, guildId, thread.id, threadLabels(thread)).catch(() => undefined);
 
-  const limits = limitsFor(await getGuildTier(guildId));
-
   // Index the solved post for semantic search (heavy embedding → worker).
   try {
     await enqueueEmbedThread({
@@ -162,19 +233,20 @@ export async function solveThread(
   // AI summaries are generated lazily — only when a KB page is actually opened
   // (see apps/web) — so we never pay to summarize threads nobody reads.
 
-  // Public KB (all tiers, opt-in, capped). Duplicates are never published on
-  // their own — they're folded under the canonical thread.
-  if (cfg.kbPublishOptIn && !row.doNotPublish && !row.duplicateOfThreadId) {
+  // Everything indexed is auto-published (online). The public site itself is gated by
+  // kbPublishOptIn + the passphrase. Duplicates are never published on their own —
+  // they're folded under the canonical thread.
+  if (!row.doNotPublish && !row.duplicateOfThreadId) {
     try {
-      const published = await countPublished(db, guildId);
-      if (published < limits.kbPageCap) {
-        await setPublished(db, guildId, thread.id, true);
-        await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });
-      }
+      await setPublished(db, guildId, thread.id, true);
+      await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });
     } catch (err) {
       log.warn({ err, threadId: thread.id }, 'failed to publish to KB');
     }
   }
+
+  // Declutter: remove the "select the answer" control prompt (or, if disabled, mark it).
+  await resolveControlPrompt(thread, cfg.removeSolvedPrompt, opts).catch(() => undefined);
 
   return row;
 }

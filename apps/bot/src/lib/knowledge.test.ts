@@ -36,4 +36,20 @@ describe('isReembedDue (knowledge re-embed backoff)', () => {
     expect(isReembedDue(1000, 256)).toBe(false);
     expect(isReembedDue(5000, 512)).toBe(false);
   });
+
+  it('re-embeds on an in-place content change (edit/delete: count did not grow)', () => {
+    // Edit on a small thread: count unchanged + dirty → re-embed (would otherwise wait for 4×).
+    expect(isReembedDue(1, 1)).toBe(false);
+    expect(isReembedDue(1, 1, true)).toBe(true);
+    // Edit on a settled thread (past the cap): still re-embeds.
+    expect(isReembedDue(256, 256, true)).toBe(true);
+    // Delete (count dropped) on a settled thread: re-embeds.
+    expect(isReembedDue(200, 256, true)).toBe(true);
+  });
+
+  it('keeps pure growth on the backoff even when the hash changed (fewer re-embeds)', () => {
+    // New messages change the embed text (dirty) but count grew past last → still backoff.
+    expect(isReembedDue(2, 1, true)).toBe(false); // 1 → needs 4
+    expect(isReembedDue(300, 256, true)).toBe(false); // settled cap holds for growth
+  });
 });

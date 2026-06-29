@@ -1,4 +1,11 @@
-import { ChannelType, type Client, DiscordAPIError, type Guild } from 'discord.js';
+import {
+  ChannelType,
+  type Client,
+  DiscordAPIError,
+  type Guild,
+  type NewsChannel,
+  type TextChannel,
+} from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import {
   deleteThreadsByChannel,
@@ -14,6 +21,7 @@ import {
   updateGuildConfig,
 } from '@dejavue/db';
 import { ensureForumTags, forumParent, threadLabels } from './forum';
+import { scheduleTrackedCapture } from './trackedChannel';
 
 const sameLabels = (a: string[], b: string[]): boolean =>
   a.length === b.length && [...a].sort().join(' ') === [...b].sort().join(' ');
@@ -100,6 +108,10 @@ async function reconcileGuild(guild: Guild): Promise<void> {
           ) {
             await updateChannelName(db, guild.id, channelId, ch.name);
             await setChannelGuidelines(db, guild.id, channelId, ch.topic ?? null);
+            // Re-capture so edits/deletes that happened while offline drop out of the
+            // index (rebuilds transcripts from live Discord; gap detection handles
+            // deeper history by kicking a reindex). Debounced + idempotent-per-channel.
+            scheduleTrackedCapture(ch as TextChannel | NewsChannel);
           }
         } catch {
           /* best effort */
