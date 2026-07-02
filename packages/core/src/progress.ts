@@ -97,7 +97,7 @@ export type GenPhase = 'queued' | 'working' | 'done' | 'failed';
 export interface GenProgressState {
   kind: GenKind;
   phase: GenPhase;
-  /** Short progress note while working (e.g. "analyzing 124 questions"). */
+  /** Short note: progress while working, or a caveat on the final render. */
   note?: string;
   /** The final rendered list (markdown), shown when phase === 'done'. */
   body?: string;
@@ -122,7 +122,9 @@ export function genProgressEmbed(s: GenProgressState): ProgressEmbed {
     case 'done':
       return {
         title,
-        description: `${s.body && s.body.trim() ? s.body : '_Nothing to show yet._'}\n\n_Updated just now._`,
+        description: `${s.body && s.body.trim() ? s.body : '_Nothing to show yet._'}${
+          s.note ? `\n\n⚠️ ${s.note}` : ''
+        }\n\n_Updated just now._`,
         color: COLOR_DONE,
       };
     case 'failed':

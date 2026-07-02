@@ -1,4 +1,13 @@
-import { getEnv, type Tier, type TierLimits, type TierSkus, tierLimits } from '@dejavue/core';
+import {
+  getEnv,
+  isMonitoredForum,
+  type MonitoredChannelConfig,
+  quotasFromEnv,
+  type Tier,
+  type TierLimits,
+  type TierSkus,
+  tierLimits,
+} from '@dejavue/core';
 import { countIndexedMessages, getDb, resolveGuildTier } from '@dejavue/db';
 
 interface CacheEntry {
@@ -35,7 +44,22 @@ export function invalidateTier(guildId: string): void {
 }
 
 export function limitsFor(tier: Tier): TierLimits {
-  return tierLimits(tier, getEnv().PRO_MONTHLY_QUOTA);
+  return tierLimits(tier, quotasFromEnv(getEnv()));
+}
+
+/**
+ * Tier-aware "should the bot act in this forum" guard for event handlers.
+ * Combines the "empty config = all forums" pre-setup rule with the downgrade
+ * cap (only the first N configured channels stay active) — see
+ * isMonitoredForum in @dejavue/core. Uses the cached tier, so it's hot-path safe.
+ */
+export async function monitoredForum(
+  guildId: string,
+  cfg: MonitoredChannelConfig | null | undefined,
+  forumId: string,
+): Promise<boolean> {
+  const limits = limitsFor(await getGuildTier(guildId));
+  return isMonitoredForum(cfg, forumId, limits.maxForumChannels);
 }
 
 /**

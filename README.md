@@ -6,7 +6,8 @@ searchable archive — inside Discord, on a public SEO knowledge base, and (on t
 **MCP server** your AI tools can query.
 
 It's monetized per-server through **Discord Premium Apps**, with pricing aligned to cost: keyword
-features are free, semantic search anchors the mid tier, and generative AI lives behind a quota up top.
+features are free, semantic search anchors the mid tier, and generative AI is metered in **AI credits**
+(1 credit = 1,000 tokens) — a small taster budget on Plus, serious budgets on Pro/Max.
 
 ---
 
@@ -14,7 +15,7 @@ features are free, semantic search anchors the mid tier, and generative AI lives
 
 1. **Someone posts** in a monitored forum → Dejavue debounces, reads the question, and checks for
    duplicates (keyword on Free, semantic on Plus+). If it finds similar solved posts, it replies with
-   the matches — plus, on Pro/Max, an **AI-drafted answer**.
+   the matches — plus, on Plus and up, an **AI-drafted answer** (credit-metered).
 2. The asker (or a helper) resolves it: click **Mark as solved** (which opens a modal so an answer is
    always captured), right-click the helpful reply → **Apps → Mark as Answer**, or hit
    **Use top answer & close** on the duplicate suggestion to borrow a previous answer.
@@ -40,7 +41,7 @@ Only the **original poster, a moderator, or an admin** can resolve a thread.
 - Per-forum `solved` / `unsolved` tag automation (created automatically on setup).
 - Full thread **transcript** captured on solve (privacy-aliased speakers on the public KB).
 
-**AI (Pro / Max, quota-metered via OpenRouter → DeepSeek V4 Pro)**
+**AI (credit-metered via OpenRouter → DeepSeek V4 Pro; drafts on Plus+, full suite on Pro/Max)**
 - **Answer drafting** from past solved threads when a duplicate is found.
 - **Thread summarization** into a canonical KB answer.
 - **Knowledge-gap clustering** — groups recurring questions so you know what docs to write.
@@ -68,22 +69,30 @@ Only the **original poster, a moderator, or an admin** can resolve a thread.
 
 Billed per-server via Discord Premium Apps (prices are suggestions — set the real amounts on your SKUs).
 
+AI usage is metered in **AI credits** (1 credit = 1,000 model tokens, input + output). Each drafted
+answer costs ≈ 0.8 credits and each thread summary ≈ 3, so the quotas below translate to roughly
+"drafts per month" at 1.25× the credit number. Everything indexed counts against one **indexed
+messages** ceiling (there is no separate archive/KB-page cap); public KB pages themselves are
+unlimited, gated only by the per-guild publish opt-in + optional passphrase.
+
 | | **Free** | **Plus** ~$4.99 | **Pro** ~$9.99 | **Max** ~$24.99 |
 |---|---|---|---|---|
-| Forum channels | 1 | 3 | 5 | unlimited |
-| Duplicate detection / search | keyword | semantic | semantic + AI draft | semantic + AI draft |
-| Mark-solved + archive | ✓ (≤500) | ✓ (≤1,500) | ✓ (≤2,500) | ✓ unlimited |
+| Forum channels | 1 | 5 | 10 | unlimited |
+| Tracked (non-forum) channels | 1 | 5 | 15 | unlimited |
+| Indexed messages | 500 | 5,000 | 50,000 | unlimited |
+| Duplicate detection / search | keyword | semantic | semantic | semantic |
+| AI-drafted answers on duplicates | — | ✓ (taster) | ✓ | ✓ |
+| AI summary / clustering / auto-FAQ | — | — | ✓ | ✓ |
+| **AI credits / mo** | — | **25** | **1,000** | **5,000** |
 | Stale-question nudges | — | ✓ | ✓ | ✓ |
 | Analytics | basic counts | full | full | full |
-| AI summary / clustering / auto-FAQ | — | — | ✓ | ✓ |
-| AI generation quota / mo | — | — | ~300 | ~1,500 |
-| Public KB pages | 10 | 100 | 500 | unlimited |
 | KB answer rendering | raw | raw | AI-summarized | AI-summarized |
-| **MCP server** | — | — | — | **✓** |
+| **MCP server** | — | — | — | **✓** (30 req/min) |
 | "Powered by Dejavue" branding | shown | removed | removed | removed |
 
-**One-time purchases** (any tier): **Backfill** (import existing forum history) · **Custom domain**
-(serve the KB on your own domain) · **Top-up** (extra AI generations, consumable).
+**One-time purchases** (any tier): **Custom domain** (serve the KB on your own domain) · **Top-up**
+(**+250 AI credits**, consumable, stacks, never expires). Importing existing forum history is included
+— setup reindexes past threads up to the tier's indexed-message limit.
 
 ---
 
@@ -185,8 +194,9 @@ named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature local
 
 `DATABASE_URL` · `DISCORD_TOKEN` · `DISCORD_CLIENT_ID` · `DISCORD_DEV_GUILD_ID` ·
 `OPENROUTER_API_KEY` · `OPENROUTER_MODEL` (default `deepseek/deepseek-v4-pro`) ·
-`KB_BASE_DOMAIN` (default `dejavue.app`) · `PRO_MONTHLY_QUOTA` (default 300) · the `SKU_*` ids ·
-`DEV_FORCE_TIER` (dev only).
+`KB_BASE_DOMAIN` (default `dejavue.app`) · `QUOTA_CREDITS_PLUS` / `QUOTA_CREDITS_PRO` /
+`QUOTA_CREDITS_MAX` (monthly AI credits: 25 / 1,000 / 5,000) · `TOPUP_CREDITS` (default 250) ·
+`MCP_RATE_PER_MIN` (default 30) · the `SKU_*` ids · `DEV_FORCE_TIER` (dev only).
 
 **Embeddings** are pluggable via `EMBEDDING_PROVIDER`:
 

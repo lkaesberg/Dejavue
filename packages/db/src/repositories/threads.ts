@@ -195,6 +195,24 @@ export async function setCanonicalSummary(
 }
 
 /**
+ * Store the canonical summary only if none exists yet. Returns whether this
+ * caller won the claim — concurrent first viewers of a KB page race to
+ * generate the same summary, and only the winner should meter the generation.
+ */
+export async function claimCanonicalSummary(
+  db: Database,
+  threadRowId: string,
+  summary: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(thread)
+    .set({ canonicalSummary: summary, updatedAt: new Date() })
+    .where(and(eq(thread.id, threadRowId), isNull(thread.canonicalSummary)))
+    .returning({ id: thread.id });
+  return rows.length > 0;
+}
+
+/**
  * Mark a thread as a duplicate of a canonical thread (folded in the KB). Folding
  * also unpublishes it: a duplicate is never a standalone KB page, so leaving it
  * published would waste the tier's page cap and orphan a no-longer-reachable URL.

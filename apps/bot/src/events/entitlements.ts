@@ -3,12 +3,14 @@ import { childLogger } from '@dejavue/core';
 import { getDb, markEntitlementDeleted, upsertEntitlement } from '@dejavue/db';
 import { mapEntitlement } from '../lib/entitlementMap';
 import { invalidateTier } from '../lib/tier';
+import { grantTopUp } from '../lib/topUp';
 import { checkTierUpgrade } from '../lib/upgrade';
 
 const log = childLogger({ mod: 'event:entitlement' });
 
 export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
   await upsertEntitlement(getDb(), mapEntitlement(ent));
+  await grantTopUp(ent);
   if (ent.guildId) {
     invalidateTier(ent.guildId);
     await checkTierUpgrade(ent.guildId);

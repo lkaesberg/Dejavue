@@ -5,6 +5,7 @@ import { scheduleDedup } from '../lib/dedup';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
 import { scheduleQuestionArchive } from '../lib/solve';
+import { monitoredForum } from '../lib/tier';
 import { scheduleTrackedCapture, scheduleTrackedThread } from '../lib/trackedChannel';
 
 const log = childLogger({ mod: 'event:messageCreate' });
@@ -57,7 +58,7 @@ export async function onMessageCreate(message: Message): Promise<void> {
 
   try {
     const cfg = await getGuildConfig(getDb(), channel.guildId);
-    if (cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) return;
+    if (!(await monitoredForum(channel.guildId, cfg, forum.id))) return;
     if (channelMode(cfg, forum.id) === 'knowledge') {
       // Any message keeps the archived/embedded copy current, not just the starter.
       scheduleKnowledgeArchive(channel);

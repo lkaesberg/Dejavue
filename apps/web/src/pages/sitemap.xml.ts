@@ -12,7 +12,9 @@ export const GET: APIRoute = async ({ locals, request }) => {
   if (!tenant) return new Response('Not found', { status: 404 });
 
   const origin = new URL(request.url).origin;
-  const threads = await getPublishedThreads(getDb(), tenant.guildId, 5000);
+  // 50,000 URLs is the sitemap-protocol cap for a single file; guilds beyond
+  // that need a sitemap index (deferred until any tenant approaches the limit).
+  const threads = await getPublishedThreads(getDb(), tenant.guildId, 50_000);
   const urls = [
     { loc: `${origin}/` },
     ...threads.map((t) => ({

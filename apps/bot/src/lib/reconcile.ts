@@ -3,6 +3,7 @@ import { childLogger } from '@dejavue/core';
 import { getDb, type NewEntitlement, reconcileGuildEntitlements } from '@dejavue/db';
 import { mapEntitlement } from './entitlementMap';
 import { invalidateTier } from './tier';
+import { grantTopUp } from './topUp';
 import { checkTierUpgrade } from './upgrade';
 
 const log = childLogger({ mod: 'reconcile' });
@@ -24,6 +25,8 @@ export async function reconcileAllEntitlements(client: Client): Promise<void> {
       const rows = byGuild.get(ent.guildId) ?? [];
       rows.push(mapEntitlement(ent));
       byGuild.set(ent.guildId, rows);
+      // Heal top-up purchases whose CREATE event we missed (grant is idempotent).
+      if (!ent.consumed) await grantTopUp(ent).catch((err) => log.warn({ err }, 'top-up heal failed'));
     }
     for (const [guildId, rows] of byGuild) {
       await reconcileGuildEntitlements(getDb(), guildId, rows);

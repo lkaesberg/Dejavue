@@ -37,6 +37,7 @@ import {
   type IngestAttachmentItem,
 } from '@dejavue/queue';
 import { mapAttachments, queueImageRehost } from './attachments';
+import { keyedTrailingDebounce } from './debounce';
 import { fetchTranscript } from './forum';
 import { isReembedDue } from './knowledge';
 import { atIndexCap } from './tier';
@@ -70,32 +71,30 @@ interface SegMsg extends TranscriptMessage {
   messageId: string;
 }
 
-const scheduled = new Set<string>();
+/**
+ * Debounced (trailing-safe) captures: message bursts collapse to one run, and a
+ * message landing while a capture is in flight triggers one follow-up run — so
+ * the KB never waits for unrelated later activity to show it.
+ */
+const debouncedChannelCapture = keyedTrailingDebounce<TrackedChannel>(
+  DEBOUNCE_MS,
+  captureTrackedChannel,
+  (err, channel) => log.warn({ err, channelId: channel.id }, 'tracked capture failed'),
+);
 
-/** Debounced, idempotent-per-channel capture (collapses message bursts to one run). */
 export function scheduleTrackedCapture(channel: TrackedChannel): void {
-  if (scheduled.has(channel.id)) return;
-  scheduled.add(channel.id);
-  const timer = setTimeout(() => {
-    void captureTrackedChannel(channel)
-      .catch((err) => log.warn({ err, channelId: channel.id }, 'tracked capture failed'))
-      .finally(() => scheduled.delete(channel.id));
-  }, DEBOUNCE_MS);
-  timer.unref();
+  debouncedChannelCapture(channel.id, channel);
 }
 
-const threadScheduled = new Set<string>();
+const debouncedThreadCapture = keyedTrailingDebounce<ThreadChannel>(
+  DEBOUNCE_MS,
+  captureTrackedThread,
+  (err, thread) => log.warn({ err, threadId: thread.id }, 'tracked thread capture failed'),
+);
 
 /** Debounced capture of a thread that lives inside a tracked normal channel. */
 export function scheduleTrackedThread(thread: ThreadChannel): void {
-  if (threadScheduled.has(thread.id)) return;
-  threadScheduled.add(thread.id);
-  const timer = setTimeout(() => {
-    void captureTrackedThread(thread)
-      .catch((err) => log.warn({ err, threadId: thread.id }, 'tracked thread capture failed'))
-      .finally(() => threadScheduled.delete(thread.id));
-  }, DEBOUNCE_MS);
-  timer.unref();
+  debouncedThreadCapture(thread.id, thread);
 }
 
 async function fetchRecent(

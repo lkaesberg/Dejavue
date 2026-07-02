@@ -14,7 +14,7 @@ import {
 } from './jobs';
 
 export * from './jobs';
-export { getBoss, startBoss, stopBoss } from './boss';
+export { getBoss, QUEUE_POLICIES, startBoss, stopBoss } from './boss';
 
 // --------------------------------------------------------------------------
 // Producers (enqueue)
@@ -47,13 +47,21 @@ export async function enqueueRegenFaq(job: RegenFaqJob): Promise<void> {
 
 export async function enqueueBackfill(job: BackfillForumJob): Promise<void> {
   const boss = await startBoss();
-  await boss.send(QUEUES.BACKFILL_FORUM, job, { singletonKey: job.backfillJobId });
+  // expireInSeconds also set per-send so a long import survives even if the
+  // queue-level policy hasn't been retrofitted yet (see QUEUE_POLICIES).
+  await boss.send(QUEUES.BACKFILL_FORUM, job, {
+    singletonKey: job.backfillJobId,
+    expireInSeconds: 6 * 3600,
+  });
 }
 
 export async function enqueueReindexChannel(job: ReindexChannelJob): Promise<void> {
   const boss = await startBoss();
   // One in-flight worker per job row even if enqueued twice (command + auto-gap).
-  await boss.send(QUEUES.REINDEX_CHANNEL, job, { singletonKey: job.reindexJobId });
+  await boss.send(QUEUES.REINDEX_CHANNEL, job, {
+    singletonKey: job.reindexJobId,
+    expireInSeconds: 6 * 3600,
+  });
 }
 
 export async function enqueueRevalidateKb(job: RevalidateKbJob): Promise<void> {

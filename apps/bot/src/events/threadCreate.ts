@@ -6,7 +6,7 @@ import { controlMessage } from '../lib/embeds';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
 import { ensureThreadRow, tagUnsolved } from '../lib/solve';
-import { getGuildTier, limitsFor } from '../lib/tier';
+import { getGuildTier, limitsFor, monitoredForum } from '../lib/tier';
 
 const log = childLogger({ mod: 'event:threadCreate' });
 
@@ -22,8 +22,8 @@ export async function onThreadCreate(
   const guildId = thread.guildId;
   const db = getDb();
   const cfg = await getGuildConfig(db, guildId);
-  // Only act on configured forums (once any are configured).
-  if (cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) return;
+  // Only act on monitored forums (configured + within the tier's channel cap).
+  if (!(await monitoredForum(guildId, cfg, forum.id))) return;
 
   // Already-solved threads (demo seeds / re-triggers) need no control message or unsolved tag.
   const existing = await getThreadByDiscordId(db, guildId, thread.id);

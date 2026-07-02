@@ -12,6 +12,7 @@ import ChannelRail from '../../components/ChannelRail.astro';
 import KbFooter from '../../components/KbFooter.astro';
 import KbNav from '../../components/KbNav.astro';
 import Base from '../../layouts/Base.astro';
+import { resolveMentions } from '../../lib/discordText';
 import { brandOf, channelHandle, channelKind } from '../../lib/theme';
 
 const { tenant, cfg, tier } = Astro.locals;
@@ -99,6 +100,8 @@ for (const m of chatMsgs) {
   memberAlias.set(m.authorId, { name: `Member ${n}`, bg: AVATAR_BGS[(n - 1) % AVATAR_BGS.length]! });
 }
 const aliasOf = (id: string): string => memberAlias.get(id)?.name ?? 'Member';
+// Mentioned users get the same anonymization as speakers ("@Member 3").
+const clean = (s: string): string => resolveMentions(s, aliasOf);
 const avatarBgOf = (id: string): string => memberAlias.get(id)?.bg ?? AVATAR_BGS[0]!;
 const fmtTime = (d: string): string =>
   new Date(d).toLocaleString('en-US', {
@@ -188,7 +191,7 @@ const fmtBytes = (n: number | undefined): string =>
                   </div>
                   <div id="kb-msgs" style="display:flex; flex-direction:column; gap:16px; padding-top:18px;">
                     {chatMsgs.map((m) => {
-                      const filterText = [m.content, aliasOf(m.authorId), ...(m.attachments ?? []).map((a) => a.name)]
+                      const filterText = [clean(m.content), aliasOf(m.authorId), ...(m.attachments ?? []).map((a) => a.name)]
                         .join(' ')
                         .toLowerCase();
                       return (
@@ -200,7 +203,7 @@ const fmtBytes = (n: number | undefined): string =>
                               <span style="font-size:12px; color:var(--textmut);">{fmtTime(m.createdAt)}</span>
                             </div>
                             {m.content && (
-                              <div style="font-size:14px; line-height:1.6; color:var(--textmid); margin-top:4px; white-space:pre-wrap;">{m.content}</div>
+                              <div style="font-size:14px; line-height:1.6; color:var(--textmid); margin-top:4px; white-space:pre-wrap;">{clean(m.content)}</div>
                             )}
                             {(m.attachments ?? []).length > 0 && (
                               <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">

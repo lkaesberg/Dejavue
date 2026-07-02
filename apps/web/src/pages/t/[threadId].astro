@@ -12,6 +12,7 @@ import ChannelRail from '../../components/ChannelRail.astro';
 import KbFooter from '../../components/KbFooter.astro';
 import KbNav from '../../components/KbNav.astro';
 import Base from '../../layouts/Base.astro';
+import { resolveMentions } from '../../lib/discordText';
 import { brandOf, channelKind } from '../../lib/theme';
 
 const { tenant, cfg, tier } = Astro.locals;
@@ -77,6 +78,9 @@ for (const m of transcript) {
   else labels.set(m.authorId, `Helper ${++helperCount}`);
 }
 const aliasOf = (id: string): string => labels.get(id) ?? 'Member';
+// Mentioned users get the same anonymization as speakers ("@Original poster",
+// "@Helper 2"); a mentioned non-participant falls back to "@Member".
+const clean = (s: string): string => resolveMentions(s, aliasOf);
 const avatarOf = (id: string): { initial: string; bg: string } =>
   thread && id === thread.opUserId
     ? { initial: 'O', bg: 'linear-gradient(135deg,#F0883E,#E0632C)' }
@@ -101,9 +105,9 @@ const jsonLd = thread
       mainEntity: {
         '@type': 'Question',
         name: thread.title,
-        text: thread.questionBody || thread.title,
+        text: clean(thread.questionBody || thread.title),
         answerCount: bestAnswer ? 1 : 0,
-        ...(bestAnswer ? { acceptedAnswer: { '@type': 'Answer', text: bestAnswer } } : {}),
+        ...(bestAnswer ? { acceptedAnswer: { '@type': 'Answer', text: clean(bestAnswer) } } : {}),
       },
     }
   : null;
@@ -113,7 +117,7 @@ const jsonLd = thread
   thread ? (
     <Base
       title={`${thread.title} — ${brand}`}
-      description={(thread.questionBody || thread.title).slice(0, 160)}
+      description={clean(thread.questionBody || thread.title).slice(0, 160)}
       canonical={`${origin}/t/${thread.threadId}`}
     >
       <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
@@ -165,7 +169,7 @@ const jsonLd = thread
                   data-thread={thread.threadId}
                   data-pending={summaryPending ? 'true' : 'false'}
                   style="font-size:15.5px; line-height:1.65; color:var(--text); margin:14px 0 0; white-space:pre-wrap;"
-                >{summary || 'Generating a summary…'}</p>
+                >{summary ? clean(summary) : 'Generating a summary…'}</p>
               </div>
             )}
 
@@ -176,7 +180,7 @@ const jsonLd = thread
                   <span style="display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; background:#2DD4BF; color:#fff; font-size:13px; font-weight:700;">✓</span>
                   <span style="font-family:var(--headfont); font-weight:600; font-size:14px; color:#0F9B82;">Accepted answer</span>
                 </div>
-                <p style="font-size:15.5px; line-height:1.65; color:var(--text); margin:15px 0 0; white-space:pre-wrap;">{acceptedAnswer}</p>
+                <p style="font-size:15.5px; line-height:1.65; color:var(--text); margin:15px 0 0; white-space:pre-wrap;">{clean(acceptedAnswer)}</p>
               </div>
             )}
 
@@ -197,7 +201,7 @@ const jsonLd = thread
                   {transcript.map((m) => {
                     const accepted = !!m.id && m.id === acceptedMessageId;
                     const atts = m.attachments ?? [];
-                    const filterText = [m.content, ...atts.map((a) => a.name)].join(' ').toLowerCase();
+                    const filterText = [clean(m.content), ...atts.map((a) => a.name)].join(' ').toLowerCase();
                     return (
                       <div class="kb-msg" data-msg={filterText} style="display:flex; gap:13px;">
                         <div style={`width:34px; height:34px; border-radius:50%; background:${avatarOf(m.authorId).bg}; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:600;`}>{avatarOf(m.authorId).initial}</div>
@@ -210,7 +214,7 @@ const jsonLd = thread
                             )}
                           </div>
                           {m.content && (
-                            <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`}>{m.content}</div>
+                            <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`}>{clean(m.content)}</div>
                           )}
                           {atts.length > 0 && (
                             <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
@@ -253,7 +257,7 @@ const jsonLd = thread
             {transcript.length === 0 && thread.questionBody && (
               <div style="margin-top:30px;">
                 <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">{acceptedAnswer ? 'Question' : 'Details'}</div>
-                <div style="font-size:15px; line-height:1.65; color:var(--textmid); margin-top:12px; white-space:pre-wrap;">{thread.questionBody}</div>
+                <div style="font-size:15px; line-height:1.65; color:var(--textmid); margin-top:12px; white-space:pre-wrap;">{clean(thread.questionBody)}</div>
               </div>
             )}
 

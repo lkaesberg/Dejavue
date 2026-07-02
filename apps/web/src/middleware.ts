@@ -73,7 +73,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
         });
       }
 
-      if (url.pathname !== '/mcp') {
+      // /api/health is exempt like /mcp: it exposes no tenant data and deploy
+      // orchestration can't hold a passphrase cookie.
+      if (url.pathname !== '/mcp' && url.pathname !== '/api/health') {
         const unlocked = isUnlocked(
           context.cookies.get(gateCookieName(guild.guildId))?.value,
           guild.guildId,

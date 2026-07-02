@@ -1,6 +1,7 @@
-import { getEnv, tierLimits, verifyPassphrase } from '@dejavue/core';
-import { getDb, getKbAnswersByRowIds, resolveGuildTier, semanticSearch } from '@dejavue/db';
+import { getEnv, quotasFromEnv, tierLimits, verifyPassphrase } from '@dejavue/core';
+import { getDb, getKbAnswersByRowIds, hybridSearch, resolveGuildTier } from '@dejavue/db';
 import type { APIRoute } from 'astro';
+import { takeToken } from '../lib/rateLimit';
 
 // Minimal MCP (Streamable HTTP, stateless) server exposing each Pro guild's
 // knowledge base as a `search_knowledge_base` tool. Served per-tenant at
@@ -55,8 +56,11 @@ async function search(
   const db = getDb();
   const { embedOne, embeddingModelId } = await import('@dejavue/ai');
   const vector = await embedOne(query, { mode: 'query', model });
-  const matches = await semanticSearch(db, {
+  // Hybrid: exact-term overlap boosts semantic matches — AI clients often
+  // search for literal error messages or command names.
+  const matches = await hybridSearch(db, {
     guildId,
+    query,
     queryVector: vector,
     limit,
     minSimilarity: 0.3,
@@ -112,7 +116,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
       pro: env.SKU_PRO,
       max: env.SKU_MAX,
     }));
-  if (!tierLimits(tier).mcp) {
+  const limits = tierLimits(tier, quotasFromEnv(env));
+  if (!limits.mcp) {
     return new Response(JSON.stringify({ error: 'The MCP server is a Max-tier feature.' }), {
       status: 402,
       headers: { 'content-type': 'application/json', ...CORS },
@@ -154,6 +159,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
           const name = msg.params?.name as string;
           if (name !== 'search_knowledge_base') {
             responses.push(fail(id, -32602, `Unknown tool: ${name}`));
+            break;
+          }
+          // Burst protection per tenant — searches are cheap but not free
+          // (embedding + vector query), and MCP clients can loop fast.
+          if (!takeToken(`mcp:${tenant.guildId}`, limits.mcpRequestsPerMinute)) {
+            responses.push(fail(id, -32000, 'Rate limited — retry in a few seconds.'));
             break;
           }
           const text = await search(

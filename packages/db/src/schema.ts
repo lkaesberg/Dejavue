@@ -65,6 +65,13 @@ export type KbHeadingFont = 'grotesk' | 'sans' | 'serif';
 /** Off-topic guard sensitivity → how readily a post is judged wrong-channel. */
 export type GuardSensitivity = 'low' | 'medium' | 'high';
 
+/**
+ * Dedup setting: a preset name, or a custom minimum-similarity percentage as a
+ * numeric string ('0'–'100'). `string & {}` keeps preset autocompletion while
+ * allowing the numeric form.
+ */
+export type DedupSensitivity = GuardSensitivity | (string & {});
+
 /** Imprint fields rendered on the public KB's legal page. */
 export interface KbImprint {
   operator?: string;
@@ -169,8 +176,10 @@ export const guildConfig = pgTable('guild_config', {
   guardSensitivity: text('guard_sensitivity').$type<GuardSensitivity>().notNull().default('medium'),
   wrongChannelTagId: text('wrong_channel_tag_id'),
   // How readily a new post is suggested as a duplicate of an existing one (semantic
-  // dedup, Plus+). Maps to a cosine-similarity bar — see apps/bot/src/lib/dedup.ts.
-  dedupSensitivity: text('dedup_sensitivity').$type<GuardSensitivity>().notNull().default('medium'),
+  // dedup, Plus+). Either a preset name ('low' | 'medium' | 'high') or a custom
+  // minimum-similarity percentage stored as a numeric string ('0'–'100') — resolved
+  // by dedupMinSimilarity in @dejavue/core.
+  dedupSensitivity: text('dedup_sensitivity').$type<DedupSensitivity>().notNull().default('medium'),
   // When a question is solved, delete the bot's control/prompt message (declutter)
   // instead of editing it into a "solved" notice. Default on.
   removeSolvedPrompt: boolean('remove_solved_prompt').notNull().default(true),
@@ -350,8 +359,11 @@ export const channelSync = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Generation quota ledger (Pro). Usage = aggregate over the current window.
-// Never store a mutable "remaining" counter.
+// Generation quota ledger. Usage = sum of prompt+completion tokens over the
+// current window (surfaced as AI credits, 1 credit = 1,000 tokens — see
+// @dejavue/core). Never store a mutable "remaining" counter.
+// topUpCreditsConsumed = whole credits billed to top-up grants for the portion
+// of this generation that spilled past the base monthly budget.
 // ---------------------------------------------------------------------------
 export const generationEvent = pgTable(
   'generation_event',
@@ -370,7 +382,7 @@ export const generationEvent = pgTable(
   (t) => [index('genevent_guild_created_idx').on(t.guildId, t.createdAt)],
 );
 
-/** Consumable top-up grants (extra generations), modeled as ledger credits. */
+/** Consumable top-up grants (extra AI credits, 1 credit = 1,000 tokens). */
 export const topUpGrant = pgTable(
   'top_up_grant',
   {

@@ -6,6 +6,7 @@ import {
 } from 'discord.js';
 import { genProgressEmbed, getEnv } from '@dejavue/core';
 import {
+  checkQuota,
   generationStatus,
   getDb,
   getFaqEntries,
@@ -30,6 +31,29 @@ const wrap = (e: { title: string; description: string; color: number }): EmbedBu
   new EmbedBuilder().setTitle(e.title).setDescription(e.description).setColor(e.color);
 
 /**
+ * When the monthly credits are exhausted, reply with a top-up upsell instead of
+ * enqueueing a job that would immediately no-op. Returns true when blocked.
+ */
+async function blockedOnCredits(
+  interaction: Repliable,
+  guildId: string,
+  baseCredits: number,
+): Promise<boolean> {
+  const quota = await checkQuota(getDb(), guildId, baseCredits);
+  if (quota.allowed) return false;
+  await interaction.reply({
+    ...upsellPayload({
+      title: 'Out of AI credits for this month',
+      description:
+        'This run needs AI credits, and the monthly budget is used up. Credits reset on the 1st (UTC) — or top up to keep going now.',
+      skuId: getEnv().SKU_TOPUP,
+    }),
+    flags: MessageFlags.Ephemeral,
+  });
+  return true;
+}
+
+/**
  * Cluster recurring questions and render the result into ONE live message the worker
  * keeps editing (no "run again"). Shared by `/dejavue insights` and its hub button.
  */
@@ -49,6 +73,7 @@ export async function runGaps(interaction: Repliable): Promise<void> {
     });
     return;
   }
+  if (await blockedOnCredits(interaction, guildId, limits.monthlyCredits)) return;
   await interaction.deferReply();
   const cfg = await getGuildConfig(db, guildId);
   const st = generationStatus(cfg, 'cluster', GEN_OPTS);
@@ -93,6 +118,7 @@ export async function runFaq(interaction: Repliable): Promise<void> {
     });
     return;
   }
+  if (await blockedOnCredits(interaction, guildId, limits.monthlyCredits)) return;
   await interaction.deferReply();
   const cfg = await getGuildConfig(db, guildId);
   const st = generationStatus(cfg, 'faq', GEN_OPTS);

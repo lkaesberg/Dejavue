@@ -12,7 +12,7 @@ import {
 } from '@dejavue/db';
 import type { RegenFaqJob } from '@dejavue/queue';
 import { LiveProgress } from '../lib/progress';
-import { guildGenerationQuota } from '../lib/quota';
+import { guildCreditBudget } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:regen-faq' });
 const MAX_FAQ = 10;
@@ -20,13 +20,13 @@ const MAX_FAQ = 10;
 const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Render the current FAQ into the live message (final state). */
-async function renderFaq(guildId: string, live: LiveProgress): Promise<void> {
+async function renderFaq(guildId: string, live: LiveProgress, note?: string): Promise<void> {
   const faqs = await getFaqEntries(getDb(), guildId);
   const body = faqs
     .slice(0, 8)
     .map((f) => `**${truncate(f.question, 120)}**\n${truncate(f.answer, 280)}`)
     .join('\n\n');
-  await live.finalize(genProgressEmbed({ kind: 'faq', phase: 'done', body }));
+  await live.finalize(genProgressEmbed({ kind: 'faq', phase: 'done', body, note }));
 }
 
 /** Generate / maintain the auto-FAQ from the top clusters (Pro, quota-metered). */
@@ -35,20 +35,22 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
   const db = getDb();
   const live = job.progress ? new LiveProgress(job.progress) : null;
   live?.update(genProgressEmbed({ kind: 'faq', phase: 'working', note: 'drafting answers…' }));
+  let stoppedOnQuota = false;
   try {
     if (!env.OPENROUTER_API_KEY) {
       log.warn('OPENROUTER_API_KEY not set; skipping FAQ regen');
       await markGenerationFinished(db, job.guildId, 'faq');
       return;
     }
-    const baseQuota = await guildGenerationQuota(job.guildId);
+    const baseCredits = await guildCreditBudget(job.guildId);
     const clusters = await getTopClusters(db, job.guildId, MAX_FAQ);
 
     for (const cluster of clusters) {
       if (!cluster.medoidThreadId) continue;
-      const quota = await checkQuota(db, job.guildId, baseQuota);
+      const quota = await checkQuota(db, job.guildId, baseCredits);
       if (!quota.allowed) {
-        log.info({ guildId: job.guildId }, 'quota exhausted; stopping FAQ regen');
+        log.info({ guildId: job.guildId }, 'AI credits exhausted; stopping FAQ regen');
+        stoppedOnQuota = true;
         break;
       }
       const [medoid] = await getThreadsByRowIds(db, [cluster.medoidThreadId]);
@@ -73,13 +75,18 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
         model: res.model,
         promptTokens: res.promptTokens,
         completionTokens: res.completionTokens,
-        usedBefore: quota.used,
-        baseQuota,
+        usedTokensBefore: quota.usedTokens,
+        baseCredits,
       });
     }
     await markGenerationFinished(db, job.guildId, 'faq');
     log.info({ guildId: job.guildId, clusters: clusters.length }, 'regenerated FAQ');
   } finally {
-    if (live) await renderFaq(job.guildId, live).catch(() => undefined);
+    if (live) {
+      const note = stoppedOnQuota
+        ? 'Stopped early — monthly AI credits used up. Top up or wait for the reset on the 1st (UTC).'
+        : undefined;
+      await renderFaq(job.guildId, live, note).catch(() => undefined);
+    }
   }
 }

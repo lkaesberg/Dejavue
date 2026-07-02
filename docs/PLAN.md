@@ -1,9 +1,11 @@
 # Dejavue — Discord Q&A Deduplication Bot (Implementation Plan)
 
 > **Historical design doc.** This is the originally approved plan. The shipped product has since
-> evolved — notably a 4th **Max** tier (only Max has unlimited caps; Pro is finite), **Plus = 3**
-> forum channels, a **custom-domain** one-time purchase, full-**transcript** KB pages, and an **MCP
-> server** (Max). See **[README.md](../README.md)** for the current, authoritative tiers + features.
+> evolved — notably a 4th **Max** tier (only Max has unlimited caps; Pro is finite), a **custom-domain**
+> one-time purchase, full-**transcript** KB pages, and an **MCP server** (Max). AI metering moved from
+> per-generation counts to **token-based AI credits** (1 credit = 1,000 tokens; taster budget on Plus),
+> and the per-tier "KB page caps" described below were replaced by a single **indexed-messages**
+> ceiling. See **[README.md](../README.md)** for the current, authoritative tiers + features.
 
 ## Context
 

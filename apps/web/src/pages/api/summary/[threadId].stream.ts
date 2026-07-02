@@ -1,10 +1,10 @@
-import { tierLimits } from '@dejavue/core';
+import { getEnv, quotasFromEnv, tierLimits } from '@dejavue/core';
 import {
   checkQuota,
+  claimCanonicalSummary,
   commitGeneration,
   getDb,
   getPublishedThread,
-  setCanonicalSummary,
 } from '@dejavue/db';
 import type { APIRoute } from 'astro';
 
@@ -63,8 +63,8 @@ export const GET: APIRoute = async ({ locals, params }) => {
         const hasContent = !!(thread.acceptedAnswerText || thread.questionBody);
         if (!hasContent) return done();
 
-        const baseQuota = tierLimits(tier).monthlyGenerationQuota;
-        const quota = await checkQuota(db, guildId, baseQuota);
+        const baseCredits = tierLimits(tier, quotasFromEnv(getEnv())).monthlyCredits;
+        const quota = await checkQuota(db, guildId, baseCredits);
         if (!quota.allowed) return done();
 
         const { buildSummaryContext, summarizeThreadStream } = await import('@dejavue/ai');
@@ -79,11 +79,12 @@ export const GET: APIRoute = async ({ locals, params }) => {
         const result = await summarizeThreadStream({ context }, (delta) => send({ delta }));
         const summary = result.text.trim();
 
-        // Persist + meter — unless a concurrent first-viewer already did (avoid double count).
+        // Persist + meter. The conditional-UPDATE claim is atomic: when two
+        // first-viewers race, exactly one wins the write and meters the
+        // generation — the loser streamed its copy but stores/charges nothing.
         if (summary) {
-          const fresh = await getPublishedThread(db, guildId, threadId);
-          if (!fresh?.canonicalSummary) {
-            await setCanonicalSummary(db, thread.id, summary);
+          const claimed = await claimCanonicalSummary(db, thread.id, summary);
+          if (claimed) {
             await commitGeneration(db, {
               guildId,
               feature: 'summary',
@@ -91,8 +92,8 @@ export const GET: APIRoute = async ({ locals, params }) => {
               promptTokens: result.promptTokens,
               completionTokens: result.completionTokens,
               threadId: thread.id,
-              usedBefore: quota.used,
-              baseQuota,
+              usedTokensBefore: quota.usedTokens,
+              baseCredits,
             });
           }
         }

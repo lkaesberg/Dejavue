@@ -1,5 +1,5 @@
 import type { ThreadChannel } from 'discord.js';
-import { childLogger, getEnv } from '@dejavue/core';
+import { activeForumChannels, childLogger, dedupMinSimilarity, getEnv } from '@dejavue/core';
 import {
   channelMode,
   checkQuota,
@@ -9,26 +9,24 @@ import {
   getThreadByDiscordId,
   getThreadsByRowIds,
   type GuildConfig,
+  hybridSearch,
   keywordSearch,
   listChannelTopicChannelIds,
   type SearchMatch,
-  semanticSearch,
   updateGuildConfig,
 } from '@dejavue/db';
 import { assessChannel, ensureChannelTopics } from './channelFit';
 import { channelFitMessage, channelGuardMessage, duplicatesMessage } from './embeds';
 import { applyTag, ensureWrongChannelTag, fetchStarterWithRetry, forumParent } from './forum';
 import { closeThread } from './solve';
-import { getGuildTier, limitsFor } from './tier';
+import { getGuildTier, limitsFor, monitoredForum } from './tier';
 
 const log = childLogger({ mod: 'dedup' });
 
 const DEBOUNCE_MS = 4000;
-// How readily to flag a reworded post as a duplicate, by the guild's chosen
-// sensitivity (/dejavue settings). bge-small cosine for genuine paraphrases sits
-// ~0.65–0.85: 'low' only catches near-identical reposts, 'high' flags loosely-related
-// ones too, 'medium' (default) is the balanced bar.
-const DEDUP_THRESHOLDS = { low: 0.8, medium: 0.65, high: 0.5 } as const;
+// How readily to flag a reworded post as a duplicate: the guild's chosen preset
+// or custom similarity % (/dejavue settings) resolves to a cosine floor via
+// dedupMinSimilarity. bge-small cosine for genuine paraphrases sits ~0.65–0.85.
 
 /** Threads we've already scheduled, so threadCreate + messageCreate collapse to one run. */
 const scheduled = new Set<string>();
@@ -45,18 +43,18 @@ export function scheduleDedup(thread: ThreadChannel): void {
   timer.unref();
 }
 
-/** Pro: draft an answer from matched solved threads, metered against the quota. */
+/** Plus+: draft an answer from matched solved threads, metered in AI credits. */
 async function maybeDraft(
   guildId: string,
   question: string,
   matches: SearchMatch[],
-  baseQuota: number,
+  baseCredits: number,
 ): Promise<string | undefined> {
   const env = getEnv();
   if (!env.OPENROUTER_API_KEY) return undefined;
   const db = getDb();
   try {
-    const quota = await checkQuota(db, guildId, baseQuota);
+    const quota = await checkQuota(db, guildId, baseCredits);
     if (!quota.allowed) return undefined;
 
     const rows = await getThreadsByRowIds(db, matches.map((m) => m.rowId));
@@ -73,8 +71,8 @@ async function maybeDraft(
       model: result.model,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
-      usedBefore: quota.used,
-      baseQuota,
+      usedTokensBefore: quota.usedTokens,
+      baseCredits,
     });
     return result.text.trim() || undefined;
   } catch (err) {
@@ -104,7 +102,10 @@ async function maybeGuardOrSuggest(
     const present = new Set(
       await listChannelTopicChannelIds(db, thread.guildId, embeddingModelId(cfg.embeddingModel)),
     );
-    const candidates = cfg.forumChannelIds.filter((id) => channelMode(cfg, id) !== 'knowledge');
+    const limits = limitsFor(await getGuildTier(thread.guildId));
+    const candidates = activeForumChannels(cfg.forumChannelIds, limits.maxForumChannels).filter(
+      (id) => channelMode(cfg, id) !== 'knowledge',
+    );
     if (candidates.some((id) => !present.has(id))) {
       // Build the missing topics for next time (ensureChannelTopics is guarded).
       void ensureChannelTopics(thread.guild, cfg).catch(() => undefined);
@@ -146,9 +147,7 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
   const guildId = thread.guildId;
   const forum = forumParent(thread);
   const cfg = await getGuildConfig(db, guildId);
-  if (forum && cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) {
-    return;
-  }
+  if (forum && !(await monitoredForum(guildId, cfg, forum.id))) return;
   // Knowledge channels are a pure archive — never post duplicate reminders.
   if (forum && channelMode(cfg, forum.id) === 'knowledge') return;
 
@@ -168,13 +167,19 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
   if (limits.semanticSearch) {
     const { embedOne, embeddingModelId } = await import('@dejavue/ai');
     queryVector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
-    matches = await semanticSearch(db, {
+    // Hybrid: direct keyword overlap boosts the similarity, so an identically-
+    // worded repost (same error message, same command) ranks above a merely
+    // related thread and can clear the sensitivity bar. Keyword-only hits are
+    // excluded — they'd make noisy duplicate suggestions.
+    matches = await hybridSearch(db, {
       guildId,
+      query,
       queryVector,
       limit: 3,
-      minSimilarity: DEDUP_THRESHOLDS[cfg?.dedupSensitivity ?? 'medium'],
+      minSimilarity: dedupMinSimilarity(cfg?.dedupSensitivity),
       excludeThreadId: thread.id,
       modelId: embeddingModelId(cfg?.embeddingModel),
+      includeKeywordOnly: false,
     });
   } else {
     matches = await keywordSearch(db, { guildId, query, limit: 3, excludeThreadId: thread.id });
@@ -189,8 +194,8 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
 
   if (matches.length === 0) return;
 
-  const draft = limits.generative
-    ? await maybeDraft(guildId, query, matches, limits.monthlyGenerationQuota)
+  const draft = limits.aiDrafts
+    ? await maybeDraft(guildId, query, matches, limits.monthlyCredits)
     : undefined;
   try {
     await thread.send(duplicatesMessage(guildId, matches, !limits.removeBranding, draft));

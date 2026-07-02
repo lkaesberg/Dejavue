@@ -21,6 +21,7 @@ import { enqueueRevalidateKb } from '@dejavue/queue';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
 import { scheduleQuestionArchive } from '../lib/solve';
+import { monitoredForum } from '../lib/tier';
 import { scheduleTrackedCapture, scheduleTrackedThread } from '../lib/trackedChannel';
 
 const log = childLogger({ mod: 'event:messageMutations' });
@@ -84,7 +85,7 @@ async function recapture(channel: AnyChannel | null | undefined, reason: string)
   const forum = forumParent(thread);
   if (!forum) return;
   const cfg = await getGuildConfig(db, guildId);
-  if (cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) return;
+  if (!(await monitoredForum(guildId, cfg, forum.id))) return;
   if (channelMode(cfg, forum.id) === 'knowledge') {
     await markChannelStale(db, guildId, forum.id, 'forum', reason).catch(() => undefined);
     scheduleKnowledgeArchive(thread);

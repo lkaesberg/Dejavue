@@ -239,6 +239,47 @@ export async function searchPublishedSemantic(
 }
 
 /**
+ * Hybrid KB search: semantic results with a keyword-overlap boost, plus direct
+ * keyword hits the embeddings missed appended below (their `relevance` is left
+ * unset, so the UI badges them "keyword"). A result matching both by meaning
+ * AND by exact terms outranks a meaning-only match. The keyword leg's ts_rank
+ * isn't returned by searchPublished, so the boost is scaled by rank position.
+ */
+export async function searchPublishedHybrid(
+  db: Database,
+  guildId: string,
+  query: string,
+  queryVector: number[],
+  modelId: string,
+  limit = 20,
+  channelId?: string,
+  keywordBoost = 0.15,
+): Promise<KbSearchResult[]> {
+  const candidates = Math.max(limit * 2, 30);
+  const [semantic, keyword] = await Promise.all([
+    searchPublishedSemantic(db, guildId, queryVector, modelId, candidates, channelId),
+    searchPublished(db, guildId, query, candidates, channelId),
+  ]);
+  // Position-based keyword weight: best keyword hit = 1, decaying linearly.
+  const kwWeight = new Map(
+    keyword.map((r, i) => [r.threadId, (keyword.length - i) / keyword.length] as const),
+  );
+
+  const fused: KbSearchResult[] = semantic
+    .map((r) => ({
+      ...r,
+      relevance: Math.min(0.99, (r.relevance ?? 0) + keywordBoost * (kwWeight.get(r.threadId) ?? 0)),
+    }))
+    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+
+  const seen = new Set(fused.map((r) => r.threadId));
+  for (const r of keyword) {
+    if (!seen.has(r.threadId)) fused.push(r); // keyword-only recall, ranked last
+  }
+  return fused.slice(0, limit);
+}
+
+/**
  * Publish all not-yet-published threads in a (knowledge) channel regardless of
  * solved status. Everything indexed is auto-published (the only ceiling is the
  * unified index cap, enforced at capture time), so this flips every eligible row.
@@ -310,27 +351,6 @@ export async function publishExistingTracked(
       ),
     );
   return rows.length;
-}
-
-/**
- * Number of threads that occupy a KB page against the tier cap. Must mirror
- * getPublishedThreads' filter — a folded or do-not-publish thread isn't a visible
- * page, so it must not consume the cap.
- */
-export async function countPublished(db: Database, guildId: string): Promise<number> {
-  const [row] = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(thread)
-    .where(
-      and(
-        eq(thread.guildId, guildId),
-        eq(thread.kind, 'forum'), // tracked-channel segments have a separate quota
-        eq(thread.publishedToKb, true),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId),
-      ),
-    );
-  return row?.c ?? 0;
 }
 
 export async function setPublished(

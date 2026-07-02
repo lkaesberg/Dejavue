@@ -9,7 +9,7 @@ import {
   SlashCommandBuilder,
   type TextChannel,
 } from 'discord.js';
-import { childLogger, getEnv } from '@dejavue/core';
+import { childLogger, getEnv, SEARCH_PRESET_SIMILARITY } from '@dejavue/core';
 import {
   type ChannelMode,
   createBackfillJob,
@@ -19,7 +19,7 @@ import {
   getGuildConfig,
   keywordSearch,
   type SearchMatch,
-  semanticSearch,
+  hybridSearch,
   setChannelGuidelines,
   updateGuildConfig,
 } from '@dejavue/db';
@@ -115,6 +115,14 @@ const data = new SlashCommandBuilder()
             { name: 'balanced — the default', value: 'balanced' },
             { name: 'exact — only close matches', value: 'exact' },
           ),
+      )
+      .addIntegerOption((o) =>
+        o
+          .setName('threshold')
+          .setDescription('Custom minimum match % (0–100) — overrides the match preset')
+          .setRequired(false)
+          .setMinValue(0)
+          .setMaxValue(100),
       ),
   )
   .addSubcommand((s) => s.setName('help').setDescription('Learn how Dejavue works'));
@@ -275,11 +283,16 @@ async function handleReindex(interaction: ChatInputCommandInteraction): Promise<
 }
 
 // How closely a `/dejavue search` result must match the query, by the `match` option.
-const SEARCH_THRESHOLDS = { broad: 0.35, balanced: 0.5, exact: 0.7 } as const;
-
 async function handleSearch(interaction: ChatInputCommandInteraction): Promise<void> {
   const query = interaction.options.getString('query', true);
-  const match = (interaction.options.getString('match') ?? 'balanced') as keyof typeof SEARCH_THRESHOLDS;
+  const match = (interaction.options.getString('match') ??
+    'balanced') as keyof typeof SEARCH_PRESET_SIMILARITY;
+  // A typed threshold % beats the preset (same scale as the "% match" badges).
+  const customThreshold = interaction.options.getInteger('threshold');
+  const minSimilarity =
+    customThreshold != null
+      ? customThreshold / 100
+      : (SEARCH_PRESET_SIMILARITY[match] ?? SEARCH_PRESET_SIMILARITY.balanced);
   const guildId = interaction.guildId!;
   await interaction.deferReply();
   const db = getDb();
@@ -290,11 +303,14 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
     const cfg = await getGuildConfig(db, guildId);
     const { embedOne, embeddingModelId } = await import('@dejavue/ai');
     const vector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
-    results = await semanticSearch(db, {
+    // Hybrid: exact-term overlap boosts semantic results, and direct keyword
+    // hits the embeddings missed are appended for recall.
+    results = await hybridSearch(db, {
       guildId,
+      query,
       queryVector: vector,
       limit: 5,
-      minSimilarity: SEARCH_THRESHOLDS[match] ?? SEARCH_THRESHOLDS.balanced,
+      minSimilarity,
       modelId: embeddingModelId(cfg?.embeddingModel),
     });
   } else {

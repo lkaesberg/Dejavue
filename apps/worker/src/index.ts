@@ -1,5 +1,7 @@
 import '@dejavue/core/env-preload';
+import { createServer, type Server } from 'node:http';
 import { logger } from '@dejavue/core';
+import { getSql } from '@dejavue/db';
 import {
   type BackfillForumJob,
   type ClusterGapsJob,
@@ -28,6 +30,22 @@ import { handleSummarizeThread } from './jobs/summarizeThread';
 
 const log = logger();
 
+/** Liveness endpoint for deploy orchestration: 200 when the DB is reachable. */
+function startHealthServer(): Server {
+  const port = Number(process.env.HEALTH_PORT ?? 8090);
+  const server = createServer((req, res) => {
+    if (req.url !== '/health') {
+      res.writeHead(404).end();
+      return;
+    }
+    getSql()`select 1`
+      .then(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}'))
+      .catch(() => res.writeHead(503, { 'content-type': 'application/json' }).end('{"ok":false}'));
+  });
+  server.listen(port, () => log.info({ port }, 'health endpoint listening'));
+  return server;
+}
+
 async function main(): Promise<void> {
   await startBoss();
   await work<EmbedThreadJob>(QUEUES.EMBED_THREAD, handleEmbedThread);
@@ -45,8 +63,11 @@ async function main(): Promise<void> {
   // Hourly stale-question sweep (Plus+). Other generative jobs are on-demand.
   await schedule(QUEUES.NUDGE_STALE, '0 * * * *');
 
+  health = startHealthServer();
   log.info('Dejavue worker started');
 }
+
+let health: Server | undefined;
 
 main().catch((err) => {
   log.error({ err }, 'worker failed to start');
@@ -56,6 +77,7 @@ main().catch((err) => {
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     log.info({ sig }, 'shutting down worker');
+    health?.close();
     void stopBoss().finally(() => process.exit(0));
   });
 }

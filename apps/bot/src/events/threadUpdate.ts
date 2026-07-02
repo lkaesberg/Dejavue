@@ -3,6 +3,7 @@ import { childLogger } from '@dejavue/core';
 import { getDb, getGuildConfig, getThreadByDiscordId, setThreadLabels } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
 import { forumParent, threadLabels } from '../lib/forum';
+import { monitoredForum } from '../lib/tier';
 
 const log = childLogger({ mod: 'event:threadUpdate' });
 
@@ -31,7 +32,7 @@ export async function onThreadUpdate(
     const db = getDb();
     const guildId = newThread.guildId;
     const cfg = await getGuildConfig(db, guildId);
-    if (cfg && cfg.forumChannelIds.length > 0 && !cfg.forumChannelIds.includes(forum.id)) return;
+    if (!(await monitoredForum(guildId, cfg, forum.id))) return;
 
     // Only update threads we've already indexed.
     const existing = await getThreadByDiscordId(db, guildId, newThread.id);

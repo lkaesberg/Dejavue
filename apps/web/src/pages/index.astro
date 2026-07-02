@@ -58,15 +58,17 @@ const featBtn =
 const ghostBtn = 'background:rgba(244,245,255,0.06); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF;';
 const steps = [
   { num: '1', title: 'Someone posts', body: 'A new forum thread lands. Dejavue reads the question and checks for duplicates — keyword on Free, semantic on Plus+.' },
-  { num: '2', title: 'Matches surface', body: 'If it has seen it before, it replies with the closest solved threads — plus an AI-drafted answer on Pro & Max.' },
+  { num: '2', title: 'Matches surface', body: 'If it has seen it before, it replies with the closest solved threads — plus an AI-drafted answer on Plus and up.' },
   { num: '3', title: 'Mark as solved', body: 'OP, mod, or admin resolves it. The accepted answer and full transcript are captured and the tag flips to solved.' },
   { num: '4', title: 'Archived & searchable', body: 'It is embedded for semantic search, summarized, and — if opted in — published to the public knowledge base.' },
 ];
+// AI usage is metered in AI credits: 1 credit = 1,000 model tokens (a drafted
+// answer ≈ 0.8 credits, a thread summary ≈ 3). Keep in sync with README + core.
 const tiers = [
-  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (≤500)', 'Basic counts', '10 public KB pages'] },
-  { name: 'Plus', price: '$4.99', per: '/mo', tag: 'Semantic search and nudges for growing forums.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['3 forum channels', 'Semantic duplicate detection', 'Archive ≤1,500', 'Stale-question nudges', 'Full analytics · 100 KB pages', '“Powered by” removed'] },
-  { name: 'Pro', price: '$9.99', per: '/mo', tag: 'AI drafting, summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['5 forum channels', 'Semantic + AI-drafted answers', 'Archive ≤2,500', 'AI summaries · clustering · auto-FAQ', '~300 AI generations / mo', '500 AI-summarized KB pages'] },
-  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited forum channels', 'Unlimited archive & KB', '~1,500 AI generations / mo', 'MCP server for your KB', 'Everything in Pro'] },
+  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public knowledge base'] },
+  { name: 'Plus', price: '$4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Stale-question nudges · full analytics', '“Powered by” removed'] },
+  { name: 'Pro', price: '$9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized KB pages'] },
+  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', '5,000 AI credits / mo', 'MCP server for your KB', 'Everything in Pro'] },
 ];
 ---
 
@@ -301,10 +303,10 @@ const tiers = [
             <div class="bento-3" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:28px;">
               <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                 <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase; white-space:nowrap;">AI answers</div>
-                <span style="background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap;">PRO &amp; MAX</span>
+                <span style="background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap;">PLUS &amp; UP</span>
               </div>
               <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:21px; letter-spacing:-0.02em; margin:9px 0 12px;">Drafts answers from solved threads</h3>
-              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:0;">Generative drafting, clean KB summaries, knowledge-gap clustering, and auto-FAQ — metered by a monthly quota.</p>
+              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:0;">Drafted answers from Plus; KB summaries, knowledge-gap clustering, and auto-FAQ on Pro &amp; Max — metered in monthly AI credits, topped up any time.</p>
             </div>
             <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
               <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Analytics</div>
@@ -390,7 +392,7 @@ const tiers = [
           <div style="text-align:center; max-width:600px; margin:0 auto;">
             <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Pricing</div>
             <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Per server, billed in Discord</h2>
-            <p style="font-size:16px; line-height:1.55; color:#9AA0C3; margin:14px 0 0;">Keyword features are free forever. Semantic search anchors the middle; generative AI lives up top.</p>
+            <p style="font-size:16px; line-height:1.55; color:#9AA0C3; margin:14px 0 0;">Keyword features are free forever. Semantic search anchors the middle; AI is metered in credits — a taster on Plus, serious budgets on Pro &amp; Max.</p>
           </div>
           <div class="pricing-grid" style="margin-top:48px;">
             {tiers.map((t) => (
@@ -414,7 +416,7 @@ const tiers = [
               </div>
             ))}
           </div>
-          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">Importing your existing history is free, up to each tier's archive limit. One-time add-ons — <span style="color:#9AA0C3;">Custom domain</span>, <span style="color:#9AA0C3;">AI top-ups</span>. Prices are suggestions set per SKU.</p>
+          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">Importing your existing history is free, up to each tier's indexed-message limit. One-time add-ons — <span style="color:#9AA0C3;">Custom domain</span>, <span style="color:#9AA0C3;">AI top-up (+250 credits, stacks, never expires)</span>. Prices are suggestions set per SKU.</p>
         </div>
       </section>
 

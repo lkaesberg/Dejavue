@@ -15,11 +15,12 @@ import {
   upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
+import { keyedTrailingDebounce } from './debounce';
 import { SOLVE_BUTTON_ID, solvedNotice } from './embeds';
 import {
   applyTag,
   fetchTranscript,
-  findForumTags,
+  findOrCreateForumTags,
   forumParent,
   getStarterText,
   threadLabels,
@@ -52,18 +53,16 @@ export async function ensureThreadRow(thread: ThreadChannel): Promise<Thread> {
 // solve), so the published page always shows the whole chat log. Embedding still
 // happens at solve (with the accepted answer) — this only refreshes the transcript.
 const QUESTION_DEBOUNCE_MS = 4000;
-const questionScheduled = new Set<string>();
 
-/** Debounced, idempotent-per-thread transcript refresh for a question post. */
+/** Debounced (trailing-safe) transcript refresh for a question post. */
+const debouncedQuestionArchive = keyedTrailingDebounce<ThreadChannel>(
+  QUESTION_DEBOUNCE_MS,
+  captureQuestionTranscript,
+  (err, thread) => log.warn({ err, threadId: thread.id }, 'question transcript capture failed'),
+);
+
 export function scheduleQuestionArchive(thread: ThreadChannel): void {
-  if (questionScheduled.has(thread.id)) return;
-  questionScheduled.add(thread.id);
-  const timer = setTimeout(() => {
-    void captureQuestionTranscript(thread)
-      .catch((err) => log.warn({ err, threadId: thread.id }, 'question transcript capture failed'))
-      .finally(() => questionScheduled.delete(thread.id));
-  }, QUESTION_DEBOUNCE_MS);
-  timer.unref();
+  debouncedQuestionArchive(thread.id, thread);
 }
 
 async function captureQuestionTranscript(thread: ThreadChannel): Promise<void> {
@@ -108,7 +107,7 @@ async function captureQuestionTranscript(thread: ThreadChannel): Promise<void> {
 export async function tagUnsolved(thread: ThreadChannel): Promise<void> {
   const forum = forumParent(thread);
   if (!forum) return;
-  const { solvedTagId, unsolvedTagId } = findForumTags(forum);
+  const { solvedTagId, unsolvedTagId } = await findOrCreateForumTags(forum, log);
   if (!unsolvedTagId) return;
   // Never mark an already-solved post unsolved (avoids both tags at once).
   if (solvedTagId && thread.appliedTags.includes(solvedTagId)) return;
@@ -185,7 +184,9 @@ export async function solveThread(
 
   const forum = forumParent(thread);
   if (forum) {
-    const { solvedTagId, unsolvedTagId } = findForumTags(forum);
+    // Creates the tags on the fly if missing — otherwise the DB would say
+    // "solved" while the visible thread tag stayed "unsolved".
+    const { solvedTagId, unsolvedTagId } = await findOrCreateForumTags(forum, log);
     try {
       // Rebuild the tag set explicitly so solved/unsolved are never both present.
       const tags = new Set(thread.appliedTags);
@@ -277,7 +278,7 @@ export async function unsolveThread(thread: ThreadChannel): Promise<void> {
   );
   const forum = forumParent(thread);
   if (forum) {
-    const { solvedTagId, unsolvedTagId } = findForumTags(forum);
+    const { solvedTagId, unsolvedTagId } = await findOrCreateForumTags(forum, log);
     try {
       const tags = new Set(thread.appliedTags);
       if (solvedTagId) tags.delete(solvedTagId);

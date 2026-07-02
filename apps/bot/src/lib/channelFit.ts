@@ -1,5 +1,6 @@
 import { ChannelType, type Client, type ForumChannel, type Guild } from 'discord.js';
 import {
+  activeForumChannels,
   childLogger,
   type FitSuggestion,
   judgeWrongChannel,
@@ -16,6 +17,8 @@ import {
   upsertChannelTopic,
 } from '@dejavue/db';
 
+import { getGuildTier, limitsFor } from './tier';
+
 const log = childLogger({ mod: 'channel-fit' });
 
 /** Guilds with a topic (re)build in flight — collapses bursts and retry storms. */
@@ -26,9 +29,16 @@ function topicText(name: string, description?: string | null): string {
   return [name.trim(), (description ?? '').trim()].filter(Boolean).join('\n\n');
 }
 
-/** Monitored channels eligible for fit checks (question channels — never knowledge). */
-function questionChannelIds(cfg: GuildConfig): string[] {
-  return cfg.forumChannelIds.filter((id) => channelMode(cfg, id) !== 'knowledge');
+/**
+ * Monitored channels eligible for fit checks (question channels — never
+ * knowledge). Capped to the tier's active channels so a downgraded guild's
+ * over-cap channels stop participating.
+ */
+async function questionChannelIds(cfg: GuildConfig): Promise<string[]> {
+  const limits = limitsFor(await getGuildTier(cfg.guildId));
+  return activeForumChannels(cfg.forumChannelIds, limits.maxForumChannels).filter(
+    (id) => channelMode(cfg, id) !== 'knowledge',
+  );
 }
 
 async function buildTopic(
@@ -70,7 +80,7 @@ export async function refreshChannelTopic(
 
 /** Force-(re)build topics for every monitored question channel (explicit enable). */
 export async function refreshAllChannelTopics(guild: Guild, cfg: GuildConfig): Promise<void> {
-  for (const channelId of questionChannelIds(cfg)) {
+  for (const channelId of await questionChannelIds(cfg)) {
     try {
       await buildTopic(guild, channelId, cfg);
     } catch (err) {
@@ -93,7 +103,7 @@ export async function ensureChannelTopics(guild: Guild, cfg: GuildConfig): Promi
     const present = new Set(
       await listChannelTopicChannelIds(getDb(), guild.id, embeddingModelId(cfg.embeddingModel)),
     );
-    for (const channelId of questionChannelIds(cfg)) {
+    for (const channelId of await questionChannelIds(cfg)) {
       if (present.has(channelId)) continue;
       try {
         await buildTopic(guild, channelId, cfg);
@@ -144,7 +154,7 @@ export async function checkChannelFit(
     modelId: embeddingModelId(cfg.embeddingModel),
   });
   if (scores.length === 0) return null;
-  return suggestBetterChannel(scores, currentChannelId, new Set(questionChannelIds(cfg)));
+  return suggestBetterChannel(scores, currentChannelId, new Set(await questionChannelIds(cfg)));
 }
 
 export interface ChannelAssessment {
@@ -172,7 +182,7 @@ export async function assessChannel(
     modelId: embeddingModelId(cfg.embeddingModel),
   });
   if (scores.length === 0) return { suggestion: null, wrong: null };
-  const candidates = new Set(questionChannelIds(cfg));
+  const candidates = new Set(await questionChannelIds(cfg));
   return {
     suggestion: suggestBetterChannel(scores, currentChannelId, candidates),
     wrong: judgeWrongChannel(scores, currentChannelId, cfg.guardSensitivity, candidates),

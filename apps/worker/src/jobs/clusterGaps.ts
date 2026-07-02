@@ -12,7 +12,7 @@ import {
 } from '@dejavue/db';
 import type { ClusterGapsJob } from '@dejavue/queue';
 import { LiveProgress } from '../lib/progress';
-import { guildGenerationQuota } from '../lib/quota';
+import { guildCreditBudget } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:cluster-gaps' });
 const SIM_THRESHOLD = 0.82;
@@ -51,7 +51,7 @@ async function clusterGaps(
   db: ReturnType<typeof getDb>,
   env: ReturnType<typeof getEnv>,
 ): Promise<void> {
-  const baseQuota = await guildGenerationQuota(job.guildId);
+  const baseCredits = await guildCreditBudget(job.guildId);
   const points = await getGuildEmbeddingPoints(db, job.guildId, embeddingModelId());
   if (points.length < 4) {
     await replaceClusters(db, job.guildId, []);
@@ -77,7 +77,7 @@ async function clusterGaps(
     let label: string | null = medoid?.title ?? null;
 
     if (i < LABEL_TOP_N && env.OPENROUTER_API_KEY) {
-      const quota = await checkQuota(db, job.guildId, baseQuota);
+      const quota = await checkQuota(db, job.guildId, baseCredits);
       if (quota.allowed) {
         try {
           const reps = c.memberIds
@@ -92,8 +92,8 @@ async function clusterGaps(
             model: res.model,
             promptTokens: res.promptTokens,
             completionTokens: res.completionTokens,
-            usedBefore: quota.used,
-            baseQuota,
+            usedTokensBefore: quota.usedTokens,
+            baseCredits,
           });
         } catch (err) {
           log.warn({ err }, 'cluster label failed');

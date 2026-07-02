@@ -13,7 +13,7 @@ export interface SearchMatch {
   title: string;
   channelName: string | null; // denormalized parent channel name (for "in #channel")
   status: 'open' | 'solved' | 'unsolved';
-  score: number; // semantic: cosine similarity in [0,1]; keyword: ts_rank (not normalized)
+  score: number; // semantic/hybrid: similarity-like in [0,1]; keyword: ts_rank (not normalized)
   /** How `score` should be read by callers: a 0–1 similarity, or an opaque keyword rank. */
   kind: 'semantic' | 'keyword';
 }
@@ -130,4 +130,103 @@ export async function keywordSearch(
     .limit(limit);
 
   return rows.map((r) => ({ ...r, kind: 'keyword' as const }));
+}
+
+// ---------------------------------------------------------------------------
+// Hybrid search — semantic recall with a keyword-overlap boost
+// ---------------------------------------------------------------------------
+
+/** How much a perfect keyword match adds to a result's similarity score. */
+export const DEFAULT_KEYWORD_BOOST = 0.15;
+
+export interface HybridFuseOptions {
+  limit: number;
+  /** The caller's similarity floor — applied to the BOOSTED score (see below). */
+  minSimilarity: number;
+  keywordBoost?: number;
+  /** Append keyword-only hits (no semantic candidate) after the fused results. */
+  includeKeywordOnly?: boolean;
+}
+
+/**
+ * Fuse semantic candidates with keyword matches: a result that also matches the
+ * query terms directly gets its similarity boosted by up to `keywordBoost`
+ * (scaled by its ts_rank relative to the best keyword hit). The similarity
+ * floor is applied to the boosted score, so a borderline semantic candidate
+ * with a strong direct keyword match can clear the bar — callers should fetch
+ * semantic candidates with a floor relaxed by `keywordBoost`.
+ *
+ * Pure function so the fusion math is unit-testable without a database.
+ */
+export function fuseMatches(
+  semantic: SearchMatch[],
+  keyword: SearchMatch[],
+  opts: HybridFuseOptions,
+): SearchMatch[] {
+  const { limit, minSimilarity, keywordBoost = DEFAULT_KEYWORD_BOOST, includeKeywordOnly = true } = opts;
+  const maxRank = keyword.reduce((m, r) => Math.max(m, r.score), 0);
+  const kwNorm = new Map(
+    keyword.map((r) => [r.rowId, maxRank > 0 ? r.score / maxRank : 0] as const),
+  );
+
+  const fused = new Map<string, SearchMatch>();
+  for (const m of semantic) {
+    const boosted = Math.min(0.99, m.score + keywordBoost * (kwNorm.get(m.rowId) ?? 0));
+    if (boosted < minSimilarity) continue;
+    fused.set(m.rowId, { ...m, score: boosted, kind: 'semantic' });
+  }
+  const out = [...fused.values()].sort((a, b) => b.score - a.score);
+
+  if (includeKeywordOnly) {
+    // Extra recall: direct keyword hits the embeddings missed, ranked below the
+    // semantic results (score is just the scaled boost, well under any match).
+    for (const m of keyword) {
+      if (fused.has(m.rowId)) continue;
+      out.push({ ...m, score: keywordBoost * (kwNorm.get(m.rowId) ?? 0), kind: 'keyword' });
+    }
+  }
+  return out.slice(0, limit);
+}
+
+export interface HybridSearchOptions extends SemanticSearchOptions {
+  /** The raw query text, for the keyword leg. */
+  query: string;
+  keywordBoost?: number;
+  includeKeywordOnly?: boolean;
+}
+
+/**
+ * Semantic search with a keyword-overlap boost (see fuseMatches). Use this for
+ * user-facing search + duplicate suggestions; keep pure semanticSearch for
+ * conservative machine decisions like backfill auto-folding.
+ */
+export async function hybridSearch(
+  db: Database,
+  opts: HybridSearchOptions,
+): Promise<SearchMatch[]> {
+  const {
+    query,
+    keywordBoost = DEFAULT_KEYWORD_BOOST,
+    includeKeywordOnly = true,
+    limit = 5,
+    minSimilarity = 0,
+    ...semanticOpts
+  } = opts;
+  const candidates = Math.max(limit * 3, 15);
+  const [semantic, keyword] = await Promise.all([
+    semanticSearch(db, {
+      ...semanticOpts,
+      limit: candidates,
+      // Relaxed floor: fuseMatches re-applies the real floor to boosted scores.
+      minSimilarity: Math.max(0, minSimilarity - keywordBoost),
+    }),
+    keywordSearch(db, {
+      guildId: semanticOpts.guildId,
+      query,
+      limit: candidates,
+      excludeThreadId: semanticOpts.excludeThreadId,
+      solvedOnly: semanticOpts.solvedOnly ?? true,
+    }),
+  ]);
+  return fuseMatches(semantic, keyword, { limit, minSimilarity, keywordBoost, includeKeywordOnly });
 }

@@ -6,13 +6,14 @@ import {
   getTopClusters,
   type KbSearchResult,
   searchPublished,
-  searchPublishedSemantic,
+  searchPublishedHybrid,
   type Thread,
 } from '@dejavue/db';
 import ChannelRail from '../components/ChannelRail.astro';
 import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
+import { resolveMentions } from '../lib/discordText';
 import { brandOf } from '../lib/theme';
 
 const { tenant, cfg, slug, tier } = Astro.locals;
@@ -42,14 +43,16 @@ if (tenant) {
       .map((c) => ({ name: c.label ?? c.representativeText ?? 'Topic', count: c.size, q: c.label ?? '' }));
   }
   if (query) {
-    // A public endpoint must never 500 on an odd query — fall back gracefully.
+    // A public endpoint must never 500 on an odd query — fall back gracefully:
+    // if the embedding backend is down, degrade to keyword results instead of none.
     try {
       if (semanticActive) {
         const { embedOne, embeddingModelId } = await import('@dejavue/ai');
         const vec = await embedOne(query, { mode: 'query', model: tenant.embeddingModel });
-        results = await searchPublishedSemantic(
+        results = await searchPublishedHybrid(
           getDb(),
           tenant.guildId,
+          query,
           vec,
           embeddingModelId(tenant.embeddingModel),
           30,
@@ -59,7 +62,11 @@ if (tenant) {
         results = await searchPublished(getDb(), tenant.guildId, query, 30, channelFilter);
       }
     } catch {
-      results = [];
+      try {
+        results = await searchPublished(getDb(), tenant.guildId, query, 30, channelFilter);
+      } catch {
+        results = [];
+      }
     }
   }
 }
@@ -155,7 +162,7 @@ const badgeText = (r: KbSearchResult): string =>
                             <span style={`font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap; flex-shrink:0; color:${r.relevance !== undefined ? 'var(--accentline)' : 'var(--chiptext)'}; background:${r.relevance !== undefined ? 'var(--accentsoft)' : 'var(--chipbg)'};`}>{badgeText(r)}</span>
                           </div>
                           {r.snippet && (
-                            <div style="font-size:14px; color:var(--textmid); line-height:1.55; margin-top:6px;">{r.snippet}</div>
+                            <div style="font-size:14px; color:var(--textmid); line-height:1.55; margin-top:6px;">{resolveMentions(r.snippet)}</div>
                           )}
                           <div style="display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap;">
                             <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--textmut);">{cfg?.customDomain ?? `${tenant.slug}.dejavue.app`}</span>

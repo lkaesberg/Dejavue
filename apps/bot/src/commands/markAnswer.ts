@@ -1,6 +1,6 @@
 import { ApplicationCommandType, ContextMenuCommandBuilder, MessageFlags } from 'discord.js';
 import { forumParent } from '../lib/forum';
-import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
+import { canResolveThread, isThreadOp, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph } from '../lib/reply';
 import { closeThread, solveThread } from '../lib/solve';
 import type { MessageContextCommand } from './types';
@@ -21,7 +21,7 @@ export const markAnswerCommand: MessageContextCommand = {
       await interaction.reply(eph('Use this on a reply inside a forum post.'));
       return;
     }
-    const isOp = channel.ownerId === interaction.user.id;
+    const isOp = await isThreadOp(channel, interaction.user.id);
     if (!canResolveThread(interaction.memberPermissions, isOp)) {
       await interaction.reply(eph(NO_PERMISSION_MESSAGE));
       return;

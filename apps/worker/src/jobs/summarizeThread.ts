@@ -8,11 +8,11 @@ import {
   setCanonicalSummary,
 } from '@dejavue/db';
 import type { SummarizeThreadJob } from '@dejavue/queue';
-import { guildGenerationQuota } from '../lib/quota';
+import { guildCreditBudget } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:summarize-thread' });
 
-/** Summarize a solved thread into a canonical KB answer (Pro, quota-metered). */
+/** Summarize a solved thread into a canonical KB answer (Pro, credit-metered). */
 export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<void> {
   const env = getEnv();
   if (!env.OPENROUTER_API_KEY) {
@@ -20,10 +20,13 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
     return;
   }
   const db = getDb();
-  const baseQuota = await guildGenerationQuota(job.guildId);
-  const quota = await checkQuota(db, job.guildId, baseQuota);
+  const baseCredits = await guildCreditBudget(job.guildId);
+  const quota = await checkQuota(db, job.guildId, baseCredits);
   if (!quota.allowed) {
-    log.info({ guildId: job.guildId, used: quota.used, limit: quota.limit }, 'quota exhausted; skipping summary');
+    log.info(
+      { guildId: job.guildId, usedCredits: quota.usedCredits, limitCredits: quota.limitCredits },
+      'AI credits exhausted; skipping summary',
+    );
     return;
   }
 
@@ -54,8 +57,8 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
     promptTokens: result.promptTokens,
     completionTokens: result.completionTokens,
     threadId: job.threadRowId,
-    usedBefore: quota.used,
-    baseQuota,
+    usedTokensBefore: quota.usedTokens,
+    baseCredits,
   });
   log.info({ threadRowId: job.threadRowId }, 'summarized thread');
 }

@@ -18,6 +18,7 @@ import {
   upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
+import { keyedTrailingDebounce } from './debounce';
 import { fetchStarterWithRetry, fetchTranscript, forumParent, threadLabels } from './forum';
 import { atIndexCap } from './tier';
 
@@ -56,24 +57,21 @@ export function isReembedDue(
   return currentCount >= last * REEMBED_GROWTH; // only after the count has quadrupled
 }
 
-/** Threads already scheduled, so threadCreate + messageCreate collapse to one run. */
-const scheduled = new Set<string>();
-
 /**
  * Knowledge channels are a pure archive: every new thread is captured, indexed, and
  * published to the public KB — no unsolved tag, control message, or duplicate
- * reminder. Debounced + idempotent-by-thread-id so the starter message has time to
- * arrive and both event triggers collapse to one run.
+ * reminder. Debounced (trailing-safe) so the starter message has time to arrive,
+ * threadCreate + messageCreate collapse to one run, and a message landing while a
+ * capture is in flight still triggers a follow-up capture.
  */
+const debouncedKnowledgeArchive = keyedTrailingDebounce<ThreadChannel>(
+  DEBOUNCE_MS,
+  archiveKnowledgeThread,
+  (err, thread) => log.warn({ err, threadId: thread.id }, 'knowledge archive failed'),
+);
+
 export function scheduleKnowledgeArchive(thread: ThreadChannel): void {
-  if (scheduled.has(thread.id)) return;
-  scheduled.add(thread.id);
-  const timer = setTimeout(() => {
-    void archiveKnowledgeThread(thread)
-      .catch((err) => log.warn({ err, threadId: thread.id }, 'knowledge archive failed'))
-      .finally(() => scheduled.delete(thread.id));
-  }, DEBOUNCE_MS);
-  timer.unref();
+  debouncedKnowledgeArchive(thread.id, thread);
 }
 
 async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {

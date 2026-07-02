@@ -1,0 +1,22 @@
+{
+  "name": "Dejavue",
+  "short_name": "Dejavue",
+  "description": "Discord bot that catches duplicate questions and turns solved threads into a searchable knowledge base.",
+  "icons": [
+    {
+      "src": "/web-app-manifest-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/web-app-manifest-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "theme_color": "#0A0B14",
+  "background_color": "#0A0B14",
+  "display": "standalone"
+}

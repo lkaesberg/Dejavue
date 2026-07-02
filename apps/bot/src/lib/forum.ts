@@ -65,6 +65,31 @@ export function findTagByName(forum: ForumChannel, name: string): string | undef
   return forum.availableTags.find((t) => t.name.toLowerCase() === name.toLowerCase())?.id;
 }
 
+/**
+ * findForumTags, but creates the solved/unsolved tags when missing (a forum
+ * monitored without running setup, or tags deleted by an admin). Never throws:
+ * solve/unsolve must go through even when tags can't be created — the caller
+ * skips the tag swap and the DB stays correct — but we log loudly because
+ * Discord's visible thread state then no longer reflects solved status.
+ */
+export async function findOrCreateForumTags(
+  forum: ForumChannel,
+  log?: { warn: (obj: unknown, msg: string) => void },
+): Promise<{ solvedTagId?: string; unsolvedTagId?: string }> {
+  const found = findForumTags(forum);
+  if (found.solvedTagId && found.unsolvedTagId) return found;
+  try {
+    const ensured = await ensureForumTags(forum);
+    return { solvedTagId: ensured.solvedTagId, unsolvedTagId: ensured.unsolvedTagId };
+  } catch (err) {
+    log?.warn(
+      { err, forumId: forum.id },
+      'solved/unsolved tags missing and could not be created (needs Manage Channels) — thread tags will not reflect solved status',
+    );
+    return found;
+  }
+}
+
 /** Tag names Dejavue manages itself — never surfaced as user "labels" on the KB. */
 const MANAGED_TAG_NAMES = new Set(['solved', 'unsolved', 'duplicate', 'wrong-channel']);
 

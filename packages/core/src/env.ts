@@ -56,8 +56,14 @@ const EnvSchema = z.object({
   KB_PUBLIC_URL: z.string().default('https://dejavue.app'),
   KB_REVALIDATE_SECRET: z.string().optional(),
 
-  // Pro generation quota (per billing window)
-  PRO_MONTHLY_QUOTA: z.coerce.number().int().positive().default(300),
+  // Monthly AI-credit budgets per tier (1 credit = 1,000 tokens) and the
+  // credits granted per top-up purchase. Defaults mirror packages/core types.ts.
+  QUOTA_CREDITS_PLUS: z.coerce.number().int().nonnegative().default(25),
+  QUOTA_CREDITS_PRO: z.coerce.number().int().positive().default(1_000),
+  QUOTA_CREDITS_MAX: z.coerce.number().int().positive().default(5_000),
+  TOPUP_CREDITS: z.coerce.number().int().positive().default(250),
+  // MCP endpoint burst limit (requests/minute, Max tier).
+  MCP_RATE_PER_MIN: z.coerce.number().int().positive().default(30),
 
   // Dev-only: force a tier regardless of entitlements (e.g. 'pro' locally so all
   // features are exercisable without real SKUs). Leave unset in production.
@@ -77,6 +83,13 @@ export function getEnv(source: NodeJS.ProcessEnv = process.env): Env {
       .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
       .join('\n');
     throw new Error(`Invalid environment configuration:\n${issues}`);
+  }
+  if (source.PRO_MONTHLY_QUOTA !== undefined) {
+    // Removed in the token-based quota rework — its unit (generations/month) is
+    // incompatible with credit budgets, so a silent fallback would be wrong.
+    console.warn(
+      'PRO_MONTHLY_QUOTA is no longer used; set QUOTA_CREDITS_PRO (AI credits, 1 credit = 1,000 tokens) instead.',
+    );
   }
   cached = parsed.data;
   return cached;

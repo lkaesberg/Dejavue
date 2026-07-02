@@ -25,9 +25,15 @@ import {
   handleCustomizeSelect,
   isCustomizeInteraction,
 } from '../lib/customize';
-import { handleHubButton, handleHubRoleSelect, handleHubSelect, isHubInteraction } from '../lib/hubs';
+import {
+  handleHubButton,
+  handleHubModal,
+  handleHubRoleSelect,
+  handleHubSelect,
+  isHubInteraction,
+} from '../lib/hubs';
 import { applyTag, ensureForumTags, findTagByName, forumParent } from '../lib/forum';
-import { canResolveThread, NO_PERMISSION_MESSAGE } from '../lib/permissions';
+import { canResolveThread, isThreadOp, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph, safeReply } from '../lib/reply';
 import { closeThread, solveThread } from '../lib/solve';
 import { getGuildTier, limitsFor } from '../lib/tier';
@@ -92,7 +98,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
     await interaction.reply(eph('Use this inside a forum post.'));
     return;
   }
-  const isOp = channel.ownerId === interaction.user.id;
+  const isOp = await isThreadOp(channel, interaction.user.id);
   if (!canResolveThread(interaction.memberPermissions, isOp)) {
     await interaction.reply(eph(NO_PERMISSION_MESSAGE));
     return;
@@ -121,7 +127,7 @@ async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
     await interaction.reply(eph('Use this inside a forum post.'));
     return;
   }
-  const isOp = channel.ownerId === interaction.user.id;
+  const isOp = await isThreadOp(channel, interaction.user.id);
   if (!canResolveThread(interaction.memberPermissions, isOp)) {
     await interaction.reply(eph(NO_PERMISSION_MESSAGE));
     return;
@@ -164,6 +170,7 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
       if (isHubInteraction(interaction.customId)) await handleHubRoleSelect(interaction);
     } else if (interaction.isModalSubmit()) {
       if (isCustomizeInteraction(interaction.customId)) await handleCustomizeModal(interaction);
+      else if (isHubInteraction(interaction.customId)) await handleHubModal(interaction);
       else await handleModal(interaction);
     }
   } catch (err) {

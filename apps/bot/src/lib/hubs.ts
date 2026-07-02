@@ -9,17 +9,28 @@ import {
   type Guild,
   type GuildBasedChannel,
   MessageFlags,
+  ModalBuilder,
+  type ModalSubmitInteraction,
   PermissionFlagsBits,
   RoleSelectMenuBuilder,
   type RoleSelectMenuInteraction,
   StringSelectMenuBuilder,
   type StringSelectMenuInteraction,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
-import { getEnv } from '@dejavue/core';
+import {
+  activeForumChannels,
+  APPROX_CREDITS_PER_FEATURE,
+  customSimilarity,
+  dedupSettingLabel,
+  getEnv,
+} from '@dejavue/core';
 import {
   type ChannelSync,
   channelMode,
   checkQuota,
+  type QuotaStatus,
   countByStatus,
   countIndexedMessages,
   deleteChannelSync,
@@ -53,6 +64,7 @@ const ID = {
   guardac: 'dv:set:guardac',
   gsens: 'dv:set:gsens',
   dedup: 'dv:set:dedup',
+  dedupModal: 'dv:set:dedupmodal',
   nudgehours: 'dv:set:nudgehours',
   nudgerole: 'dv:set:nudgerole',
   // setup (channel) hub
@@ -107,7 +119,7 @@ export async function renderSettingsHub(guildId: string): Promise<BaseMessageOpt
           : 'off',
         inline: true,
       },
-      { name: 'Duplicate suggestions', value: cfg.dedupSensitivity, inline: true },
+      { name: 'Duplicate suggestions', value: dedupSettingLabel(cfg.dedupSensitivity), inline: true },
     );
   const toggles = new ActionRowBuilder<ButtonBuilder>().addComponents(
     toggleBtn(ID.nudges, `Nudges: ${onOff(cfg.nudgeEnabled)}`, cfg.nudgeEnabled),
@@ -125,14 +137,22 @@ export async function renderSettingsHub(guildId: string): Promise<BaseMessageOpt
         { label: 'Guard: high — flag aggressively', value: 'high', default: cfg.guardSensitivity === 'high' },
       ),
   );
+  const dedupIsCustom = customSimilarity(cfg.dedupSensitivity) !== undefined;
   const dedup = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId(ID.dedup)
-      .setPlaceholder(`Duplicate suggestions: ${cfg.dedupSensitivity}`)
+      .setPlaceholder(`Duplicate suggestions: ${dedupSettingLabel(cfg.dedupSensitivity)}`)
       .addOptions(
         { label: 'Duplicates: low — only near-identical reposts', value: 'low', default: cfg.dedupSensitivity === 'low' },
         { label: 'Duplicates: medium — balanced', value: 'medium', default: cfg.dedupSensitivity === 'medium' },
         { label: 'Duplicates: high — also flag loosely-related', value: 'high', default: cfg.dedupSensitivity === 'high' },
+        {
+          label: dedupIsCustom
+            ? `Duplicates: ${dedupSettingLabel(cfg.dedupSensitivity)} — change…`
+            : 'Duplicates: custom — type an exact match %…',
+          value: 'custom',
+          default: dedupIsCustom,
+        },
       ),
   );
   const hours = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
@@ -232,6 +252,15 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
   );
   const line = (id: string, suffix = ''): string =>
     `${channelSyncDisplay(syncMap.get(id), liveMap.get(id))}\n<#${id}>${suffix}`;
+  // Channels past the tier's cap (e.g. after a downgrade) stay configured but
+  // inactive — the same first-N rule the event guards enforce (isMonitoredForum).
+  const activeForums = new Set(
+    activeForumChannels(cfg?.forumChannelIds ?? [], limits.maxForumChannels),
+  );
+  const forumLine = (id: string): string => {
+    if (!activeForums.has(id)) return `💤 inactive — over the **${tier}** channel cap\n<#${id}>`;
+    return line(id, channelMode(cfg, id) === 'knowledge' ? ' _(knowledge)_' : '');
+  };
 
   const indexValue = `${indexed.toLocaleString()} / ${Number.isFinite(indexCap) ? indexCap.toLocaleString() : '∞'} messages${atCap ? '\n⚠️ **Index full** — reindex or remove a channel to free space.' : ''}`;
 
@@ -242,10 +271,19 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
       { name: 'Tier', value: tier, inline: true },
       { name: 'Indexed', value: indexValue, inline: true },
       { name: 'Embedding model', value: cfg?.embeddingModel ?? 'bge-small-en-v1.5', inline: true },
+      ...((limits.aiDrafts || limits.generative)
+        ? [
+            {
+              name: 'AI credits (month)',
+              value: creditUsageField(await checkQuota(db, guildId, limits.monthlyCredits)),
+              inline: false,
+            },
+          ]
+        : []),
       {
         name: `Forums (${cfg?.forumChannelIds.length ?? 0} / ${channelCap})`,
         value: cfg?.forumChannelIds.length
-          ? cfg.forumChannelIds.map((id) => line(id, channelMode(cfg, id) === 'knowledge' ? ' _(knowledge)_' : '')).join('\n')
+          ? cfg.forumChannelIds.map(forumLine).join('\n')
           : '_none — `/dejavue setup #forum mode`_',
       },
       {
@@ -327,24 +365,64 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
   } else {
     embed.addFields({ name: 'Analytics', value: 'Resolution rate, top helpers & most-asked topics are a **Plus** feature.' });
   }
+  let quota: QuotaStatus | undefined;
+  if (limits.aiDrafts || limits.generative) {
+    quota = await checkQuota(db, guildId, limits.monthlyCredits);
+    embed.addFields({ name: 'AI credits (month)', value: creditUsageField(quota), inline: false });
+    if (!quota.allowed) {
+      embed.addFields({
+        name: '⛔ Out of AI credits',
+        value: 'AI features pause until the reset on the 1st (UTC). Top up below to keep going.',
+      });
+    } else if (quota.limitCredits > 0 && quota.usedCredits / quota.limitCredits >= 0.8) {
+      embed.addFields({
+        name: '⚠️ Running low',
+        value: `${quota.remainingCredits} credits left — they reset on the 1st (UTC).`,
+      });
+    }
+  }
   if (limits.generative) {
-    const q = await checkQuota(db, guildId, limits.monthlyGenerationQuota);
-    embed.addFields({ name: 'AI generations (month)', value: `${q.used} / ${q.limit}`, inline: true });
     const top = await getTopClusters(db, guildId, 5);
     if (top.length)
       embed.addFields({ name: 'Most-asked topics', value: top.map((c) => `• ${c.label ?? c.representativeText ?? 'topic'} (${c.size})`).join('\n') });
   }
   if (!limits.removeBranding) embed.setFooter({ text: 'Powered by Dejavue' });
 
-  const components = limits.generative
-    ? [
+  const components: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (limits.generative) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ID.gaps).setLabel('Knowledge gaps').setEmoji('🧩').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ID.faq).setLabel('Auto-FAQ').setEmoji('📚').setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  }
+  // Out of credits → native Premium buttons: top-up, and Max for non-Max guilds.
+  if (quota && !quota.allowed) {
+    const env = getEnv();
+    const skus = [env.SKU_TOPUP, limits.mcp ? undefined : env.SKU_MAX].filter(
+      (s): s is string => Boolean(s),
+    );
+    if (skus.length > 0) {
+      components.push(
         new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(ID.gaps).setLabel('Knowledge gaps').setEmoji('🧩').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(ID.faq).setLabel('Auto-FAQ').setEmoji('📚').setStyle(ButtonStyle.Secondary),
+          skus.map((sku) => new ButtonBuilder().setStyle(ButtonStyle.Premium).setSKUId(sku)),
         ),
-      ]
-    : [];
+      );
+    }
+  }
   await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
+}
+
+/** Render `▰▰▰▰▰▰▱▱▱▱ 620 / 1,000 credits (+250 top-up) · ≈ 470 drafts left`. */
+function creditUsageField(q: QuotaStatus): string {
+  const fmt = (n: number): string => n.toLocaleString('en-US');
+  const pct = q.limitCredits > 0 ? Math.min(1, q.usedCredits / q.limitCredits) : 1;
+  const filled = Math.round(pct * 10);
+  const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
+  const topUp = q.topUpCredits > 0 ? ` (+${fmt(q.topUpCredits)} top-up)` : '';
+  const draftsLeft = Math.floor(q.remainingCredits / APPROX_CREDITS_PER_FEATURE.draft);
+  return `${bar} ${fmt(q.usedCredits)} / ${fmt(q.limitCredits)} credits${topUp} · ≈ ${fmt(draftsLeft)} drafted answers left`;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +520,26 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
     return void (await interaction.update(await renderSettingsHub(guildId)));
   }
   if (id === ID.dedup && value) {
+    if (value === 'custom') {
+      // Ask for the exact minimum match % in a modal instead of storing 'custom'.
+      const cfg = await getGuildConfig(db, guildId);
+      const current = customSimilarity(cfg?.dedupSensitivity);
+      const input = new TextInputBuilder()
+        .setCustomId('threshold')
+        .setLabel('Minimum match % (0–100)')
+        .setPlaceholder('e.g. 65 — only suggest duplicates at least 65% similar')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(3);
+      if (current !== undefined) input.setValue(String(Math.round(current * 100)));
+      await interaction.showModal(
+        new ModalBuilder()
+          .setCustomId(ID.dedupModal)
+          .setTitle('Custom duplicate threshold')
+          .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)),
+      );
+      return;
+    }
     await updateGuildConfig(db, guildId, { dedupSensitivity: value as 'low' | 'medium' | 'high' });
     return void (await interaction.update(await renderSettingsHub(guildId)));
   }
@@ -466,6 +564,31 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
     }
     await deleteChannelSync(db, guildId, value).catch(() => undefined);
     if (interaction.guild) await interaction.update(await renderSetupHub(interaction.guild));
+  }
+}
+
+/** Modal submits from the settings hub (currently: the custom dedup threshold). */
+export async function handleHubModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (interaction.customId !== ID.dedupModal) return;
+  if (!isAdmin(interaction)) {
+    await interaction.reply(eph('You need the **Manage Server** permission to change this.'));
+    return;
+  }
+  const raw = interaction.fields.getTextInputValue('threshold').trim();
+  const similarity = customSimilarity(raw);
+  if (similarity === undefined) {
+    await interaction.reply(eph(`\`${raw}\` isn't a valid threshold — enter a whole number from 0 to 100.`));
+    return;
+  }
+  const guildId = interaction.guildId!;
+  await updateGuildConfig(getDb(), guildId, {
+    dedupSensitivity: String(Math.round(similarity * 100)),
+  });
+  // The modal came from the settings-hub select, so refresh that message in place.
+  if (interaction.isFromMessage()) {
+    await interaction.update(await renderSettingsHub(guildId));
+  } else {
+    await interaction.reply(eph(`✅ Duplicate suggestions now require ≥${Math.round(similarity * 100)}% match.`));
   }
 }
 
