@@ -1,0 +1,23 @@
+{
+  "name": "Dejavue",
+  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.yml"],
+  "service": "dev",
+  "runServices": ["dev", "postgres"],
+  "workspaceFolder": "/workspaces/dejavue",
+  "remoteUser": "node",
+  "forwardPorts": [4321, 5432, 8090],
+  "portsAttributes": {
+    "4321": { "label": "web (Astro KB)" },
+    "5432": { "label": "postgres" },
+    "8090": { "label": "worker health" }
+  },
+  "postCreateCommand": "pnpm install && pnpm db:migrate",
+  "customizations": {
+    "vscode": {
+      "extensions": ["astro-build.astro-vscode", "vitest.explorer"],
+      "settings": {
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  }
+}

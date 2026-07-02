@@ -1,5 +1,6 @@
 import { getDb, getPublishedThreads } from '@dejavue/db';
 import type { APIRoute } from 'astro';
+import { threadPath } from '../lib/slug';
 
 function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, (c) =>
@@ -18,7 +19,7 @@ export const GET: APIRoute = async ({ locals, request }) => {
   const urls = [
     { loc: `${origin}/` },
     ...threads.map((t) => ({
-      loc: `${origin}/t/${t.threadId}`,
+      loc: `${origin}${threadPath(t)}`,
       lastmod: (t.solvedAt ?? t.updatedAt)?.toISOString(),
     })),
   ];

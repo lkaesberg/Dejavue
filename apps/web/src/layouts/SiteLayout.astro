@@ -34,6 +34,7 @@ const { title, description, canonical } = Astro.props;
     <slot name="head" />
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }
+      html { scrollbar-gutter: stable; }
       /* Scoped to .site-theme so it can't leak into the KB (light) layout, whose
          global body rule is bundled into the same page. */
       body.site-theme { margin: 0; background: #0A0B14; font-family: 'Inter', system-ui, sans-serif; color: #F4F5FF; overflow-x: hidden; }

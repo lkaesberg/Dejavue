@@ -14,6 +14,7 @@ import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
 import { resolveMentions } from '../lib/discordText';
+import { threadPath } from '../lib/slug';
 import { brandOf } from '../lib/theme';
 
 const { tenant, cfg, slug, tier } = Astro.locals;
@@ -153,7 +154,7 @@ const badgeText = (r: KbSearchResult): string =>
                   <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No matches for “{query}”.</p>
                 ) : (
                   results.map((r) => (
-                    <a href={`/t/${r.threadId}`} class="kb-row" style="display:block; padding:18px 2px; border-bottom:1px solid var(--border);">
+                    <a href={threadPath(r)} class="kb-row" style="display:block; padding:18px 2px; border-bottom:1px solid var(--border);">
                       <div style="display:flex; align-items:flex-start; gap:14px;">
                         <span style="color:#2DD4BF; font-size:15px; margin-top:2px;">✓</span>
                         <div style="flex:1; min-width:0;">

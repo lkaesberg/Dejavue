@@ -15,6 +15,7 @@
     "db:verify": "pnpm --filter @dejavue/db verify",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
+    "dev": "docker compose up -d --wait postgres && pnpm db:migrate && pnpm -r --parallel dev",
     "dev:bot": "pnpm --filter @dejavue/bot dev",
     "dev:worker": "pnpm --filter @dejavue/worker dev",
     "dev:web": "pnpm --filter @dejavue/web dev"

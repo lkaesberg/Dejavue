@@ -5,6 +5,7 @@ import Echo from '../components/Echo.astro';
 import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
+import { channelPath, threadPath } from '../lib/slug';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { brandOf, channelDot, channelHandle, channelKind } from '../lib/theme';
 
@@ -109,7 +110,7 @@ const tiers = [
               <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin-bottom:13px;">Most asked</div>
               <div style="border:1px solid var(--border); border-radius:var(--rad); overflow:hidden; background:var(--surface);">
                 {mostAsked.map((q) => (
-                  <a href={`/t/${q.threadId}`} class="kb-row" style="display:flex; align-items:center; gap:13px; padding:15px 18px; border-bottom:1px solid var(--border);">
+                  <a href={threadPath(q)} class="kb-row" style="display:flex; align-items:center; gap:13px; padding:15px 18px; border-bottom:1px solid var(--border);">
                     <span style="color:#2DD4BF; font-size:14px;">✓</span>
                     <span style="font-size:14.5px; color:var(--text); flex:1; font-weight:500;">{q.title}</span>
                     {q.channelName && (
@@ -131,7 +132,7 @@ const tiers = [
                 const guidelines = channelGuidelinesOf(cfg, c.id);
                 const kind = channelKind(cfg, c.id);
                 return (
-                  <a href={`/c/${c.id}`} class="kb-card-hover" style="border:1px solid var(--border); border-radius:var(--rad); padding:18px 20px; display:block; background:var(--surface);">
+                  <a href={channelPath(c)} class="kb-card-hover" style="border:1px solid var(--border); border-radius:var(--rad); padding:18px 20px; display:block; background:var(--surface);">
                     <div style="display:flex; align-items:center; justify-content:space-between;">
                       <span style="display:flex; align-items:center; gap:9px;">
                         <span style={`width:9px; height:9px; border-radius:50%; background:${channelDot(c.id)};`}></span>

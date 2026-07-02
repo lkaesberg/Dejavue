@@ -32,6 +32,9 @@ const faviconHref = cfg?.kbLogoUrl ?? `data:image/svg+xml,${encodeURIComponent(f
 
 const css = `
   *, *::before, *::after { box-sizing: border-box; }
+  /* Reserve the scrollbar gutter so short pages (no scrollbar) don't render
+     ~15px wider than long ones — the whole layout used to shift between pages. */
+  html { scrollbar-gutter: stable; }
   body.kb-theme { ${vars}; margin:0; width:100%; overflow-x:hidden; min-height:100vh;
     display:flex; flex-direction:column;
     font-family:'Inter', system-ui, sans-serif; color:var(--text); background:var(--bg); }
@@ -46,15 +49,18 @@ const css = `
   .kb-foot { border-top:1px solid var(--border); background:var(--footerbg); margin-top:auto; }
   .kb-bound { max-width:1180px; margin:0 auto; padding-left:clamp(18px,4vw,36px); padding-right:clamp(18px,4vw,36px); }
 
-  /* Home: full-bleed hero + bounded content. */
+  /* Home: full-bleed hero + bounded content. Same 1180px bound as the nav,
+     footer and inner pages so the content column never changes width between pages. */
   .kb-hero { background:linear-gradient(180deg,var(--hero1),var(--hero2)); border-bottom:1px solid var(--border); padding:clamp(44px,7vw,86px) clamp(18px,4vw,36px); }
   .kb-hero-inner { max-width:740px; margin:0 auto; text-align:center; }
-  .kb-home { max-width:1120px; margin:0 auto; padding:clamp(30px,4vw,46px) clamp(18px,4vw,36px) clamp(40px,5vw,64px); }
+  .kb-home { max-width:1180px; margin:0 auto; padding:clamp(30px,4vw,46px) clamp(18px,4vw,36px) clamp(40px,5vw,64px); }
   .cat-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(248px, 1fr)); gap:14px; }
 
-  /* Inner pages: channel-nav rail + main column. */
+  /* Inner pages: channel-nav rail + main column. The rail is a FIXED 232px on
+     every page (it used to flex 196–256px with content pressure, shifting the
+     main column from page to page). */
   .kb-inner { max-width:1180px; margin:0 auto; padding:0 clamp(18px,4vw,36px); display:flex; flex-wrap:wrap; align-items:flex-start; }
-  .kb-rail { flex:1 1 220px; max-width:256px; min-width:196px; padding:28px 22px 28px 0; border-right:1px solid var(--border); }
+  .kb-rail { flex:0 0 232px; width:232px; padding:28px 22px 28px 0; border-right:1px solid var(--border); }
   .kb-main { flex:999 1 540px; min-width:0; padding:8px 0 24px clamp(0px,3vw,30px); }
   /* Article: content + related rail inside main. */
   .kb-article { display:grid; grid-template-columns:minmax(0,1fr) 232px; gap:0; }

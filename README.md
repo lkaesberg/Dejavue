@@ -146,6 +146,12 @@ hourly LIST reconcile + per-process cache) and gates every feature.
 ## Quick start
 
 ```bash
+make setup                       # install + .env + Postgres + migrations
+```
+
+…or step by step (`make help` lists every task):
+
+```bash
 corepack enable                  # provides pnpm (pinned in package.json)
 pnpm install
 pnpm db:up                       # Postgres (pinned pgvector/pgvector:pg16)
@@ -153,13 +159,17 @@ pnpm db:migrate                  # extension + tables + HNSW index
 pnpm db:verify                   # proves pgvector cosine search works
 ```
 
-Then fill in `.env` (copy from `.env.example`) and run the services:
+**Dev container:** open the repo in VS Code / Cursor and "Reopen in Container" — the
+[.devcontainer](.devcontainer/devcontainer.json) starts Postgres alongside a Node 22 workspace,
+installs dependencies, and runs migrations automatically (ports 4321/5432/8090 forwarded).
+
+Then fill in `.env` (copy from `.env.example`) and start everything with one command:
 
 ```bash
-pnpm dev:bot                     # gateway client      (needs DISCORD_TOKEN)
-pnpm dev:worker                  # background jobs
-pnpm dev:web                     # Astro KB + MCP      (http://localhost:4321)
+make dev                         # Postgres + migrations + bot + worker + web (live reload)
 ```
+
+Or run services individually: `pnpm dev:bot` / `pnpm dev:worker` / `pnpm dev:web`.
 
 **Or the whole stack in one command:**
 

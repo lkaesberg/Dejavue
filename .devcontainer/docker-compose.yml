@@ -1,0 +1,21 @@
+# Devcontainer overlay: adds a long-running `dev` service next to the root
+# compose file's `postgres`. The editor attaches to `dev`; the production
+# bot/worker/web services are NOT started (see runServices in devcontainer.json).
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/dejavue:cached
+      # Keep the downloaded CPU embedding model out of the bind mount.
+      - dejavue_models:/workspaces/dejavue/.models
+    environment:
+      DATABASE_URL: postgres://dejavue:dejavue@postgres:5432/dejavue
+      # One shared model cache for bot/worker/web (the default is cwd-relative,
+      # which would scatter copies across apps/*/.models).
+      TRANSFORMERS_CACHE: /workspaces/dejavue/.models
+    depends_on:
+      postgres:
+        condition: service_healthy

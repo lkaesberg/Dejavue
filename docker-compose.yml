@@ -8,7 +8,11 @@ x-app: &app
     context: .
     dockerfile: Dockerfile
   image: dejavue-local:latest
-  env_file: .env
+  # Optional so `docker compose up postgres` (and the devcontainer, which only
+  # starts postgres + dev) works before a .env exists.
+  env_file:
+    - path: .env
+      required: false
   environment:
     DATABASE_URL: postgres://dejavue:dejavue@postgres:5432/dejavue
     NODE_ENV: production

@@ -8,15 +8,18 @@ import {
   getTopClusters,
   type Thread,
 } from '@dejavue/db';
-import ChannelRail from '../../components/ChannelRail.astro';
-import KbFooter from '../../components/KbFooter.astro';
-import KbNav from '../../components/KbNav.astro';
-import Base from '../../layouts/Base.astro';
-import { resolveMentions } from '../../lib/discordText';
-import { brandOf, channelKind } from '../../lib/theme';
+import ChannelRail from '../../../components/ChannelRail.astro';
+import KbFooter from '../../../components/KbFooter.astro';
+import KbNav from '../../../components/KbNav.astro';
+import Base from '../../../layouts/Base.astro';
+import { resolveMentions } from '../../../lib/discordText';
+import { channelPath, extractThreadId, threadPath } from '../../../lib/slug';
+import { brandOf, channelKind } from '../../../lib/theme';
 
 const { tenant, cfg, tier } = Astro.locals;
-const { threadId } = Astro.params;
+// The route is /c/{channel-slug}/{title-slug}-{snowflake}. Only the trailing
+// id is the lookup key — both slugs are cosmetic and self-heal via redirect.
+const threadId = extractThreadId(Astro.params.thread ?? '');
 const origin = new URL(Astro.request.url).origin;
 const limits = tierLimits(tier);
 
@@ -50,6 +53,12 @@ if (tenant && threadId) {
   }
 }
 if (!thread) Astro.response.status = 404;
+
+// Legacy `/t/{id}` and stale-slug urls permanently redirect to the canonical
+// slugged path, so old indexed links keep working and search engines converge.
+if (thread && Astro.url.pathname !== threadPath(thread)) {
+  return Astro.redirect(threadPath(thread), 301);
+}
 
 const summary = thread?.canonicalSummary ?? '';
 const acceptedAnswer = thread?.acceptedAnswerText ?? '';
@@ -118,7 +127,7 @@ const jsonLd = thread
     <Base
       title={`${thread.title} — ${brand}`}
       description={clean(thread.questionBody || thread.title).slice(0, 160)}
-      canonical={`${origin}/t/${thread.threadId}`}
+      canonical={`${origin}${threadPath(thread)}`}
     >
       <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
       <KbNav query="" />
@@ -130,7 +139,7 @@ const jsonLd = thread
             <div style="min-width:0; padding:26px clamp(0px,3vw,32px) 44px 0;">
             <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut); flex-wrap:wrap;">
               <a href="/" class="kb-link">Help Center</a>
-              {channelName && (<><span style="color:var(--border2);">/</span><a href={`/c/${thread.channelId}`} class="kb-link">{channelName}</a></>)}
+              {channelName && (<><span style="color:var(--border2);">/</span><a href={channelPath(thread)} class="kb-link">{channelName}</a></>)}
               <span style="color:var(--border2);">/</span><span style="color:var(--textmid);">{thread.title.slice(0, 40)}</span>
             </div>
 
@@ -264,10 +273,10 @@ const jsonLd = thread
             {(channelName || thread.labels.length > 0) && (
               <div style="display:flex; align-items:center; gap:8px; margin-top:32px; padding-top:24px; border-top:1px solid var(--border); flex-wrap:wrap;">
                 {channelName && (
-                  <a href={`/c/${thread.channelId}`} style="background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
+                  <a href={channelPath(thread)} style="background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{channelName}</a>
                 )}
                 {thread.labels.map((l) => (
-                  <a href={`/c/${thread.channelId}?label=${encodeURIComponent(l)}`} style="background:var(--chipbg); color:var(--chiptext); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{l}</a>
+                  <a href={`${channelPath(thread)}?label=${encodeURIComponent(l)}`} style="background:var(--chipbg); color:var(--chiptext); font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">{l}</a>
                 ))}
               </div>
             )}
@@ -280,7 +289,7 @@ const jsonLd = thread
                 <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Related</div>
                 <div style="display:flex; flex-direction:column; gap:3px; margin-top:13px;">
                   {related.map((r) => (
-                    <a href={`/t/${r.threadId}`} class="kb-row" style="display:flex; gap:9px; padding:11px 12px; border-radius:var(--radsm); align-items:flex-start;">
+                    <a href={threadPath(r)} class="kb-row" style="display:flex; gap:9px; padding:11px 12px; border-radius:var(--radsm); align-items:flex-start;">
                       <span style="color:#2DD4BF; font-size:13px; margin-top:1px;">✓</span>
                       <span style="font-size:13.5px; line-height:1.4; color:var(--textmid);">{r.title}</span>
                     </a>

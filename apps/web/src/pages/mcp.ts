@@ -2,6 +2,7 @@ import { getEnv, quotasFromEnv, tierLimits, verifyPassphrase } from '@dejavue/co
 import { getDb, getKbAnswersByRowIds, hybridSearch, resolveGuildTier } from '@dejavue/db';
 import type { APIRoute } from 'astro';
 import { takeToken } from '../lib/rateLimit';
+import { threadPath } from '../lib/slug';
 
 // Minimal MCP (Streamable HTTP, stateless) server exposing each Pro guild's
 // knowledge base as a `search_knowledge_base` tool. Served per-tenant at
@@ -77,7 +78,7 @@ async function search(
       const meta = [m.channelName ? `#${m.channelName}` : null, `${Math.round(m.score * 100)}% match`]
         .filter(Boolean)
         .join(' · ');
-      return `${i + 1}. ${m.title} (${meta})\n${a?.answer || '(no recorded answer)'}\nSource: ${origin}/t/${m.threadId}`;
+      return `${i + 1}. ${m.title} (${meta})\n${a?.answer || '(no recorded answer)'}\nSource: ${origin}${threadPath(m)}`;
     })
     .join('\n\n');
 }
