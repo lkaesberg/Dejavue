@@ -7,8 +7,14 @@
 
 /** A >20-minute silence starts a new conversation segment. */
 export const SEGMENT_GAP_MS = 20 * 60 * 1000;
-/** Skip one-off chatter — a segment needs at least this many messages. */
-export const MIN_SEGMENT_MSGS = 2;
+/**
+ * Minimum messages for a segment to be indexed. 1: a standalone message IS the
+ * conversation in sparse/announcement channels. (This was 2 to skip one-off
+ * chatter, but it made sparse tracked channels index NOTHING at setup/rescan —
+ * content only appeared once a second message landed within the gap window,
+ * which read as "old messages never import".)
+ */
+export const MIN_SEGMENT_MSGS = 1;
 
 /** Split chronologically-sorted messages into segments on a silence gap. */
 export function segmentByGap<T extends { createdAt: string }>(

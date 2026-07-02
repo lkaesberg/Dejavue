@@ -53,13 +53,17 @@ const css = `
      footer and inner pages so the content column never changes width between pages. */
   .kb-hero { background:linear-gradient(180deg,var(--hero1),var(--hero2)); border-bottom:1px solid var(--border); padding:clamp(44px,7vw,86px) clamp(18px,4vw,36px); }
   .kb-hero-inner { max-width:740px; margin:0 auto; text-align:center; }
-  .kb-home { max-width:1180px; margin:0 auto; padding:clamp(30px,4vw,46px) clamp(18px,4vw,36px) clamp(40px,5vw,64px); }
+  /* width:100% matters: these are children of the body column-flex, and their
+     margin:0 auto disables the default cross-axis stretch — without an explicit
+     width they'd shrink to fit-content, so sparse pages rendered narrower than
+     full ones (and the rail+main row wrapped when content was short). */
+  .kb-home { width:100%; max-width:1180px; margin:0 auto; padding:clamp(30px,4vw,46px) clamp(18px,4vw,36px) clamp(40px,5vw,64px); }
   .cat-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(248px, 1fr)); gap:14px; }
 
   /* Inner pages: channel-nav rail + main column. The rail is a FIXED 232px on
      every page (it used to flex 196–256px with content pressure, shifting the
      main column from page to page). */
-  .kb-inner { max-width:1180px; margin:0 auto; padding:0 clamp(18px,4vw,36px); display:flex; flex-wrap:wrap; align-items:flex-start; }
+  .kb-inner { width:100%; max-width:1180px; margin:0 auto; padding:0 clamp(18px,4vw,36px); display:flex; flex-wrap:wrap; align-items:flex-start; }
   .kb-rail { flex:0 0 232px; width:232px; padding:28px 22px 28px 0; border-right:1px solid var(--border); }
   .kb-main { flex:999 1 540px; min-width:0; padding:8px 0 24px clamp(0px,3vw,30px); }
   /* Article: content + related rail inside main. */

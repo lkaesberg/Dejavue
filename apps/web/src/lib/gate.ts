@@ -46,8 +46,11 @@ export function gateHtml(cfg: GuildConfig, opts: { error?: boolean; branded: boo
   const errorBlock = opts.error
     ? `<div style="font-size:13px; color:#E5484D; margin-top:11px;">That passphrase doesn't match. Try again.</div>`
     : '';
+  // Inline copy of the Echo mark (components/Echo.astro, tile "none") — this
+  // page is a standalone HTML string, so it can't render the Astro component.
+  const echoIcon = `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" style="display:block;width:26px;height:26px;" aria-hidden="true"><g><rect x="344" y="320" width="448" height="348" rx="82" fill="#4F46E5"></rect><path d="M430 660 L452 762 L528 660 Z" fill="#4F46E5"></path><path d="M476 492 L540 558 L676 414" fill="none" stroke="#2DD4BF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"></path></g></svg>`;
   const poweredBy = opts.branded
-    ? `<div style="margin-top:26px; padding-top:22px; border-top:1px solid var(--border); font-size:13px; color:var(--textmut);">powered by <strong style="font-family:var(--headfont); color:var(--textmid);">dejavue</strong></div>`
+    ? `<div style="margin-top:26px; padding-top:22px; border-top:1px solid var(--border); font-size:13px; color:var(--textmut); display:flex; align-items:center; justify-content:center; gap:7px;">${echoIcon}<span>powered by <strong style="font-family:var(--headfont); color:var(--textmid);">dejavue</strong></span></div>`
     : '';
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

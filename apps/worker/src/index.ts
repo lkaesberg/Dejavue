@@ -30,7 +30,11 @@ import { handleSummarizeThread } from './jobs/summarizeThread';
 
 const log = logger();
 
-/** Liveness endpoint for deploy orchestration: 200 when the DB is reachable. */
+/**
+ * Liveness endpoint for deploy orchestration: 200 when the DB is reachable.
+ * Best effort — a taken port (e.g. a second local worker next to the Docker
+ * one) must not crash job processing, so listen errors only log a warning.
+ */
 function startHealthServer(): Server {
   const port = Number(process.env.HEALTH_PORT ?? 8090);
   const server = createServer((req, res) => {
@@ -42,6 +46,7 @@ function startHealthServer(): Server {
       .then(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}'))
       .catch(() => res.writeHead(503, { 'content-type': 'application/json' }).end('{"ok":false}'));
   });
+  server.on('error', (err) => log.warn({ err, port }, 'health endpoint unavailable (continuing without it)'));
   server.listen(port, () => log.info({ port }, 'health endpoint listening'));
   return server;
 }

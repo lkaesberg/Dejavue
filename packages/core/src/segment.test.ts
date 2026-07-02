@@ -50,8 +50,10 @@ describe('segmentTitle', () => {
 });
 
 describe('segmentation constants', () => {
-  it('uses a 20-minute gap and a 2-message minimum', () => {
+  it('uses a 20-minute gap and indexes single-message segments', () => {
     expect(SEGMENT_GAP_MS).toBe(20 * 60 * 1000);
-    expect(MIN_SEGMENT_MSGS).toBe(2);
+    // 1, deliberately: a standalone message is the whole conversation in a
+    // sparse channel — a 2-minimum made such channels index nothing at setup.
+    expect(MIN_SEGMENT_MSGS).toBe(1);
   });
 });
