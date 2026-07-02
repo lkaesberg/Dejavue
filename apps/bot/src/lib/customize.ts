@@ -33,6 +33,7 @@ import {
   updateGuildConfig,
 } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
+import { checkDomainDns, dnsInstructions } from './domainDns';
 import { COLOR } from './embeds';
 import { eph } from './reply';
 import { getGuildTier } from './tier';
@@ -337,6 +338,29 @@ export async function handleCustomizeButton(interaction: ButtonInteraction): Pro
   }
 }
 
+/**
+ * Purchase-confirmed + live DNS status + the exact record to create, shown
+ * right after an admin saves a custom domain.
+ */
+async function domainStatusEmbed(domain: string, kbHost: string): Promise<EmbedBuilder> {
+  const dns = await checkDomainDns(domain, kbHost);
+  const statusLine =
+    dns.status === 'ok'
+      ? `✅ DNS is set up correctly (${dns.via === 'cname' ? 'CNAME' : 'ALIAS/A record'} → \`${dns.found}\`). ` +
+        `Your knowledge base is live at https://${domain} — the TLS certificate is provisioned automatically on first request.`
+      : dns.status === 'wrong-target'
+        ? `⚠️ \`${domain}\` currently points at \`${dns.found}\` — update the record below and it will switch over as DNS propagates.`
+        : `⏳ \`${domain}\` doesn't resolve to us yet. Create the record below — propagation usually takes minutes, sometimes up to a day.`;
+  return new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle(`Custom domain: ${domain}`)
+    .setDescription(
+      `✅ Your custom-domain purchase is active — **${domain}** is saved.\n\n${statusLine}\n\n${dnsInstructions(domain, kbHost)}\n` +
+        '_HTTPS is enforced; the certificate is issued automatically once DNS points here. ' +
+        'Re-save the domain in **Edit details** anytime to re-run this check._',
+    );
+}
+
 /** Modal submissions: save details / imprint, then re-render the hub. */
 export async function handleCustomizeModal(interaction: ModalSubmitInteraction): Promise<void> {
   const guildId = interaction.guildId!;
@@ -364,16 +388,30 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
     }
 
     const rawDomain = interaction.fields.getTextInputValue('domain').trim().toLowerCase();
+    let domainSaved: string | null = null;
     if (rawDomain === '' || rawDomain === 'none' || rawDomain === 'remove') {
       patch.customDomain = null;
     } else {
       const otp = env.SKU_CUSTOM_DOMAIN ? await getActiveOtp(db, guildId, env.SKU_CUSTOM_DOMAIN) : undefined;
       if (!otp && !env.DEV_FORCE_TIER) {
-        errors.push('A custom domain is a one-time purchase — buy it, then set it here.');
-      } else if (!DOMAIN_RE.test(rawDomain) || rawDomain.endsWith(env.KB_BASE_DOMAIN)) {
+        // Not allowed (yet): answer with the native purchase button, not just text.
+        await interaction.reply({
+          ...upsellPayload({
+            title: 'Custom domain is a one-time purchase',
+            description:
+              `Serving your knowledge base on **${rawDomain}** needs the custom-domain purchase for this server. ` +
+              'Buy it below, then set the domain here again — I’ll walk you through the DNS setup.',
+            skuId: env.SKU_CUSTOM_DOMAIN,
+          }),
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (!DOMAIN_RE.test(rawDomain) || rawDomain.endsWith(env.KB_BASE_DOMAIN)) {
         errors.push('Custom domain looks invalid. Use a hostname you own, e.g. `help.yoursite.com`.');
       } else {
         patch.customDomain = rawDomain;
+        domainSaved = rawDomain;
       }
     }
 
@@ -400,6 +438,14 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
     }
     await enqueueRevalidateKb({ guildId, threadId: 'all', action: 'publish' }).catch(() => undefined);
     await rerender(interaction, guildId);
+    // A domain was set → confirm the purchase is active, check DNS live, and
+    // show exactly which record to create. Re-saving the domain re-runs this,
+    // so it doubles as a "check my DNS again" button.
+    if (domainSaved) {
+      await interaction
+        .followUp({ embeds: [await domainStatusEmbed(domainSaved, env.KB_BASE_DOMAIN)], flags: MessageFlags.Ephemeral })
+        .catch((err) => log.warn({ err, guildId }, 'domain status follow-up failed'));
+    }
     return;
   }
 
