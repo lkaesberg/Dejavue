@@ -4,12 +4,13 @@ import { getDb, getPublishedThreads, getTopClusters } from '@dejavue/db';
 import ChannelRail from '../components/ChannelRail.astro';
 import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
+import PlatformPrivacy from '../components/legal/PlatformPrivacy.astro';
 import Base from '../layouts/Base.astro';
 import { brandOf } from '../lib/theme';
 
 const { tenant, cfg, slug, tier } = Astro.locals;
 const notFound = slug !== null && tenant === null;
-if (notFound || !tenant) Astro.response.status = 404;
+if (notFound) Astro.response.status = 404;
 const origin = new URL(Astro.request.url).origin;
 const brand = brandOf(cfg, tenant?.slug ?? undefined);
 const limits = tierLimits(tier);
@@ -41,7 +42,7 @@ if (tenant) {
 ---
 
 {
-  tenant && (
+  tenant ? (
     <Base title={`Privacy Policy — ${brand}`} description={`How ${brand}'s knowledge base handles published content.`} canonical={`${origin}/privacy`} noindex>
       <KbNav />
       <div class="kb-inner">
@@ -70,5 +71,8 @@ if (tenant) {
       </div>
       <KbFooter />
     </Base>
+  ) : notFound ? null : (
+    // Main marketing domain — the platform-level privacy policy.
+    <PlatformPrivacy />
   )
 }

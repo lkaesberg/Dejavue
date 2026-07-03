@@ -1,0 +1,15 @@
+---
+import { getEnv } from '@dejavue/core';
+import PlatformTerms from '../components/legal/PlatformTerms.astro';
+
+const env = getEnv();
+const { tenant, slug } = Astro.locals;
+const notFound = slug !== null && tenant === null;
+if (notFound) Astro.response.status = 404;
+
+// Tenant KBs carry their operator's own legal pages (imprint/privacy); the
+// platform terms live on the main site only — send KB visitors there.
+if (tenant) return Astro.redirect(new URL('/terms', env.KB_PUBLIC_URL).toString(), 301);
+---
+
+{!notFound && <PlatformTerms />}

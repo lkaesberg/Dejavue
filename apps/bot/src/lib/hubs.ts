@@ -48,6 +48,7 @@ import {
 import { refreshAllChannelTopics } from './channelFit';
 import { COLOR } from './embeds';
 import { runFaq, runGaps } from './generate';
+import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
 import { allTargets, startReindex } from './reindexTrigger';
 import { getGuildTier, limitsFor } from './tier';
@@ -245,6 +246,11 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
   const atCap = Number.isFinite(indexCap) && indexed >= indexCap;
   const kbUrl = cfg?.kbSlug ? `https://${cfg.kbSlug}.${env.KB_BASE_DOMAIN}` : null;
   const channelCap = Number.isFinite(limits.maxForumChannels) ? String(limits.maxForumChannels) : '∞';
+  // Legacy KBs that went public before the imprint gate existed get a nag here.
+  const imprintWarn =
+    cfg && isPubliclyLive(cfg) && !imprintComplete(cfg.kbImprint)
+      ? '\n⚠️ **Imprint incomplete** — public sites must name an operator and contact. Add them in `/dejavue customize`.'
+      : '';
 
   const syncMap = new Map((await listChannelSync(db, guildId)).map((r) => [r.channelId, r]));
   const liveMap = new Map(
@@ -294,7 +300,7 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
       },
       {
         name: 'Public site',
-        value: cfg?.kbPublishOptIn && kbUrl ? `on — ${kbUrl}` : cfg?.kbPublishOptIn ? 'on — _set a slug in_ `/dejavue customize`' : 'off — _turn on in_ `/dejavue customize`',
+        value: cfg?.kbPublishOptIn && kbUrl ? `on — ${kbUrl}${imprintWarn}` : cfg?.kbPublishOptIn ? `on — _set a slug in_ \`/dejavue customize\`${imprintWarn}` : 'off — _turn on in_ `/dejavue customize`',
       },
     );
   if (limits.mcp && kbUrl) embed.addFields({ name: 'MCP (Max)', value: `\`${kbUrl}/mcp\`` });

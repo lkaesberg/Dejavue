@@ -35,6 +35,7 @@ import {
 import { enqueueRevalidateKb } from '@dejavue/queue';
 import { checkDomainDns, dnsInstructions } from './domainDns';
 import { COLOR } from './embeds';
+import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
 import { getGuildTier } from './tier';
 import { upsellPayload } from './upsell';
@@ -125,16 +126,22 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
   const paid = tierAtLeast(tier, 'plus');
   const url = cfg.kbSlug ? `https://${cfg.kbSlug}.${kbBaseDomain}` : '—';
   const brand = cfg.brandName?.trim() || cfg.kbSlug || '(uses slug)';
+  const imprintOk = imprintComplete(cfg.kbImprint);
+  const needsImprint = isPubliclyLive(cfg) && !imprintOk;
 
   const embed = new EmbedBuilder()
     .setColor(COLOR)
     .setTitle('🎨 Customize your knowledge base')
     .setDescription(
-      paid
+      (paid
         ? 'Pick a theme, accent, corners and heading font below — they apply to your live site instantly. ' +
-            'Use **Edit details** for the name, slug, domain and passphrase.'
+          'Use **Edit details** for the name, slug, domain and passphrase.'
         : 'Set your **name, slug, passphrase** and **publishing** below. Theme, accent, corners & fonts are a ' +
-            '**Plus** feature — upgrade to fully brand your site.',
+          '**Plus** feature — upgrade to fully brand your site.') +
+        (needsImprint
+          ? '\n\n⚠️ **Your site is public but its imprint is incomplete.** Public sites must name an operator ' +
+            'and a contact (Terms of Service § 4) — add them via **Imprint…** below.'
+          : ''),
     )
     .addFields(
       { name: 'Brand name', value: brand, inline: true },
@@ -145,7 +152,7 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
       { name: 'Accent', value: labelFor(ACCENT_OPTS, cfg.kbAccent), inline: true },
       { name: 'Corners', value: labelFor(CORNER_OPTS, cfg.kbCorners), inline: true },
       { name: 'Heading font', value: labelFor(FONT_OPTS, cfg.kbHeadingFont), inline: true },
-      { name: 'Imprint', value: cfg.kbImprint?.operator ? '✅ set' : '— not set', inline: true },
+      { name: 'Imprint', value: imprintOk ? '✅ set' : needsImprint ? '⚠️ required — site is public' : '— not set', inline: true },
     );
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -236,11 +243,33 @@ function imprintModal(cfg: GuildConfig): ModalBuilder {
     .setCustomId(ID.imprintModal)
     .setTitle('Imprint (legal page)')
     .addComponents(
-      row(new TextInputBuilder().setCustomId('operator').setLabel('Operator').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setValue(im.operator ?? '')),
-      row(new TextInputBuilder().setCustomId('contact').setLabel('Contact (email)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setValue(im.contact ?? '')),
+      row(new TextInputBuilder().setCustomId('operator').setLabel('Operator').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('Who runs this knowledge base — required while the site is public').setValue(im.operator ?? '')),
+      row(new TextInputBuilder().setCustomId('contact').setLabel('Contact (email)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('An email readers can reach — required while the site is public').setValue(im.contact ?? '')),
       row(new TextInputBuilder().setCustomId('representedBy').setLabel('Represented by').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setValue(im.representedBy ?? '')),
       row(new TextInputBuilder().setCustomId('responsible').setLabel('Responsible for content').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setValue(im.responsible ?? '')),
     );
+}
+
+/**
+ * Ephemeral refusal shown when an action would make the KB publicly reachable
+ * without the imprint minimum (operator + contact). The button reuses ID.imprint,
+ * so the existing interaction routing opens the imprint modal directly.
+ */
+function imprintRequiredPayload(): BaseMessageOptions {
+  const embed = new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle('⚖️ Add an imprint before going public')
+    .setDescription(
+      'A publicly reachable knowledge base must say who operates it. Fill in at least **Operator** and ' +
+        "**Contact** — they appear on your site's `/imprint` page.\n\n" +
+        `This identification is required by the [Terms of Service](${getEnv().KB_PUBLIC_URL}/terms) ` +
+        '(§ 4 — your own legal notices), and in many countries by law. Passphrase-protected (private) ' +
+        'sites are exempt.',
+    );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(ID.imprint).setLabel('Fill in imprint…').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+  );
+  return { embeds: [embed], components: [row] };
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +349,12 @@ export async function handleCustomizeButton(interaction: ButtonInteraction): Pro
   }
   if (interaction.customId === ID.publish) {
     const next = !cfg.kbPublishOptIn;
+    // Turning the site on may make it publicly reachable — that requires the imprint
+    // minimum first (ToS § 4). Passphrase-gated and slug-less sites stay ungated.
+    if (next && isPubliclyLive({ ...cfg, kbPublishOptIn: true }) && !imprintComplete(cfg.kbImprint)) {
+      await interaction.reply({ ...imprintRequiredPayload(), flags: MessageFlags.Ephemeral });
+      return;
+    }
     await updateGuildConfig(db, guildId, { kbPublishOptIn: next });
     if (next) {
       // Turning the public site on. Everything indexed is auto-published already, but
@@ -368,6 +403,7 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
 
   if (interaction.customId === ID.detailsModal) {
     const env = getEnv();
+    const cfg = await ensureGuildConfig(db, guildId);
     const patch: Parameters<typeof updateGuildConfig>[2] = {};
     const errors: string[] = [];
 
@@ -428,8 +464,14 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
       await interaction.reply(eph(`⚠️ ${errors.join('\n')}`));
       return;
     }
+    // Block the transition into public-live (first slug/domain, passphrase removed)
+    // until the imprint identifies the operator (ToS § 4). Already-live sites only get
+    // the hub warning, so unrelated edits never lock up.
+    if (!isPubliclyLive(cfg) && isPubliclyLive({ ...cfg, ...patch }) && !imprintComplete(cfg.kbImprint)) {
+      await interaction.reply({ ...imprintRequiredPayload(), flags: MessageFlags.Ephemeral });
+      return;
+    }
     try {
-      await ensureGuildConfig(db, guildId);
       await updateGuildConfig(db, guildId, patch);
     } catch (err) {
       log.warn({ err, guildId }, 'customize details save failed');
@@ -457,7 +499,18 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
       responsible: interaction.fields.getTextInputValue('responsible').trim() || undefined,
     };
     const empty = !Object.values(imprint).some(Boolean);
-    await ensureGuildConfig(db, guildId);
+    const cfg = await ensureGuildConfig(db, guildId);
+    // A live public site can't drop below the imprint minimum — turn the site off or
+    // set a passphrase first, then trim the imprint.
+    if (isPubliclyLive(cfg) && !imprintComplete(imprint)) {
+      await interaction.reply(
+        eph(
+          '⚠️ Your site is publicly live, so the imprint must keep at least **Operator** and **Contact**. ' +
+            'Turn the site off or set a passphrase first if you want to remove them.',
+        ),
+      );
+      return;
+    }
     await updateGuildConfig(db, guildId, { kbImprint: empty ? null : imprint });
     await enqueueRevalidateKb({ guildId, threadId: 'all', action: 'publish' }).catch(() => undefined);
     await rerender(interaction, guildId);

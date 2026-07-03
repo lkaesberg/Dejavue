@@ -1,0 +1,92 @@
+---
+// Shared shell for the platform-level legal pages (/imprint, /privacy, /terms)
+// on the marketing domain. Tenant KBs render their own legal pages instead —
+// see pages/imprint.astro and pages/privacy.astro, which branch on the tenant.
+import Echo from '../components/Echo.astro';
+import SiteLayout from './SiteLayout.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  heading: string;
+  sub: string;
+  active: 'imprint' | 'privacy' | 'terms';
+  updated?: string;
+}
+const { title, description, heading, sub, active, updated } = Astro.props;
+const origin = new URL(Astro.request.url).origin;
+const tabs = [
+  { key: 'imprint', href: '/imprint', label: 'Impressum' },
+  { key: 'privacy', href: '/privacy', label: 'Privacy Policy' },
+  { key: 'terms', href: '/terms', label: 'Terms of Service' },
+] as const;
+---
+
+<SiteLayout title={title} description={description} canonical={`${origin}/${active === 'imprint' ? 'imprint' : active}`}>
+  <nav style="border-bottom:1px solid rgba(244,245,255,0.07);">
+    <div style="max-width:840px; margin:0 auto; padding:14px clamp(16px,4vw,32px); display:flex; align-items:center; justify-content:space-between; gap:16px;">
+      <a href="/" style="display:flex; align-items:center; gap:11px;">
+        <Echo tile="none" bubbleFill="#F4F5FF" checkFill="#2DD4BF" echoFill="#A78BFA" echoOpacity={0.6} size={28} />
+        <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:19px; letter-spacing:-0.04em; color:#F4F5FF;">dejavue</span>
+      </a>
+      <a href="/" style="font-size:13.5px; color:#9AA0C3;">&larr; Back to home</a>
+    </div>
+  </nav>
+
+  <main style="max-width:840px; margin:0 auto; padding:clamp(32px,5vw,52px) clamp(16px,4vw,32px) clamp(56px,8vw,80px);">
+    <div style="display:flex; gap:22px; border-bottom:1px solid rgba(244,245,255,0.09); flex-wrap:wrap;">
+      {
+        tabs.map((t) =>
+          t.key === active ? (
+            <span style="font-size:14px; font-weight:600; padding:0 0 11px; color:#C4B5FD; border-bottom:2px solid #7C3AED;">{t.label}</span>
+          ) : (
+            <a href={t.href} style="font-size:14px; font-weight:600; padding:0 0 11px; color:#6F7596;">{t.label}</a>
+          )
+        )
+      }
+    </div>
+    <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,4.5vw,38px); letter-spacing:-0.03em; margin:30px 0 0; line-height:1.1;">{heading}</h1>
+    <p style="font-size:15.5px; line-height:1.6; color:#9AA0C3; margin:14px 0 0; max-width:660px;">{sub}</p>
+    {updated && <p style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#6F7596; margin:14px 0 0;">Last updated: {updated}</p>}
+    <div class="legal-body">
+      <slot />
+    </div>
+  </main>
+
+  <footer style="border-top:1px solid rgba(244,245,255,0.07); padding:34px clamp(16px,4vw,32px);">
+    <div style="max-width:840px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <Echo tile="none" bubbleFill="#F4F5FF" checkFill="#2DD4BF" showEcho={false} size={20} />
+        <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:15px; letter-spacing:-0.03em;">dejavue</span>
+      </div>
+      <div style="display:flex; gap:22px; font-size:13px; flex-wrap:wrap;">
+        <a href="/terms" style="color:#9AA0C3;">Terms of Service</a>
+        <a href="/privacy" style="color:#9AA0C3;">Privacy Policy</a>
+        <a href="/imprint" style="color:#9AA0C3;">Impressum</a>
+      </div>
+    </div>
+  </footer>
+
+  <style is:global>
+    .legal-body { margin-top: 8px; }
+    .legal-body h2 { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 20px; letter-spacing: -0.02em; color: #f4f5ff; margin: 40px 0 0; }
+    .legal-body h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 16px; letter-spacing: -0.01em; color: #dbdee1; margin: 26px 0 0; }
+    .legal-body p, .legal-body li { font-size: 14.5px; line-height: 1.7; color: #9aa0c3; }
+    .legal-body p { margin: 12px 0 0; }
+    .legal-body ul { margin: 12px 0 0; padding-left: 22px; }
+    .legal-body li { margin: 7px 0 0; }
+    .legal-body strong { color: #dbdee1; font-weight: 600; }
+    .legal-body a { color: #a78bfa; }
+    .legal-body a:hover { text-decoration: underline; }
+    .legal-body .en { color: #6f7596; }
+    .legal-body .legal-card { margin-top: 20px; border: 1px solid rgba(244, 245, 255, 0.1); border-radius: 14px; background: rgba(27, 29, 51, 0.5); overflow: hidden; }
+    .legal-body .legal-card > div { display: flex; gap: 16px; padding: 13px 18px; border-bottom: 1px solid rgba(244, 245, 255, 0.07); }
+    .legal-body .legal-card > div:last-child { border-bottom: none; }
+    .legal-body .legal-card .k { flex: 0 0 200px; font-size: 13.5px; color: #6f7596; }
+    .legal-body .legal-card .v { flex: 1; font-size: 13.5px; color: #dbdee1; line-height: 1.55; }
+    @media (max-width: 560px) {
+      .legal-body .legal-card > div { flex-direction: column; gap: 3px; }
+      .legal-body .legal-card .k { flex: auto; }
+    }
+  </style>
+</SiteLayout>

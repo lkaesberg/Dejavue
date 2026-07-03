@@ -1,0 +1,190 @@
+---
+// Platform-level privacy policy (GDPR) for the marketing domain. Tenant KBs show
+// their own short privacy summary (pages/privacy.astro, tenant branch); this page
+// is the authoritative statement for all processing performed by the platform.
+// Keep this in sync with what the code actually does — it documents: server logs,
+// the private-KB unlock cookie, Discord sync + aliasing, OpenRouter AI calls,
+// Discord Premium Apps entitlements, and the MCP endpoint. Nothing else.
+import SiteLegal from '../../layouts/SiteLegal.astro';
+---
+
+<SiteLegal
+  title="Privacy Policy — dejavue"
+  description="How dejavue processes personal data: no accounts, no tracking, aliased authors, and AI processing explained."
+  heading="Privacy Policy"
+  sub="How dejavue handles personal data on this website, in the Discord bot, and on the hosted knowledge bases. Auf Anfrage stellen wir diese Datenschutzerklärung gern auch auf Deutsch bereit."
+  active="privacy"
+  updated="3 July 2026"
+>
+  <h2>1. Controller</h2>
+  <p>
+    The controller within the meaning of the EU General Data Protection Regulation (GDPR) for this website and the
+    dejavue platform is:
+  </p>
+  <div class="legal-card">
+    <div><span class="k">Name</span><span class="v">Lars Benedikt Kaesberg</span></div>
+    <div><span class="k">Address</span><span class="v">Hannoversche Straße 8, 37075 Göttingen, Germany</span></div>
+    <div><span class="k">Email</span><span class="v"><a href="mailto:contact@larskaesberg.de">contact@larskaesberg.de</a></span></div>
+  </div>
+  <p>
+    For content published inside an individual knowledge base, the Discord community that operates it is the
+    responsible party — see section 5.
+  </p>
+
+  <h2>2. The short version</h2>
+  <ul>
+    <li>There are <strong>no user accounts</strong> on this website or on the knowledge bases.</li>
+    <li>We use <strong>no analytics, no advertising, and no tracking cookies</strong>, and we do not profile visitors.</li>
+    <li>Fonts and all other assets are <strong>self-hosted</strong> — viewing a page sends no requests to Google or other third parties.</li>
+    <li>Knowledge-base content comes from Discord servers whose administrators chose to publish it. Authors are shown only under <strong>neutral aliases</strong> such as “Original poster” or “Helper 1” — never with Discord names, avatars, or IDs.</li>
+    <li>Payments are handled entirely <strong>inside Discord</strong>; we never see payment details.</li>
+  </ul>
+
+  <h2>3. Visiting our pages (server logs)</h2>
+  <p>
+    When you visit dejavue.app or a hosted knowledge base, our web server processes the technical data your browser
+    transmits: IP address, date and time of the request, requested URL, referrer URL, browser and operating-system
+    information (user agent), and the HTTP status of the response.
+  </p>
+  <p>
+    We process this data to deliver the pages, to ensure the stability and security of the service, and to detect
+    and defend against abuse (e.g. rate limiting). The legal basis is Art. 6(1)(f) GDPR (legitimate interest in a
+    secure, functional service). Log data is kept short-term for these purposes and is then deleted or anonymized;
+    it is not merged with other data or used to profile visitors. Our servers are operated on infrastructure rented
+    from a hosting provider that processes this data on our behalf under an Art. 28 GDPR data-processing agreement.
+  </p>
+
+  <h2>4. Cookies</h2>
+  <p>
+    The marketing site sets <strong>no cookies</strong>. If a community makes its knowledge base private with a
+    passphrase, entering the correct passphrase sets a single technical cookie (name prefix <code>dvkb_</code>,
+    HttpOnly, valid for 30 days) so you do not have to re-enter it on every page. This cookie contains no personal
+    data and no identifier of you — it only proves that the passphrase was entered. It is strictly necessary for
+    the service you requested (§ 25(2) no. 2 German TDDDG), which is why no consent banner is required. We set no
+    third-party cookies of any kind.
+  </p>
+
+  <h2>5. Knowledge bases: content from Discord, and who is responsible</h2>
+  <p>
+    Each knowledge base (e.g. <code>example.dejavue.app</code> or a community’s custom domain) is created by the
+    administrators of a Discord server who install the dejavue bot and deliberately enable publishing. For the
+    content published there, the <strong>respective community/server operator is the controller</strong>; dejavue
+    stores and displays this content on the operator’s behalf as a processor (Art. 28 GDPR). Each knowledge base
+    carries its own imprint identifying its operator (the “Imprint” link in its footer).
+  </p>
+  <p>When an administrator enables indexing or publishing for a channel, the following is synced from Discord:</p>
+  <ul>
+    <li>message text of the selected threads and channels, thread titles, timestamps, and solved status,</li>
+    <li>reaction counts (numbers only),</li>
+    <li>attachments posted in those threads (a copy is re-hosted on our infrastructure so pages don’t depend on Discord’s CDN),</li>
+    <li>the <strong>numeric Discord user ID</strong> of each message author — never usernames, display names, or avatars.</li>
+  </ul>
+  <p>
+    On the public pages, authors appear only under neutral aliases (“Original poster”, “Helper 1”, “Member”), with
+    generic initials instead of avatars. The numeric user IDs are stored internally for one purpose only: keeping
+    aliases consistent within a thread and enabling removal requests. They are never displayed and never shared.
+    Note that the text of a message can itself contain personal data if a member wrote some into it; operators are
+    contractually required to review what they publish and to handle objections (see our
+    <a href="/terms">Terms of Service</a>).
+  </p>
+  <p>
+    <strong>Removal:</strong> if content concerning you appears in a knowledge base, you can contact the operator
+    named in that knowledge base’s imprint, or write to us at
+    <a href="mailto:contact@larskaesberg.de">contact@larskaesberg.de</a> — we will assist and can unpublish content
+    directly.
+  </p>
+
+  <h2>6. Search and AI features</h2>
+  <p>
+    Search queries you enter on a knowledge base are processed to return results and are not used to build visitor
+    profiles. For semantic search, a mathematical representation (embedding) of the query is computed; by default
+    this happens locally on our own servers.
+  </p>
+  <p>
+    Some features are AI-generated at the operator’s request: drafted answers to duplicate questions, thread
+    summaries, topic clustering, and auto-generated FAQs. For these, the relevant question and thread text is
+    transmitted to <strong>OpenRouter, Inc.</strong> (USA), which routes it to the configured AI model for
+    processing. What is sent is the community content being summarized or answered — never data about you as a
+    visitor (no IP addresses, cookies, or identifiers are included). AI usage is metered per Discord server as
+    anonymous token counts (“AI credits”); no per-person usage records are kept. Legal bases: the operator’s
+    instructions for content they publish (Art. 28 GDPR) and our legitimate interest in providing the contracted
+    features (Art. 6(1)(f) GDPR). For transfers to the USA, see section 10.
+  </p>
+
+  <h2>7. The Discord bot and purchases</h2>
+  <p>
+    The dejavue bot operates inside Discord and processes the data of the servers it is added to (selected
+    channels, messages, moderation actions like “mark as solved”) as directed by the server’s administrators.
+    Discord Inc. is an independent controller for the Discord platform itself; see the
+    <a href="https://discord.com/privacy" rel="noopener">Discord Privacy Policy</a>.
+  </p>
+  <p>
+    Paid tiers, top-ups, and one-time add-ons are purchased exclusively through Discord’s own checkout (“Premium
+    Apps”). Payment and billing data stays entirely with Discord — we never receive names, addresses, or payment
+    details of buyers. We only receive <strong>entitlement records</strong> (which server has which SKU, and its
+    validity period) so we can activate the purchased features; legal basis: Art. 6(1)(b) GDPR.
+  </p>
+
+  <h2>8. MCP endpoint</h2>
+  <p>
+    Knowledge bases on the Max tier expose their published content via an MCP endpoint (<code>/mcp</code>) so AI
+    assistants can search it. Queries arriving there are handled like website searches (sections 3 and 6). For
+    private knowledge bases, the endpoint requires the knowledge base’s passphrase.
+  </p>
+
+  <h2>9. Recipients</h2>
+  <p>We share personal data only with the following categories of recipients, and only as far as necessary:</p>
+  <ul>
+    <li>our <strong>hosting provider</strong> (infrastructure, as processor under Art. 28 GDPR),</li>
+    <li><strong>OpenRouter, Inc.</strong> (AI processing, only when AI features are used — section 6),</li>
+    <li><strong>Discord Inc.</strong> (as the platform the bot operates on — independent controller).</li>
+  </ul>
+  <p>We do not sell personal data and we do not share it with advertising networks.</p>
+
+  <h2>10. Transfers to third countries</h2>
+  <p>
+    OpenRouter, Inc. and Discord Inc. are based in the USA. Transfers to them rest on an adequacy mechanism under
+    Chapter V GDPR — the EU–US Data Privacy Framework where the recipient is certified, and otherwise the EU
+    Standard Contractual Clauses (Art. 46(2)(c) GDPR) agreed with the recipient. Only the data described in
+    sections 6 and 7 is affected; plain visits to our pages involve no transfer to a third country.
+  </p>
+
+  <h2>11. Retention</h2>
+  <ul>
+    <li><strong>Server logs:</strong> kept short-term for security purposes, then deleted or anonymized.</li>
+    <li><strong>Knowledge-base content and derived data</strong> (embeddings, summaries, re-hosted attachments): kept as long as the operator keeps it published; removed when the operator unpublishes or deletes it or removes the bot from the server.</li>
+    <li><strong>Unlock cookie:</strong> expires after 30 days, or immediately when the operator changes the passphrase.</li>
+    <li><strong>Entitlement and credit records:</strong> kept while the server uses the service and thereafter only as long as legal obligations require.</li>
+  </ul>
+
+  <h2>12. Your rights</h2>
+  <p>You have the right to:</p>
+  <ul>
+    <li>access the personal data we process about you (Art. 15 GDPR),</li>
+    <li>rectification of inaccurate data (Art. 16 GDPR),</li>
+    <li>erasure (Art. 17 GDPR) and restriction of processing (Art. 18 GDPR),</li>
+    <li>data portability (Art. 20 GDPR),</li>
+    <li><strong>object</strong> to processing based on legitimate interests (Art. 21 GDPR).</li>
+  </ul>
+  <p>
+    To exercise these rights, email <a href="mailto:contact@larskaesberg.de">contact@larskaesberg.de</a>. For
+    content inside a knowledge base you can also contact its operator directly (see the knowledge base’s imprint);
+    we forward requests we receive and assist the operator in fulfilling them. You also have the right to lodge a
+    complaint with a data-protection supervisory authority (Art. 77 GDPR). The authority responsible for us is: Die
+    Landesbeauftragte für den Datenschutz Niedersachsen, Prinzenstraße 5, 30159 Hannover, Germany.
+  </p>
+
+  <h2>13. No automated decision-making</h2>
+  <p>
+    We perform no automated decision-making and no profiling within the meaning of Art. 22 GDPR. Providing personal
+    data is neither legally nor contractually required to read the knowledge bases — they can be visited without
+    disclosing any data beyond the technical minimum in section 3.
+  </p>
+
+  <h2>14. Security and changes</h2>
+  <p>
+    All pages are served over TLS (HTTPS is mandatory on this domain). Data minimization is built into the product:
+    author identities are aliased before publication, and no visitor accounts or tracking exist. We will update
+    this policy when the service changes and always show the current version with its date on this page.
+  </p>
+</SiteLegal>

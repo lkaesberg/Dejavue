@@ -1,5 +1,19 @@
 ---
 // Dark theme for the marketing site (apex / www).
+// Fonts are self-hosted (bundled from @fontsource) — no requests to Google Fonts,
+// which would transmit visitor IPs to Google (GDPR risk, LG München 3 O 17493/20).
+import '@fontsource/space-grotesk/400.css';
+import '@fontsource/space-grotesk/500.css';
+import '@fontsource/space-grotesk/600.css';
+import '@fontsource/space-grotesk/700.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/600.css';
+
 interface Props {
   title: string;
   description?: string;
@@ -25,12 +39,6 @@ const { title, description, canonical } = Astro.props;
     <meta property="og:title" content={title} />
     {description && <meta property="og:description" content={description} />}
     <meta property="og:type" content="website" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
     <slot name="head" />
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }

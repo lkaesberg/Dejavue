@@ -1,0 +1,201 @@
+---
+// Platform Terms of Service. Core legal positioning: dejavue is a technical
+// hosting/publishing service (Art. 6/8 DSA); the Discord communities that enable
+// publishing ("operators") are solely responsible for their content, must keep
+// their own imprint (§ 4), and act as data controllers with dejavue as their
+// Art. 28 processor (§ 5). Payments run entirely through Discord's checkout.
+import SiteLegal from '../../layouts/SiteLegal.astro';
+---
+
+<SiteLegal
+  title="Terms of Service — dejavue"
+  description="The terms governing the dejavue Discord bot and the hosted knowledge bases."
+  heading="Terms of Service"
+  sub="These terms govern the dejavue Discord bot, the website dejavue.app, and the knowledge bases hosted on this platform."
+  active="terms"
+  updated="3 July 2026"
+>
+  <h2>1. Provider and scope</h2>
+  <p>
+    The dejavue service (“the service”) is provided by <strong>Lars Benedikt Kaesberg</strong>, Hannoversche Straße
+    8, 37075 Göttingen, Germany, <a href="mailto:contact@larskaesberg.de">contact@larskaesberg.de</a> (“we”, “us”) —
+    see the <a href="/imprint">Impressum</a>.
+  </p>
+  <p>
+    These terms apply to (a) Discord server administrators and moderators who add the dejavue bot to a server and
+    operate a knowledge base with it (“<strong>operators</strong>”), and (b) anyone who visits a hosted knowledge
+    base or uses its search or MCP endpoint (“<strong>visitors</strong>”). By adding the bot to a server, or by
+    using a hosted knowledge base, you accept these terms. Discord’s own terms of service apply separately to your
+    use of Discord and are not affected.
+  </p>
+
+  <h2>2. The service — and our role</h2>
+  <p>
+    dejavue is a Discord bot and publishing platform: it detects duplicate questions in forum and help channels,
+    supports a mark-as-solved workflow, and — where an administrator deliberately enables it — publishes solved
+    threads as a searchable public knowledge base under a subdomain (e.g. <code>example.dejavue.app</code>) or a
+    custom domain, with optional AI features (drafted answers, summaries, topic clustering, auto-FAQ, semantic
+    search, MCP access).
+  </p>
+  <p>
+    We provide <strong>technical infrastructure only</strong>. All knowledge-base content originates from the
+    respective Discord community; it is selected for publication by that community’s operators, not by us. We are a
+    hosting service within the meaning of Art. 6 of Regulation (EU) 2022/2065 (Digital Services Act): we do not
+    pre-review, curate, endorse, or adopt the content, and we have no general obligation to monitor it (Art. 8
+    DSA). Author identities are aliased on the public pages by design.
+  </p>
+
+  <h2>3. Tiers, purchases, and AI credits</h2>
+  <p>
+    A free tier and paid tiers (currently Plus, Pro, Max) with different limits and features exist, plus one-time
+    add-ons (e.g. history backfill, custom domain, AI-credit top-ups). Current features and limits are shown on the
+    <a href="/#pricing">pricing section</a> and in Discord.
+  </p>
+  <ul>
+    <li>
+      <strong>Purchases run through Discord.</strong> All subscriptions and add-ons are bought exclusively via
+      Discord’s Premium Apps checkout. Billing, prices and taxes shown at checkout, payment processing,
+      cancellation, refunds, and any statutory withdrawal (cancellation) rights are handled within Discord under
+      Discord’s applicable paid-services terms and policies. We do not receive or store payment details.
+    </li>
+    <li>
+      <strong>AI credits</strong> meter the AI features: 1 credit corresponds to 1,000 AI-model tokens. Monthly
+      tier credits reset with each billing cycle and do not roll over. Top-up credits stack and do not expire while
+      the service is used on that server. Credits belong to the server, are not transferable, and have no cash
+      value.
+    </li>
+    <li>
+      <strong>Fair use.</strong> Technical rate limits (e.g. on the MCP endpoint) protect the service and may not
+      be circumvented.
+    </li>
+  </ul>
+
+  <h2>4. Operator obligations</h2>
+  <p>As an operator, you set up and run your knowledge base on your own responsibility. You warrant and agree:</p>
+  <ul>
+    <li>
+      <strong>Authority.</strong> You have the authority to add the bot to the server and to decide about
+      publication of its content.
+    </li>
+    <li>
+      <strong>Publishing is your decision.</strong> Publishing is off by default. Before enabling it for a channel,
+      you review whether its content is appropriate for public display, and you only publish content you are
+      entitled to publish (including under your server’s rules and the permissions of its members).
+    </li>
+    <li>
+      <strong>Your own legal notices.</strong> You keep your knowledge base’s imprint complete and accurate at all
+      times (editable via <code>/dejavue customize</code>; shown at <code>/imprint</code> on your knowledge base) —
+      identifying you or your community as the party responsible for its content, with a working contact. Where the
+      law applicable to you requires further notices (e.g. your own privacy information), you provide them.
+    </li>
+    <li>
+      <strong>Content responsibility.</strong> You are solely responsible for the published content. It must not
+      infringe any law or third-party rights (including copyright, trademarks, personality and data-protection
+      rights) and must not contain the personal data of identifiable persons beyond the aliased form the platform
+      provides — do not publish channels in which members share private or identifying information.
+    </li>
+    <li>
+      <strong>Removal requests.</strong> You handle objections and removal requests from your members and third
+      parties promptly, and you unpublish affected content without undue delay when required.
+    </li>
+    <li>
+      <strong>Custom domains.</strong> You only connect domains you are entitled to use.
+    </li>
+    <li>
+      <strong>Indemnity.</strong> You indemnify us against reasonable costs and damages from third-party claims
+      arising from your content or your breach of this section, unless you are not responsible for the breach. Our
+      statutory duties as a hosting provider (e.g. removal upon notice) remain unaffected.
+    </li>
+  </ul>
+
+  <h2>5. Data processing (operators)</h2>
+  <p>
+    For personal data contained in the content you publish (see the <a href="/privacy">Privacy Policy</a>, section
+    5), <strong>you are the controller and we process the data on your behalf</strong> pursuant to Art. 28 GDPR.
+    This section constitutes the data-processing agreement between you and us: we process such data only to provide
+    the service as described in these terms and per your documented instructions (your settings in the bot);
+    persons authorized to process it are bound to confidentiality; we implement appropriate technical and
+    organizational measures (TLS transport encryption, access controls, author aliasing by design); we assist you,
+    as far as reasonable, with data-subject requests and your obligations under Art. 32–36 GDPR; upon termination
+    we delete the published content and derived data as described in § 9. You authorize the sub-processors listed
+    in the Privacy Policy (hosting infrastructure; OpenRouter, Inc. for AI features); we will inform you of
+    intended changes via the service, and you may object for important data-protection reasons.
+  </p>
+
+  <h2>6. Acceptable use (everyone)</h2>
+  <p>When using the service, you must not:</p>
+  <ul>
+    <li>upload, publish, or distribute content that is illegal or infringes third-party rights,</li>
+    <li>attempt to identify or de-anonymize aliased authors,</li>
+    <li>circumvent passphrase gates, rate limits, tier limits, or other technical restrictions,</li>
+    <li>introduce malware, disrupt or overload the service, or access it in an abusive automated manner (normal search-engine crawling of public pages and use of the provided MCP endpoint are welcome),</li>
+    <li>misuse the reporting channels with knowingly false notices.</li>
+  </ul>
+
+  <h2>7. Content moderation and reporting</h2>
+  <p>
+    Illegal content or violations of these terms can be reported to
+    <a href="mailto:contact@larskaesberg.de">contact@larskaesberg.de</a> with the URL and the reasons (see the
+    <a href="/imprint">Impressum</a> for details of the Art. 16 DSA notice procedure). We review notices promptly.
+    We may unpublish or remove content, disable a knowledge base, or suspend or terminate service to a server if we
+    obtain knowledge of illegal content, or if these terms are violated — proportionately, and where the DSA
+    requires it with a statement of reasons. If you disagree with a decision, reply to the same address and we will
+    re-examine it.
+  </p>
+
+  <h2>8. Availability and changes to the service</h2>
+  <p>
+    The service is provided “as available”. We aim for high availability but do not guarantee uninterrupted
+    operation; maintenance, further development, and factors outside our control (including Discord’s platform and
+    API) can lead to interruptions. We may evolve features over time; where a change materially reduces a paid
+    feature, we will announce it in advance through the service. The knowledge base mirrors content whose source of
+    truth remains your Discord server; we do not warrant permanent retention of derived data (e.g. embeddings,
+    summaries), which can be regenerated.
+  </p>
+
+  <h2>9. Content ownership, license, term, and termination</h2>
+  <p>
+    Published content remains yours and your community’s. You grant us the non-exclusive, worldwide right to host,
+    store, reproduce, technically adapt (e.g. formatting, aliasing, embeddings), process with the AI features you
+    enabled, and publicly display the content as configured by you, for the purpose of operating the service. The
+    license ends when the content is deleted from the service, except for short-lived backups and caches.
+  </p>
+  <p>
+    You can stop using the service at any time by disabling publishing or removing the bot from your server —
+    publishing then ceases and published content and derived data are deleted from the live systems within a
+    reasonable period. We may terminate the service relationship for good cause, in particular serious or repeated
+    violations of § 4 or § 6. Records we must keep by law (e.g. entitlement records) remain unaffected. The
+    software, brand, and design of the platform remain our property.
+  </p>
+
+  <h2>10. Liability</h2>
+  <p>
+    We are liable without limitation for intent and gross negligence, for injury to life, body, or health, under
+    the German Product Liability Act, and where we have given an express guarantee. For simple negligence, we are
+    liable only for breach of essential contractual obligations (obligations whose fulfilment makes the proper
+    performance of the contract possible in the first place and on whose fulfilment you may regularly rely), and
+    limited to the damage typical for this kind of contract and foreseeable at the time of conclusion. For features
+    provided free of charge, we are liable — apart from the cases in the first sentence — only for intent and gross
+    negligence. In all other respects, liability is excluded. This does not shift the burden of proof to your
+    disadvantage.
+  </p>
+
+  <h2>11. Changes to these terms</h2>
+  <p>
+    We may amend these terms with effect for the future, in particular to reflect changes in the law, in Discord’s
+    platform, or in the service’s features. Material changes will be announced in advance through the service or on
+    this page with a reasonable notice period; if you do not agree, you can terminate at any time under § 9. The
+    version current at the time of your use, as published on this page, applies.
+  </p>
+
+  <h2>12. Final provisions</h2>
+  <p>
+    German law applies, excluding the UN Convention on Contracts for the International Sale of Goods. If you are a
+    consumer habitually resident in the EU, the mandatory consumer-protection provisions of your country of
+    residence remain unaffected. If you are a merchant, a legal entity under public law, or a special fund under
+    public law, the exclusive place of jurisdiction is Göttingen, Germany. We are neither willing nor obliged to
+    participate in dispute-resolution proceedings before a consumer arbitration board (§ 36 VSBG). Should
+    individual provisions of these terms be invalid, the remainder stays in force. These terms are provided in
+    English; questions are welcome at <a href="mailto:contact@larskaesberg.de">contact@larskaesberg.de</a>.
+  </p>
+</SiteLegal>
