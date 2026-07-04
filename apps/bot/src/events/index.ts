@@ -1,5 +1,6 @@
 import { type Client, Events } from 'discord.js';
 import { logger, notifyAsync } from '@dejavue/core';
+import { registerCommands } from '../commands/registry';
 import { channelFitReconcile } from '../lib/channelFit';
 import { kbStartupReconcile } from '../lib/kbReconcile';
 import { reconcileAllEntitlements } from '../lib/reconcile';
@@ -28,6 +29,26 @@ export function registerEvents(client: Client): void {
         { name: 'Guilds', value: String(c.guilds.cache.size) },
       ],
     });
+
+    // Re-register application commands on every startup so a deploy / reboot /
+    // restart always syncs Discord with the code. Idempotent overwrite (uses the
+    // dev guild if DISCORD_DEV_GUILD_ID is set, else global); non-fatal on failure.
+    const appId = c.application?.id;
+    if (appId) {
+      void registerCommands(c.rest, appId)
+        .then(({ count, scope }) => logger().info({ count, scope }, 'registered application commands'))
+        .catch((err) => {
+          logger().error({ err }, 'startup command registration failed');
+          notifyAsync({
+            level: 'error',
+            title: '🔴 Command registration failed',
+            description: String(err instanceof Error ? err.message : err).slice(0, 500),
+          });
+        });
+    } else {
+      logger().warn('no application id on ready; skipping command registration');
+    }
+
     // Heal any entitlement drift on startup, then hourly.
     void reconcileAllEntitlements(c);
     setInterval(() => void reconcileAllEntitlements(c), RECONCILE_INTERVAL_MS).unref();
