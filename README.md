@@ -194,8 +194,8 @@ named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature local
    instant guild commands, or registers globally if unset).
 4. **Enable Monetization** and create SKUs in the developer portal, then put their ids in `.env`:
    - Guild subscriptions: `SKU_PLUS`, `SKU_PRO`, `SKU_MAX`
-   - Durable one-time: `SKU_CUSTOM_DOMAIN` (backfill needs no SKU — history import is included)
-   - Consumable one-time: `SKU_TOPUP`
+   - Consumable one-time: `SKU_TOPUP` (credit pack) · `SKU_CUSTOM_DOMAIN` (per-server unlock)
+   - Backfill needs no SKU — history import is included
 5. **Website domains:** point `*.dejavue.app` (wildcard DNS + TLS) at the web app. `.app` is HSTS-preloaded,
    so HTTPS is mandatory — the wildcard cert must cover `*.dejavue.app`. Custom domains CNAME to the
    same host (provision per-domain TLS / on-demand certs).

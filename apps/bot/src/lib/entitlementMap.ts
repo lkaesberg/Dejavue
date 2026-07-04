@@ -7,7 +7,11 @@ export function mapEntitlement(ent: DiscordEntitlement): NewEntitlement {
   const env = getEnv();
   let type: NewEntitlement['type'] = 'unknown';
   if (env.SKU_BACKFILL && ent.skuId === env.SKU_BACKFILL) type = 'durable';
-  else if (env.SKU_TOPUP && ent.skuId === env.SKU_TOPUP) type = 'consumable';
+  else if (
+    (env.SKU_TOPUP && ent.skuId === env.SKU_TOPUP) ||
+    (env.SKU_CUSTOM_DOMAIN && ent.skuId === env.SKU_CUSTOM_DOMAIN)
+  )
+    type = 'consumable';
   else if (ent.guildId) type = 'guild_subscription';
   else if (ent.userId) type = 'user_subscription';
 

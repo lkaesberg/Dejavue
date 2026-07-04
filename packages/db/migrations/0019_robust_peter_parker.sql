@@ -1,0 +1,1 @@
+ALTER TABLE "guild_config" ADD COLUMN "custom_domain_unlocked" boolean DEFAULT false NOT NULL;

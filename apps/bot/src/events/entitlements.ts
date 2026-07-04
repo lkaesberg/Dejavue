@@ -3,6 +3,7 @@ import { childLogger, getEnv, notifyAsync } from '@dejavue/core';
 import { getDb, markEntitlementDeleted, resolvePurchaseIntent, upsertEntitlement } from '@dejavue/db';
 import { mapEntitlement } from '../lib/entitlementMap';
 import { invalidateTier } from '../lib/tier';
+import { grantCustomDomain } from '../lib/customDomain';
 import { grantTopUp } from '../lib/topUp';
 import { checkTierUpgrade } from '../lib/upgrade';
 
@@ -88,6 +89,7 @@ export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
   }
   await upsertEntitlement(getDb(), row);
   await grantTopUp(ent, row.guildId);
+  await grantCustomDomain(ent, row.guildId);
   if (row.guildId) {
     invalidateTier(row.guildId);
     await checkTierUpgrade(row.guildId);

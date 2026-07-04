@@ -163,6 +163,9 @@ export const guildConfig = pgTable('guild_config', {
   kbSlug: text('kb_slug').unique(),
   // Custom domain for the public KB (one-time purchase). e.g. help.acme.com
   customDomain: text('custom_domain').unique(),
+  // Custom-domain feature unlock — set true when the consumable custom-domain SKU is
+  // bought (recorded here permanently, since the consumable entitlement is consumed).
+  customDomainUnlocked: boolean('custom_domain_unlocked').notNull().default(false),
   // "powered by Dejavue" branding (forced on for Free tier regardless of this flag)
   brandingEnabled: boolean('branding_enabled').notNull().default(true),
   // Channel-fit check (Plus+): embed each monitored channel's name + description and,

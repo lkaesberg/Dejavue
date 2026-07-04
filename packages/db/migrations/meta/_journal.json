@@ -134,6 +134,13 @@
       "when": 1783191691560,
       "tag": "0018_thick_maggott",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783192569481,
+      "tag": "0019_robust_peter_parker",
+      "breakpoints": true
     }
   ]
 }
