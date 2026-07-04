@@ -61,15 +61,15 @@ const steps = [
   { num: '1', title: 'Someone posts', body: 'A new forum thread lands. Dejavue reads the question and checks for duplicates — keyword on Free, semantic on Plus+.' },
   { num: '2', title: 'Matches surface', body: 'If it has seen it before, it replies with the closest solved threads — plus an AI-drafted answer on Plus and up.' },
   { num: '3', title: 'Mark as solved', body: 'OP, mod, or admin resolves it. The accepted answer and full transcript are captured and the tag flips to solved.' },
-  { num: '4', title: 'Archived & searchable', body: 'It is embedded for semantic search, summarized, and — if opted in — published to the public knowledge base.' },
+  { num: '4', title: 'Archived & searchable', body: 'It is embedded for semantic search, summarized, and — if opted in — published to your public, searchable website.' },
 ];
 // AI usage is metered in AI credits: 1 credit = 1,000 model tokens (a drafted
 // answer ≈ 0.8 credits, a thread summary ≈ 3). Keep in sync with README + core.
 const tiers = [
-  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public knowledge base'] },
+  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public answers website'] },
   { name: 'Plus', price: '$4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Stale-question nudges · full analytics', '“Powered by” removed'] },
-  { name: 'Pro', price: '$9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized KB pages'] },
-  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', '5,000 AI credits / mo', 'MCP server for your KB', 'Everything in Pro'] },
+  { name: 'Pro', price: '$9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
+  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', '5,000 AI credits / mo', 'MCP server for your answers', 'Everything in Pro'] },
 ];
 ---
 
@@ -169,7 +169,7 @@ const tiers = [
   ) : (
     <SiteLayout
       title="Dejavue — never answer the same question twice"
-      description="A Discord bot that catches duplicate questions, drives a mark-solved workflow, and turns your forum into a searchable, SEO-ready knowledge base."
+      description="A Discord bot that catches duplicate questions, drives a mark-solved workflow, and publishes every answer to a public, searchable website Google can find."
       canonical={`${origin}/`}
     >
       {/* ===== NAV ===== */}
@@ -182,7 +182,7 @@ const tiers = [
           <div class="site-nav-links">
             <a href="#how" style="font-size:14px; color:#9AA0C3;">How it works</a>
             <a href="#features" style="font-size:14px; color:#9AA0C3;">Features</a>
-            <a href="#kb" style="font-size:14px; color:#9AA0C3;">Knowledge base</a>
+            <a href="#kb" style="font-size:14px; color:#9AA0C3;">Website</a>
             <a href="#pricing" style="font-size:14px; color:#9AA0C3;">Pricing</a>
             <a class="cta" href={addUrl} style="font-size:14px; font-weight:600; color:#F4F5FF; background:linear-gradient(135deg,#4F46E5,#7C3AED); padding:10px 18px; border-radius:10px; box-shadow:0 6px 18px rgba(124,58,237,0.35);">Add to Discord</a>
           </div>
@@ -200,7 +200,7 @@ const tiers = [
               A Discord bot for help &amp; Q&amp;A forums
             </div>
             <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(34px,8vw,62px); line-height:1.02; letter-spacing:-0.038em; margin:24px 0 0;">Never answer the same question twice.</h1>
-            <p style="font-size:clamp(16px,2.4vw,19px); line-height:1.55; color:#9AA0C3; margin:24px 0 0; max-width:520px;">Dejavue catches duplicate questions the moment they're posted, surfaces the answer from past solved threads, and turns your forum into a searchable, SEO-ready knowledge base.</p>
+            <p style="font-size:clamp(16px,2.4vw,19px); line-height:1.55; color:#9AA0C3; margin:24px 0 0; max-width:520px;">Dejavue catches duplicate questions the moment they're posted, surfaces answers from past solved threads, and publishes every solution to a public, searchable website — so people find answers on Google before they even ask.</p>
             <div style="display:flex; gap:14px; margin-top:36px; flex-wrap:wrap;">
               <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);">Add to Discord — free</a>
               <a href="#how" style="display:inline-flex; align-items:center; gap:9px; background:rgba(244,245,255,0.05); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px;">See how it works</a>
@@ -307,7 +307,7 @@ const tiers = [
                 <span style="background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap;">PLUS &amp; UP</span>
               </div>
               <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:21px; letter-spacing:-0.02em; margin:9px 0 12px;">Drafts answers from solved threads</h3>
-              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:0;">Drafted answers from Plus; KB summaries, knowledge-gap clustering, and auto-FAQ on Pro &amp; Max — metered in monthly AI credits, topped up any time.</p>
+              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:0;">Drafted answers from Plus; website summaries, knowledge-gap clustering, and auto-FAQ on Pro &amp; Max — metered in monthly AI credits, topped up any time.</p>
             </div>
             <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
               <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Analytics</div>
@@ -322,7 +322,7 @@ const tiers = [
             <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
               <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Backfill</div>
               <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Import your whole history</h3>
-              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">On setup, past threads are imported up to your tier — deduped and, if the KB is on, published.</p>
+              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">On setup, past threads are imported up to your tier — deduped and, if your website's on, published.</p>
             </div>
           </div>
         </div>
@@ -332,9 +332,9 @@ const tiers = [
       <section id="kb" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px);">
         <div class="kb-grid" style="max-width:1200px; margin:0 auto;">
           <div>
-            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Public knowledge base</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Your public website</div>
             <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,38px); letter-spacing:-0.03em; margin:14px 0 0;">Your answers, indexed by Google</h2>
-            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Every solved thread can publish to a fast, near-zero-JS page on your own <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">slug.dejavue.app</span> subdomain — or a custom domain. Each channel becomes a category; pages carry QA &amp; FAQ structured data so people find answers before they ask.</p>
+            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Every solved thread becomes a page on your own public website — a fast, near-zero-JS site at <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">slug.dejavue.app</span> or a custom domain you own. Each channel becomes a category, and every page carries QA &amp; FAQ structured data so people find answers on Google before they ask.</p>
             <ul style="list-style:none; padding:0; margin:24px 0 0; display:flex; flex-direction:column; gap:12px;">
               <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> Per-guild subdomain or custom domain</li>
               <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> Privacy-aliased speakers, opt-in per guild</li>
@@ -375,7 +375,7 @@ const tiers = [
             <div style="position:relative;">
               <span style="display:inline-block; background:#0A0B14; color:#2DD4BF; font-size:11px; font-weight:600; padding:4px 11px; border-radius:999px; letter-spacing:0.04em;">MAX TIER</span>
               <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(26px,4.5vw,34px); letter-spacing:-0.03em; margin:16px 0 0;">Your community is an MCP server</h2>
-              <p style="font-size:16px; line-height:1.6; color:#CfCfE6; margin:14px 0 0; max-width:480px;">Each Max guild exposes its knowledge base as a Streamable HTTP MCP server. Point Claude or any MCP client at it and let your AI answer from the questions your community already solved.</p>
+              <p style="font-size:16px; line-height:1.6; color:#CfCfE6; margin:14px 0 0; max-width:480px;">Each Max guild exposes its published answers as a Streamable HTTP MCP server. Point Claude or any MCP client at it and let your AI answer from the questions your community already solved.</p>
             </div>
             <div style="position:relative; background:#0A0B14; border:1px solid rgba(244,245,255,0.1); border-radius:14px; padding:20px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.7; overflow-x:auto;">
               <div style="color:#6F7596;"># add to your MCP client</div>
