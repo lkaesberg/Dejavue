@@ -127,6 +127,13 @@
       "when": 1782693437372,
       "tag": "0017_short_baron_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783191691560,
+      "tag": "0018_thick_maggott",
+      "breakpoints": true
     }
   ]
 }

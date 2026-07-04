@@ -1,6 +1,6 @@
 import type { Entitlement } from 'discord.js';
 import { childLogger, getEnv, notifyAsync } from '@dejavue/core';
-import { getDb, markEntitlementDeleted, upsertEntitlement } from '@dejavue/db';
+import { getDb, markEntitlementDeleted, resolvePurchaseIntent, upsertEntitlement } from '@dejavue/db';
 import { mapEntitlement } from '../lib/entitlementMap';
 import { invalidateTier } from '../lib/tier';
 import { grantTopUp } from '../lib/topUp';
@@ -21,11 +21,17 @@ function productLabel(skuId: string): string {
 }
 
 /** Guild / user id fields shared across subscription alerts. */
-function whoFields(ent: Entitlement) {
+function whoFields(e: { guildId?: string | null; userId?: string | null }) {
   return [
-    { name: 'Guild', value: ent.guildId ?? '—' },
-    { name: 'User', value: ent.userId ?? '—' },
+    { name: 'Guild', value: e.guildId ?? '—' },
+    { name: 'User', value: e.userId ?? '—' },
   ];
+}
+
+/** SKUs Discord delivers as USER-owned one-time purchases (the entitlement has no guildId). */
+function isOneTimeSku(skuId: string): boolean {
+  const env = getEnv();
+  return skuId === env.SKU_TOPUP || skuId === env.SKU_CUSTOM_DOMAIN || skuId === env.SKU_BACKFILL;
 }
 
 /**
@@ -65,17 +71,32 @@ function probe(event: 'CREATE' | 'UPDATE' | 'DELETE', ent: Entitlement): void {
 export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
   probe('CREATE', ent);
   const row = mapEntitlement(ent);
-  await upsertEntitlement(getDb(), row);
-  await grantTopUp(ent);
-  if (ent.guildId) {
-    invalidateTier(ent.guildId);
-    await checkTierUpgrade(ent.guildId);
+  // One-time purchases (top-up, custom domain) are USER-owned: Discord sends them
+  // with a user_id and no guild_id. Bridge them to the guild the buyer launched the
+  // purchase from (recorded as a pending intent when we showed the buy button).
+  if (!row.guildId && row.userId && isOneTimeSku(row.skuId)) {
+    const guildId = await resolvePurchaseIntent(getDb(), row.userId, row.skuId);
+    if (guildId) {
+      row.guildId = guildId;
+      log.info({ id: ent.id, skuId: ent.skuId, guildId }, 'bridged user-owned purchase to guild');
+    } else {
+      log.warn(
+        { id: ent.id, skuId: ent.skuId, userId: row.userId },
+        'one-time purchase with no guild intent — cannot resolve target guild',
+      );
+    }
   }
-  log.info({ id: ent.id, skuId: ent.skuId, guildId: ent.guildId }, 'entitlement created');
+  await upsertEntitlement(getDb(), row);
+  await grantTopUp(ent, row.guildId);
+  if (row.guildId) {
+    invalidateTier(row.guildId);
+    await checkTierUpgrade(row.guildId);
+  }
+  log.info({ id: ent.id, skuId: ent.skuId, guildId: row.guildId }, 'entitlement created');
   notifyAsync({
     level: 'success',
     title: `🎉 New ${productLabel(ent.skuId)}`,
-    fields: [...whoFields(ent), { name: 'Type', value: row.type ?? 'unknown' }],
+    fields: [...whoFields(row), { name: 'Type', value: row.type ?? 'unknown' }],
   });
 }
 

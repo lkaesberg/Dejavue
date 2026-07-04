@@ -35,10 +35,16 @@ jobs:
             exit 1
           fi
 
+          # DNS diagnostic (counts only — never prints the server IP to the log).
+          # GitHub-hosted runners have NO IPv6 route, so an AAAA-only host is
+          # unreachable; that's why we force IPv4 (-4) everywhere below.
+          echo "IPv4 (A) records:    $(getent ahostsv4 "$SSH_HOST" | wc -l)"
+          echo "IPv6 (AAAA) records: $(getent ahostsv6 "$SSH_HOST" | wc -l)"
+
           # Best-effort host-key pin. NON-fatal (|| true) and stderr is shown, not
           # swallowed — a keyscan hiccup must not abort the deploy silently. `ssh`
           # falls back to StrictHostKeyChecking=accept-new below.
-          ssh-keyscan -T 15 -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts || true
+          ssh-keyscan -4 -T 15 -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts || true
           echo "known_hosts entries: $(wc -l < ~/.ssh/known_hosts)"
 
       - name: Verify SSH connectivity
@@ -47,7 +53,7 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+          ssh -4 -i ~/.ssh/deploy_key -p "$SSH_PORT" \
             -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o ConnectTimeout=15 -o BatchMode=yes \
@@ -61,7 +67,7 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+          ssh -4 -i ~/.ssh/deploy_key -p "$SSH_PORT" \
             -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o ConnectTimeout=15 -o BatchMode=yes \
