@@ -75,7 +75,7 @@ answer costs ≈ 0.8 credits and each thread summary ≈ 3, so the quotas below 
 messages** ceiling (there is no separate archive/website-page cap); public website pages themselves are
 unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 
-| | **Free** | **Plus** $4.99 | **Pro** $9.99 | **Max** $24.99 |
+| | **Free** | **Plus** €4.99 | **Pro** €9.99 | **Max** €24.99 |
 |---|---|---|---|---|
 | Forum channels | 1 | 5 | 10 | unlimited |
 | Tracked (non-forum) channels | 1 | 5 | 15 | unlimited |
@@ -90,8 +90,8 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 | **MCP server** | — | — | — | **✓** (30 req/min) |
 | "Powered by Dejavue" branding | shown | removed | removed | removed |
 
-**One-time purchases** (any tier): **Custom domain — $29.99** (serve your public website on your own
-domain) · **Top-up — $1.99** (**+250 AI credits**, consumable, stacks, never expires). Importing
+**One-time purchases** (any tier): **Custom domain — €29.99** (serve your public website on your own
+domain) · **Top-up — €1.99** (**+250 AI credits**, consumable, stacks, never expires). Importing
 existing forum history is included — setup reindexes past threads up to the tier's indexed-message limit.
 
 ---

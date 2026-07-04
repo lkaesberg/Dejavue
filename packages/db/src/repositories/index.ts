@@ -3,6 +3,7 @@ export * from './threads';
 export * from './embeddings';
 export * from './search';
 export * from './entitlements';
+export * from './purchaseIntent';
 export * from './quota';
 export * from './backfill';
 export * from './reindex';

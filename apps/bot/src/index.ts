@@ -1,9 +1,10 @@
 import '@dejavue/core/env-preload';
-import { logger, requireEnv } from '@dejavue/core';
+import { installCrashHandlers, logger, notify, requireEnv } from '@dejavue/core';
 import { createClient } from './client';
 import { registerEvents } from './events';
 
 const log = logger();
+installCrashHandlers('bot');
 
 async function main(): Promise<void> {
   const token = requireEnv('DISCORD_TOKEN');
@@ -14,5 +15,9 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   log.error({ err }, 'bot failed to start');
-  process.exit(1);
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  // Await the alert so it flushes before we exit.
+  void notify({ level: 'error', title: '🔴 Bot failed to start', description: detail.slice(0, 4000) }).finally(
+    () => process.exit(1),
+  );
 });

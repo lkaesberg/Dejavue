@@ -19,6 +19,9 @@ const EnvSchema = z.object({
   DISCORD_TOKEN: z.string().optional(),
   DISCORD_CLIENT_ID: z.string().optional(),
   DISCORD_DEV_GUILD_ID: z.string().optional(),
+  // Ops-alert webhook: startup / subscription / failure events are posted here.
+  // Unset (or empty) → notifications are silently skipped (dev/CI stay quiet).
+  DISCORD_WEBHOOK_URL: z.string().optional(),
 
   // Premium Apps SKU ids
   SKU_PLUS: z.string().optional(),

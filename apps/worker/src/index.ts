@@ -1,6 +1,6 @@
 import '@dejavue/core/env-preload';
 import { createServer, type Server } from 'node:http';
-import { logger } from '@dejavue/core';
+import { installCrashHandlers, logger, notify, notifyAsync } from '@dejavue/core';
 import { getSql } from '@dejavue/db';
 import {
   type BackfillForumJob,
@@ -29,6 +29,7 @@ import { handleRevalidateKb } from './jobs/revalidateKb';
 import { handleSummarizeThread } from './jobs/summarizeThread';
 
 const log = logger();
+installCrashHandlers('worker');
 
 /**
  * Liveness endpoint for deploy orchestration: 200 when the DB is reachable.
@@ -70,13 +71,17 @@ async function main(): Promise<void> {
 
   health = startHealthServer();
   log.info('Dejavue worker started');
+  notifyAsync({ level: 'success', title: '✅ Worker online' });
 }
 
 let health: Server | undefined;
 
 main().catch((err) => {
   log.error({ err }, 'worker failed to start');
-  process.exit(1);
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  void notify({ level: 'error', title: '🔴 Worker failed to start', description: detail.slice(0, 4000) }).finally(
+    () => process.exit(1),
+  );
 });
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

@@ -5,6 +5,7 @@ export * from './tier';
 export * from './channels';
 export * from './sensitivity';
 export * from './logger';
+export * from './notify';
 export * from './cluster';
 export * from './channelFit';
 export * from './passphrase';

@@ -1,5 +1,5 @@
 import type { Entitlement } from 'discord.js';
-import { childLogger } from '@dejavue/core';
+import { childLogger, getEnv, notifyAsync } from '@dejavue/core';
 import { getDb, markEntitlementDeleted, upsertEntitlement } from '@dejavue/db';
 import { mapEntitlement } from '../lib/entitlementMap';
 import { invalidateTier } from '../lib/tier';
@@ -7,6 +7,26 @@ import { grantTopUp } from '../lib/topUp';
 import { checkTierUpgrade } from '../lib/upgrade';
 
 const log = childLogger({ mod: 'event:entitlement' });
+
+/** Human-readable product name for a SKU, for ops alerts. */
+function productLabel(skuId: string): string {
+  const env = getEnv();
+  if (env.SKU_MAX && skuId === env.SKU_MAX) return 'Max subscription';
+  if (env.SKU_PRO && skuId === env.SKU_PRO) return 'Pro subscription';
+  if (env.SKU_PLUS && skuId === env.SKU_PLUS) return 'Plus subscription';
+  if (env.SKU_TOPUP && skuId === env.SKU_TOPUP) return 'Credit top-up';
+  if (env.SKU_BACKFILL && skuId === env.SKU_BACKFILL) return 'History backfill';
+  if (env.SKU_CUSTOM_DOMAIN && skuId === env.SKU_CUSTOM_DOMAIN) return 'Custom domain';
+  return `SKU ${skuId}`;
+}
+
+/** Guild / user id fields shared across subscription alerts. */
+function whoFields(ent: Entitlement) {
+  return [
+    { name: 'Guild', value: ent.guildId ?? '—' },
+    { name: 'User', value: ent.userId ?? '—' },
+  ];
+}
 
 /**
  * Full-field dump of an entitlement so we can see exactly what Discord delivers —
@@ -44,13 +64,19 @@ function probe(event: 'CREATE' | 'UPDATE' | 'DELETE', ent: Entitlement): void {
 
 export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
   probe('CREATE', ent);
-  await upsertEntitlement(getDb(), mapEntitlement(ent));
+  const row = mapEntitlement(ent);
+  await upsertEntitlement(getDb(), row);
   await grantTopUp(ent);
   if (ent.guildId) {
     invalidateTier(ent.guildId);
     await checkTierUpgrade(ent.guildId);
   }
   log.info({ id: ent.id, skuId: ent.skuId, guildId: ent.guildId }, 'entitlement created');
+  notifyAsync({
+    level: 'success',
+    title: `🎉 New ${productLabel(ent.skuId)}`,
+    fields: [...whoFields(ent), { name: 'Type', value: row.type ?? 'unknown' }],
+  });
 }
 
 export async function onEntitlementUpdate(ent: Entitlement): Promise<void> {
@@ -62,6 +88,17 @@ export async function onEntitlementUpdate(ent: Entitlement): Promise<void> {
     await checkTierUpgrade(ent.guildId);
   }
   log.info({ id: ent.id, endsAt: ent.endsTimestamp }, 'entitlement updated');
+  // Active subs & renewals keep endsTimestamp null (see tier.ts semantics), so a
+  // set end date means the subscription is cancelled / not renewing — the churn
+  // signal worth alerting on. Renewals produce no noise here.
+  if (ent.endsTimestamp) {
+    notifyAsync({
+      level: 'warning',
+      title: `⚠️ ${productLabel(ent.skuId)} ending`,
+      description: `Ends <t:${Math.floor(ent.endsTimestamp / 1000)}:R>`,
+      fields: whoFields(ent),
+    });
+  }
 }
 
 export async function onEntitlementDelete(ent: Entitlement): Promise<void> {
@@ -73,4 +110,10 @@ export async function onEntitlementDelete(ent: Entitlement): Promise<void> {
     await checkTierUpgrade(ent.guildId); // records the downgrade; never backfills down
   }
   log.info({ id: ent.id }, 'entitlement deleted');
+  notifyAsync({
+    level: 'error',
+    title: `❌ ${productLabel(ent.skuId)} removed`,
+    description: 'Refund, manual removal, or test-entitlement deletion.',
+    fields: whoFields(ent),
+  });
 }

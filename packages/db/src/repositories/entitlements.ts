@@ -83,6 +83,10 @@ export async function reconcileGuildEntitlements(
   for (const row of rows) await upsertEntitlement(db, row);
   const existing = await getGuildEntitlements(db, guildId);
   for (const e of existing) {
+    // One-time purchases (durable/consumable) are user-owned; Discord's per-guild
+    // entitlement list never returns them, so they'd look "missing" and be wrongly
+    // deleted. Only reconcile subscription rows against the authoritative list.
+    if (e.type === 'durable' || e.type === 'consumable') continue;
     if (!present.has(e.id) && !e.deleted) await markEntitlementDeleted(db, e.id);
   }
 }

@@ -16,24 +16,59 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Rebuild and redeploy over SSH
+      - name: Configure SSH key
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          touch ~/.ssh/known_hosts
+
+          # Fail early with an actionable message if the key secret is malformed
+          # (the usual culprit: pasted without header/footer lines or real newlines).
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null 2>keyerr; then
+            echo "::error::SSH_KEY is not a valid OpenSSH private key. Store the FULL contents of the private key file — including the '-----BEGIN/END-----' lines and its newlines — and make sure it has no passphrase."
+            cat keyerr
+            exit 1
+          fi
+
+          # Best-effort host-key pin. NON-fatal (|| true) and stderr is shown, not
+          # swallowed — a keyscan hiccup must not abort the deploy silently. `ssh`
+          # falls back to StrictHostKeyChecking=accept-new below.
+          ssh-keyscan -T 15 -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts || true
+          echo "known_hosts entries: $(wc -l < ~/.ssh/known_hosts)"
+
+      - name: Verify SSH connectivity
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
+            'echo "connected as $(whoami)@$(hostname); docker=$(command -v docker || echo MISSING)"'
+
+      - name: Rebuild and redeploy
+        env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-            DEPLOY_PATH="$DEPLOY_PATH" 'bash -s' <<'REMOTE'
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" DEPLOY_PATH="$DEPLOY_PATH" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd "$DEPLOY_PATH"
-          echo "==> Pulling latest main into $(pwd)"
+          echo "==> Deploying in $(pwd) (current $(git rev-parse --short HEAD 2>/dev/null || echo unknown))"
           git fetch --prune origin
           git pull --ff-only
           echo "==> Rebuilding and redeploying (migrate runs before the apps)"

@@ -40,6 +40,7 @@ import {
   getGuildConfig,
   listActiveReindexJobs,
   listChannelSync,
+  recordPurchaseIntent,
   resolutionStats,
   topHelpers,
   getTopClusters,
@@ -406,6 +407,10 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
   // Out of credits → native Premium buttons: top-up, and Max for non-Max guilds.
   if (quota && !quota.allowed) {
     const env = getEnv();
+    // One-time purchase → user-owned entitlement; remember the guild before the button.
+    if (env.SKU_TOPUP) {
+      await recordPurchaseIntent(db, { userId: interaction.user.id, skuId: env.SKU_TOPUP, guildId });
+    }
     const skus = [env.SKU_TOPUP, limits.mcp ? undefined : env.SKU_MAX].filter(
       (s): s is string => Boolean(s),
     );

@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -222,6 +223,25 @@ export const entitlement = pgTable(
   },
   (t) => [index('entitlement_guild_idx').on(t.guildId), index('entitlement_sku_idx').on(t.skuId)],
 );
+
+// ---------------------------------------------------------------------------
+// Purchase intents — one-time purchases (top-up, custom domain) are USER-owned:
+// Discord delivers the entitlement with a user_id and NO guild_id. We record which
+// guild a user launched the buy button from, so onEntitlementCreate can apply the
+// purchase to that guild. Latest write per (user, sku) wins.
+// ---------------------------------------------------------------------------
+export const purchaseIntent = pgTable(
+  'purchase_intent',
+  {
+    userId: text('user_id').notNull(),
+    skuId: text('sku_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.skuId] })],
+);
+export type PurchaseIntent = typeof purchaseIntent.$inferSelect;
+export type NewPurchaseIntent = typeof purchaseIntent.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // Threads (archived forum posts)

@@ -1,5 +1,5 @@
 import { type Client, Events } from 'discord.js';
-import { logger } from '@dejavue/core';
+import { logger, notifyAsync } from '@dejavue/core';
 import { channelFitReconcile } from '../lib/channelFit';
 import { kbStartupReconcile } from '../lib/kbReconcile';
 import { reconcileAllEntitlements } from '../lib/reconcile';
@@ -20,6 +20,14 @@ const DELETION_RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export function registerEvents(client: Client): void {
   client.once(Events.ClientReady, (c) => {
     logger().info({ user: c.user.tag, guilds: c.guilds.cache.size }, 'Dejavue ready');
+    notifyAsync({
+      level: 'success',
+      title: '✅ Bot online',
+      fields: [
+        { name: 'User', value: c.user.tag },
+        { name: 'Guilds', value: String(c.guilds.cache.size) },
+      ],
+    });
     // Heal any entitlement drift on startup, then hourly.
     void reconcileAllEntitlements(c);
     setInterval(() => void reconcileAllEntitlements(c), RECONCILE_INTERVAL_MS).unref();

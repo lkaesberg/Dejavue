@@ -13,6 +13,7 @@ import {
   getGuildConfig,
   getTopClusters,
   markGenerationStarted,
+  recordPurchaseIntent,
 } from '@dejavue/db';
 import { enqueueClusterGaps, enqueueRegenFaq } from '@dejavue/queue';
 import { COLOR, threadUrl } from './embeds';
@@ -41,6 +42,11 @@ async function blockedOnCredits(
 ): Promise<boolean> {
   const quota = await checkQuota(getDb(), guildId, baseCredits);
   if (quota.allowed) return false;
+  // One-time purchase → user-owned entitlement; remember the guild before the button.
+  const topUpSku = getEnv().SKU_TOPUP;
+  if (topUpSku) {
+    await recordPurchaseIntent(getDb(), { userId: interaction.user.id, skuId: topUpSku, guildId });
+  }
   await interaction.reply({
     ...upsellPayload({
       title: 'Out of AI credits for this month',

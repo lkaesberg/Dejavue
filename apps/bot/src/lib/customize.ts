@@ -21,6 +21,7 @@ import {
   ensureGuildConfig,
   getActiveOtp,
   getDb,
+  recordPurchaseIntent,
   getGuildConfig,
   type GuildConfig,
   type KbAccent,
@@ -430,6 +431,15 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
     } else {
       const otp = env.SKU_CUSTOM_DOMAIN ? await getActiveOtp(db, guildId, env.SKU_CUSTOM_DOMAIN) : undefined;
       if (!otp && !env.DEV_FORCE_TIER) {
+        // One-time purchases are user-owned (no guildId on the entitlement), so
+        // record which guild this admin is buying for before we surface the button.
+        if (env.SKU_CUSTOM_DOMAIN) {
+          await recordPurchaseIntent(db, {
+            userId: interaction.user.id,
+            skuId: env.SKU_CUSTOM_DOMAIN,
+            guildId,
+          });
+        }
         // Not allowed (yet): answer with the native purchase button, not just text.
         await interaction.reply({
           ...upsellPayload({

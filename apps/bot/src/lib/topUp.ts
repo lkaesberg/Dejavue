@@ -12,14 +12,17 @@ const log = childLogger({ mod: 'topup' });
  * repurchase; if consume() fails the credits are already granted and the next
  * reconcile pass retries the consume.
  */
-export async function grantTopUp(ent: Entitlement): Promise<void> {
+export async function grantTopUp(
+  ent: Entitlement,
+  guildId: string | null | undefined = ent.guildId,
+): Promise<void> {
   const env = getEnv();
-  if (!env.SKU_TOPUP || ent.skuId !== env.SKU_TOPUP || !ent.guildId) return;
-  await addTopUpGrant(getDb(), { id: ent.id, guildId: ent.guildId, credits: env.TOPUP_CREDITS });
+  if (!env.SKU_TOPUP || ent.skuId !== env.SKU_TOPUP || !guildId) return;
+  await addTopUpGrant(getDb(), { id: ent.id, guildId, credits: env.TOPUP_CREDITS });
   try {
     if (!ent.consumed) await ent.consume();
   } catch (err) {
     log.warn({ err, id: ent.id }, 'failed to consume top-up entitlement (credits granted)');
   }
-  log.info({ id: ent.id, guildId: ent.guildId, credits: env.TOPUP_CREDITS }, 'top-up credits granted');
+  log.info({ id: ent.id, guildId, credits: env.TOPUP_CREDITS }, 'top-up credits granted');
 }
