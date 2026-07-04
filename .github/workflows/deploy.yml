@@ -19,13 +19,14 @@ jobs:
     steps:
       # Same SSH mechanics as the known-good deploy in the other repo — only the
       # remote command differs (we build from the git checkout instead of pulling
-      # a prebuilt image). Reuses the same DEPLOY_* secrets that already work there.
+      # a prebuilt image). Uses this repo's SSH_* secrets; set their VALUES to
+      # match the working repo's DEPLOY_* secrets (host / user / port / key).
       - name: Rebuild & restart docker-compose over SSH
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
-          SSH_USER: ${{ secrets.DEPLOY_USER }}
-          SSH_PORT: ${{ secrets.DEPLOY_PORT }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
           mkdir -p ~/.ssh
