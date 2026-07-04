@@ -2,7 +2,7 @@
 
 **Dejavue** is a Discord bot for help/Q&A **forum channels**. It catches duplicate questions the
 moment they're posted, drives a clean *mark-solved* workflow, and turns every solved thread into a
-searchable archive — inside Discord, on a public SEO knowledge base, and (on the top tier) as an
+searchable archive — inside Discord, on a public, SEO-friendly website, and (on the top tier) as an
 **MCP server** your AI tools can query.
 
 It's monetized per-server through **Discord Premium Apps**, with pricing aligned to cost: keyword
@@ -21,7 +21,7 @@ features are free, semantic search anchors the mid tier, and generative AI is me
    **Use top answer & close** on the duplicate suggestion to borrow a previous answer.
 3. On solve, Dejavue swaps the `unsolved` → `solved` tag, stores the **accepted answer + full
    transcript**, embeds it for semantic search, (Pro/Max) writes a clean **AI summary**, and — if the
-   guild opted in — **publishes it to the public KB**.
+   guild opted in — **publishes it to the public website**.
 4. Members find answers with `/dejavue search`; admins watch `/dejavue analytics`, `gaps`, and `faq`.
 
 Only the **original poster, a moderator, or an admin** can resolve a thread.
@@ -39,43 +39,43 @@ Only the **original poster, a moderator, or an admin** can resolve a thread.
 **Solving & archive**
 - Button + modal + message context menu + slash command, all permission-gated to OP/mod/admin.
 - Per-forum `solved` / `unsolved` tag automation (created automatically on setup).
-- Full thread **transcript** captured on solve (privacy-aliased speakers on the public KB).
+- Full thread **transcript** captured on solve (privacy-aliased speakers on the public website).
 
 **AI (credit-metered via OpenRouter → DeepSeek V4 Pro; drafts on Plus+, full suite on Pro/Max)**
 - **Answer drafting** from past solved threads when a duplicate is found.
-- **Thread summarization** into a canonical KB answer.
+- **Thread summarization** into a clean, canonical answer for the public website.
 - **Knowledge-gap clustering** — groups recurring questions so you know what docs to write.
 - **Auto-FAQ** generation/maintenance (respects manual edits).
 
-**Public web knowledge base**
+**Public website**
 - Per-guild **subdomain** (`{slug}.dejavue.app`) or your own **custom domain** (one-time purchase).
 - Each monitored **channel becomes its own category**; pages show the answer + full discussion.
 - `QAPage` / `FAQPage` JSON-LD, DB-driven sitemap, near-zero-JS pages for SEO.
 - Opt-in per guild (default off); usernames aliased ("Original poster" / "Helper N").
 
 **MCP server (Max)**
-- Each Max guild exposes its KB as a **Streamable HTTP MCP server** at `{slug}.dejavue.app/mcp`
+- Each Max guild exposes its published answers as a **Streamable HTTP MCP server** at `{slug}.dejavue.app/mcp`
   with a `search_knowledge_base` tool — add it to Claude or any MCP client to let your AI answer
   from the community's solved questions.
 
 **Ops**
 - Analytics: resolution rate, time-to-resolution, top helpers (Plus+).
 - Stale-question **nudges** that ping a helper role on a timer (Plus+).
-- **Backfill** one-time purchase: import a forum's entire history into the archive.
+- **Backfill**: import a forum's entire history into the archive — included, up to your tier's indexed-message limit.
 
 ---
 
 ## Tiers
 
-Billed per-server via Discord Premium Apps (prices are suggestions — set the real amounts on your SKUs).
+Billed per-server via Discord Premium Apps.
 
 AI usage is metered in **AI credits** (1 credit = 1,000 model tokens, input + output). Each drafted
 answer costs ≈ 0.8 credits and each thread summary ≈ 3, so the quotas below translate to roughly
 "drafts per month" at 1.25× the credit number. Everything indexed counts against one **indexed
-messages** ceiling (there is no separate archive/KB-page cap); public KB pages themselves are
+messages** ceiling (there is no separate archive/website-page cap); public website pages themselves are
 unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 
-| | **Free** | **Plus** ~$4.99 | **Pro** ~$9.99 | **Max** ~$24.99 |
+| | **Free** | **Plus** $4.99 | **Pro** $9.99 | **Max** $24.99 |
 |---|---|---|---|---|
 | Forum channels | 1 | 5 | 10 | unlimited |
 | Tracked (non-forum) channels | 1 | 5 | 15 | unlimited |
@@ -86,13 +86,13 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 | **AI credits / mo** | — | **25** | **1,000** | **5,000** |
 | Stale-question nudges | — | ✓ | ✓ | ✓ |
 | Analytics | basic counts | full | full | full |
-| KB answer rendering | raw | raw | AI-summarized | AI-summarized |
+| Website page rendering | raw | raw | AI-summarized | AI-summarized |
 | **MCP server** | — | — | — | **✓** (30 req/min) |
 | "Powered by Dejavue" branding | shown | removed | removed | removed |
 
-**One-time purchases** (any tier): **Custom domain** (serve the KB on your own domain) · **Top-up**
-(**+250 AI credits**, consumable, stacks, never expires). Importing existing forum history is included
-— setup reindexes past threads up to the tier's indexed-message limit.
+**One-time purchases** (any tier): **Custom domain — $29.99** (serve your public website on your own
+domain) · **Top-up — $1.99** (**+250 AI credits**, consumable, stacks, never expires). Importing
+existing forum history is included — setup reindexes past threads up to the tier's indexed-message limit.
 
 ---
 
@@ -103,7 +103,7 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 | Subcommand | What it does | Who |
 |---|---|---|
 | `setup <forum>` | Monitor a forum channel; ensures solved/unsolved tags | admin |
-| `status` | Full config: tier, channels, KB/MCP URLs, quota, custom domain | admin |
+| `status` | Full config: tier, channels, website/MCP URLs, quota, custom domain | admin |
 | `config` | Quick configuration summary | anyone |
 | `search <query>` | Search the solved-answer archive | anyone |
 | `stats` | Solved/unsolved counts (+ quota on Pro+) | anyone |
@@ -112,9 +112,9 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 | `faq` | Auto-generated FAQ (Pro+) | anyone |
 | `nudges [enabled] [hours] [role]` | Configure stale-question pings (Plus+) | admin |
 | `solved` | Mark the current post solved (opens the answer modal) | OP/mod/admin |
-| `kb [slug] [publish]` | Configure the public KB subdomain + publishing | admin |
+| `kb [slug] [publish]` | Configure the public website (subdomain + publishing) | admin |
 | `domain [host]` | Set a custom domain (one-time purchase) | admin |
-| `backfill <forum>` | Import a forum's history (one-time purchase) | admin |
+| `backfill <forum>` | Import a forum's history (included, up to your tier's limit) | admin |
 | `demo` | Create an example forum with sample Q&A to try it out | admin |
 | `help` | Overview | anyone |
 
@@ -125,7 +125,7 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 **Stack:** TypeScript · discord.js v14 · Postgres + pgvector (Drizzle) · pluggable embeddings
 (self-host CPU via Transformers.js `bge-small-en-v1.5`, or OpenRouter `text-embedding-3-large`;
 384-dim either way) · DeepSeek V4 Pro via OpenRouter · pg-boss (Postgres-backed jobs, no Redis) ·
-Astro SSR (public KB + MCP).
+Astro SSR (public website + MCP).
 
 ```
 packages/core   shared types, env, tier/entitlement logic, clustering
@@ -134,7 +134,7 @@ packages/ai     embeddings (Transformers.js) + OpenRouter LLM client
 packages/queue  pg-boss queues + job definitions
 apps/bot        discord.js gateway client (commands, events, interactions)
 apps/worker     pg-boss jobs (embed, summarize, cluster, FAQ, nudge, backfill, reconcile)
-apps/web        Astro SSR — public KB (subdomain/custom-domain) + /mcp endpoint
+apps/web        Astro SSR — public website (subdomain/custom-domain) + /mcp endpoint
 ```
 
 The **bot** does live query-embedding + interactions; the **worker** does heavy/scheduled work; they
@@ -194,9 +194,9 @@ named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature local
    instant guild commands, or registers globally if unset).
 4. **Enable Monetization** and create SKUs in the developer portal, then put their ids in `.env`:
    - Guild subscriptions: `SKU_PLUS`, `SKU_PRO`, `SKU_MAX`
-   - Durable one-time: `SKU_BACKFILL`, `SKU_CUSTOM_DOMAIN`
+   - Durable one-time: `SKU_CUSTOM_DOMAIN` (backfill needs no SKU — history import is included)
    - Consumable one-time: `SKU_TOPUP`
-5. **KB domains:** point `*.dejavue.app` (wildcard DNS + TLS) at the web app. `.app` is HSTS-preloaded,
+5. **Website domains:** point `*.dejavue.app` (wildcard DNS + TLS) at the web app. `.app` is HSTS-preloaded,
    so HTTPS is mandatory — the wildcard cert must cover `*.dejavue.app`. Custom domains CNAME to the
    same host (provision per-domain TLS / on-demand certs).
 
@@ -226,7 +226,7 @@ dimension means migrating the `vec` column (and re-embedding).
 
 ## Using the MCP server (Max)
 
-Once a Max guild has set a KB slug and opted in, its knowledge base is queryable at
+Once a Max guild has set a website slug and opted in, its published answers are queryable at
 `https://{slug}.dejavue.app/mcp`. Add it to an AI client as a **Streamable HTTP** MCP server; it
 exposes one tool:
 

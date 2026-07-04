@@ -66,10 +66,10 @@ const steps = [
 // AI usage is metered in AI credits: 1 credit = 1,000 model tokens (a drafted
 // answer ≈ 0.8 credits, a thread summary ≈ 3). Keep in sync with README + core.
 const tiers = [
-  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public answers website'] },
-  { name: 'Plus', price: '$4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Stale-question nudges · full analytics', '“Powered by” removed'] },
+  { name: 'Free', price: '$0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public website on your subdomain'] },
+  { name: 'Plus', price: '$4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Public website · no Dejavue branding', 'Stale-question nudges · full analytics'] },
   { name: 'Pro', price: '$9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
-  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', '5,000 AI credits / mo', 'MCP server for your answers', 'Everything in Pro'] },
+  { name: 'Max', price: '$24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', 'Unlimited AI-summarized website pages', '5,000 AI credits / mo', 'MCP server for your answers', 'Everything in Pro'] },
 ];
 ---
 
@@ -334,11 +334,14 @@ const tiers = [
           <div>
             <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Your public website</div>
             <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,38px); letter-spacing:-0.03em; margin:14px 0 0;">Your answers, indexed by Google</h2>
-            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Every solved thread becomes a page on your own public website — a fast, near-zero-JS site at <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">slug.dejavue.app</span> or a custom domain you own. Each channel becomes a category, and every page carries QA &amp; FAQ structured data so people find answers on Google before they ask.</p>
+            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Every solved thread becomes a page on your own public website — a fast, near-zero-JS help center at <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">slug.dejavue.app</span> or a custom domain you own. It updates itself: each monitored channel becomes a category, and every page carries the accepted answer plus the full discussion — so visitors and Google find answers before anyone opens Discord.</p>
             <ul style="list-style:none; padding:0; margin:24px 0 0; display:flex; flex-direction:column; gap:12px;">
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> Per-guild subdomain or custom domain</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> Privacy-aliased speakers, opt-in per guild</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF;">✓</span> JSON-LD + DB-driven sitemap, built for SEO</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Your own subdomain — or a custom domain you own</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Each channel becomes a category; every page shows the answer + full thread</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Built for SEO: QA &amp; FAQ structured data, auto-generated sitemap, near-zero-JS pages</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Clean, AI-summarized answer pages on Pro &amp; Max</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Privacy-first: opt-in per server, aliased usernames, optional passphrase</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Unlimited pages, refreshed automatically as questions get solved</li>
             </ul>
           </div>
           <div style="border-radius:16px; overflow:hidden; box-shadow:0 30px 70px rgba(0,0,0,0.5); border:1px solid rgba(244,245,255,0.1);">
@@ -417,7 +420,7 @@ const tiers = [
               </div>
             ))}
           </div>
-          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">Importing your existing history is free, up to each tier's indexed-message limit. One-time add-ons — <span style="color:#9AA0C3;">Custom domain</span>, <span style="color:#9AA0C3;">AI top-up (+250 credits, stacks, never expires)</span>. Prices are suggestions set per SKU.</p>
+          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">Importing your existing history is free, up to each tier's indexed-message limit. One-time add-ons — <span style="color:#9AA0C3;">Custom domain · $29.99</span>, <span style="color:#9AA0C3;">AI top-up · +250 credits for $1.99 (stacks, never expires)</span>.</p>
         </div>
       </section>
 
