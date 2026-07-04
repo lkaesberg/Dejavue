@@ -28,10 +28,19 @@ export async function registerCommands(
   appId: string,
 ): Promise<{ count: number; scope: string }> {
   const devGuild = getEnv().DISCORD_DEV_GUILD_ID;
+  const scope = devGuild ? `guild ${devGuild}` : 'global';
   const body = allCommandJSON();
   const route = devGuild
     ? Routes.applicationGuildCommands(appId, devGuild)
     : Routes.applicationCommands(appId);
-  await rest.put(route, { body });
-  return { count: body.length, scope: devGuild ? `guild ${devGuild}` : 'global' };
+  try {
+    await rest.put(route, { body });
+  } catch (err) {
+    // Surface the scope: "Missing Access" on a guild scope means the bot wasn't
+    // invited to that guild with the applications.commands OAuth scope. For a
+    // multi-guild (production) bot, leave DISCORD_DEV_GUILD_ID unset → global.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`command registration failed (scope: ${scope}): ${msg}`, { cause: err });
+  }
+  return { count: body.length, scope };
 }
