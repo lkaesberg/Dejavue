@@ -194,7 +194,9 @@ named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature local
    instant guild commands, or registers globally if unset).
 4. **Enable Monetization** and create SKUs in the developer portal, then put their ids in `.env`:
    - Guild subscriptions: `SKU_PLUS`, `SKU_PRO`, `SKU_MAX`
-   - Consumable one-time: `SKU_TOPUP` (credit pack) · `SKU_CUSTOM_DOMAIN` (per-server unlock)
+   - Consumable AI-credit packs: `SKU_TOPUP_500` / `SKU_TOPUP_1000` / `SKU_TOPUP_2000` / `SKU_TOPUP_5000`
+     (pack sizes are fixed in code; suggested prices $4.99 / $8.99 / $15.99 / $34.99)
+   - Consumable one-time: `SKU_CUSTOM_DOMAIN` (per-server unlock)
    - Backfill needs no SKU — history import is included
 5. **Website domains:** point `*.dejavue.app` (wildcard DNS + TLS) at the web app. `.app` is HSTS-preloaded,
    so HTTPS is mandatory — the wildcard cert must cover `*.dejavue.app`. Custom domains CNAME to the
@@ -205,8 +207,9 @@ named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature local
 `DATABASE_URL` · `DISCORD_TOKEN` · `DISCORD_CLIENT_ID` · `DISCORD_DEV_GUILD_ID` ·
 `OPENROUTER_API_KEY` · `OPENROUTER_MODEL` (default `deepseek/deepseek-v4-pro`) ·
 `KB_BASE_DOMAIN` (default `dejavue.app`) · `QUOTA_CREDITS_PLUS` / `QUOTA_CREDITS_PRO` /
-`QUOTA_CREDITS_MAX` (monthly AI credits: 25 / 1,000 / 5,000) · `TOPUP_CREDITS` (default 250) ·
-`MCP_RATE_PER_MIN` (default 30) · the `SKU_*` ids · `DEV_FORCE_TIER` (dev only).
+`QUOTA_CREDITS_MAX` (monthly AI credits: 25 / 1,000 / 5,000) ·
+`MCP_RATE_PER_MIN` (default 30) · the `SKU_*` ids (incl. the `SKU_TOPUP_*` credit packs) ·
+`DEV_FORCE_TIER` (dev only).
 
 **Embeddings** are pluggable via `EMBEDDING_PROVIDER`:
 

@@ -1,5 +1,5 @@
 import type { Entitlement as DiscordEntitlement } from 'discord.js';
-import { getEnv } from '@dejavue/core';
+import { getEnv, isTopUpSku } from '@dejavue/core';
 import type { NewEntitlement } from '@dejavue/db';
 
 /** Map a discord.js Entitlement to our DB row. */
@@ -8,7 +8,7 @@ export function mapEntitlement(ent: DiscordEntitlement): NewEntitlement {
   let type: NewEntitlement['type'] = 'unknown';
   if (env.SKU_BACKFILL && ent.skuId === env.SKU_BACKFILL) type = 'durable';
   else if (
-    (env.SKU_TOPUP && ent.skuId === env.SKU_TOPUP) ||
+    isTopUpSku(env, ent.skuId) ||
     (env.SKU_CUSTOM_DOMAIN && ent.skuId === env.SKU_CUSTOM_DOMAIN)
   )
     type = 'consumable';

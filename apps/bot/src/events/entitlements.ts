@@ -1,5 +1,5 @@
 import type { Entitlement } from 'discord.js';
-import { childLogger, getEnv, notifyAsync } from '@dejavue/core';
+import { childLogger, getEnv, isTopUpSku, notifyAsync, topUpCreditsForSku } from '@dejavue/core';
 import { getDb, markEntitlementDeleted, resolvePurchaseIntent, upsertEntitlement } from '@dejavue/db';
 import { mapEntitlement } from '../lib/entitlementMap';
 import { invalidateTier } from '../lib/tier';
@@ -15,7 +15,8 @@ function productLabel(skuId: string): string {
   if (env.SKU_MAX && skuId === env.SKU_MAX) return 'Max subscription';
   if (env.SKU_PRO && skuId === env.SKU_PRO) return 'Pro subscription';
   if (env.SKU_PLUS && skuId === env.SKU_PLUS) return 'Plus subscription';
-  if (env.SKU_TOPUP && skuId === env.SKU_TOPUP) return 'Credit top-up';
+  const topUpCredits = topUpCreditsForSku(env, skuId);
+  if (topUpCredits !== undefined) return `Credit top-up (+${topUpCredits.toLocaleString('en-US')})`;
   if (env.SKU_BACKFILL && skuId === env.SKU_BACKFILL) return 'History backfill';
   if (env.SKU_CUSTOM_DOMAIN && skuId === env.SKU_CUSTOM_DOMAIN) return 'Custom domain';
   return `SKU ${skuId}`;
@@ -32,7 +33,7 @@ function whoFields(e: { guildId?: string | null; userId?: string | null }) {
 /** SKUs Discord delivers as USER-owned one-time purchases (the entitlement has no guildId). */
 function isOneTimeSku(skuId: string): boolean {
   const env = getEnv();
-  return skuId === env.SKU_TOPUP || skuId === env.SKU_CUSTOM_DOMAIN || skuId === env.SKU_BACKFILL;
+  return isTopUpSku(env, skuId) || skuId === env.SKU_CUSTOM_DOMAIN || skuId === env.SKU_BACKFILL;
 }
 
 /**

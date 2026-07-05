@@ -13,11 +13,11 @@ import {
   getGuildConfig,
   getTopClusters,
   markGenerationStarted,
-  recordPurchaseIntent,
 } from '@dejavue/db';
 import { enqueueClusterGaps, enqueueRegenFaq } from '@dejavue/queue';
 import { COLOR, threadUrl } from './embeds';
 import { getGuildTier, limitsFor } from './tier';
+import { prepareTopUpSkus } from './topUp';
 import { upsellPayload } from './upsell';
 
 /** A generation is re-triggered only if none ran in the last 5 minutes and one isn't
@@ -42,17 +42,14 @@ async function blockedOnCredits(
 ): Promise<boolean> {
   const quota = await checkQuota(getDb(), guildId, baseCredits);
   if (quota.allowed) return false;
-  // One-time purchase → user-owned entitlement; remember the guild before the button.
-  const topUpSku = getEnv().SKU_TOPUP;
-  if (topUpSku) {
-    await recordPurchaseIntent(getDb(), { userId: interaction.user.id, skuId: topUpSku, guildId });
-  }
+  // One-time purchases are user-owned; remember the guild before showing the buttons.
+  const topUpSkus = await prepareTopUpSkus(interaction.user.id, guildId);
   await interaction.reply({
     ...upsellPayload({
       title: 'Out of AI credits for this month',
       description:
         'This run needs AI credits, and the monthly budget is used up. Credits reset on the 1st (UTC) — or top up to keep going now.',
-      skuId: getEnv().SKU_TOPUP,
+      skuIds: topUpSkus,
     }),
     flags: MessageFlags.Ephemeral,
   });

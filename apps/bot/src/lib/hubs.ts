@@ -40,7 +40,6 @@ import {
   getGuildConfig,
   listActiveReindexJobs,
   listChannelSync,
-  recordPurchaseIntent,
   resolutionStats,
   topHelpers,
   getTopClusters,
@@ -53,7 +52,8 @@ import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
 import { allTargets, startReindex } from './reindexTrigger';
 import { getGuildTier, limitsFor } from './tier';
-import { upsellPayload } from './upsell';
+import { prepareTopUpSkus } from './topUp';
+import { premiumButtonRows, upsellPayload } from './upsell';
 
 const PREFIX = 'dv:';
 export const isHubInteraction = (id: string): boolean => id.startsWith(PREFIX);
@@ -404,23 +404,14 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
       ),
     );
   }
-  // Out of credits → native Premium buttons: top-up, and Max for non-Max guilds.
+  // Out of credits → native Premium buttons: the top-up ladder, plus Max for non-Max guilds.
   if (quota && !quota.allowed) {
     const env = getEnv();
-    // One-time purchase → user-owned entitlement; remember the guild before the button.
-    if (env.SKU_TOPUP) {
-      await recordPurchaseIntent(db, { userId: interaction.user.id, skuId: env.SKU_TOPUP, guildId });
-    }
-    const skus = [env.SKU_TOPUP, limits.mcp ? undefined : env.SKU_MAX].filter(
-      (s): s is string => Boolean(s),
-    );
-    if (skus.length > 0) {
-      components.push(
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          skus.map((sku) => new ButtonBuilder().setStyle(ButtonStyle.Premium).setSKUId(sku)),
-        ),
-      );
-    }
+    // One-time purchases are user-owned; remember the guild before showing the buttons.
+    const topUpSkus = await prepareTopUpSkus(interaction.user.id, guildId);
+    const maxSku = limits.mcp ? undefined : env.SKU_MAX;
+    const skus = [...topUpSkus, ...(maxSku ? [maxSku] : [])];
+    if (skus.length > 0) components.push(...premiumButtonRows(skus));
   }
   await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
 }

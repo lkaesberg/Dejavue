@@ -28,7 +28,13 @@ const EnvSchema = z.object({
   SKU_PRO: z.string().optional(),
   SKU_MAX: z.string().optional(),
   SKU_BACKFILL: z.string().optional(),
-  SKU_TOPUP: z.string().optional(),
+  // Consumable AI-credit top-up packs — one SKU per pack size. How many credits
+  // each grants is fixed in code (see @dejavue/core `topUpTiers`); only the ids
+  // vary per environment. Leave a pack's id unset to hide that pack.
+  SKU_TOPUP_500: z.string().optional(),
+  SKU_TOPUP_1000: z.string().optional(),
+  SKU_TOPUP_2000: z.string().optional(),
+  SKU_TOPUP_5000: z.string().optional(),
   SKU_CUSTOM_DOMAIN: z.string().optional(),
 
   // Embeddings — switch the backend between self-host and OpenRouter.
@@ -59,12 +65,11 @@ const EnvSchema = z.object({
   KB_PUBLIC_URL: z.string().default('https://dejavue.app'),
   KB_REVALIDATE_SECRET: z.string().optional(),
 
-  // Monthly AI-credit budgets per tier (1 credit = 1,000 tokens) and the
-  // credits granted per top-up purchase. Defaults mirror packages/core types.ts.
+  // Monthly AI-credit budgets per tier (1 credit = 1,000 tokens). Defaults mirror
+  // packages/core types.ts. Top-up pack sizes are fixed in code (`topUpTiers`), not env.
   QUOTA_CREDITS_PLUS: z.coerce.number().int().nonnegative().default(25),
   QUOTA_CREDITS_PRO: z.coerce.number().int().positive().default(1_000),
   QUOTA_CREDITS_MAX: z.coerce.number().int().positive().default(5_000),
-  TOPUP_CREDITS: z.coerce.number().int().positive().default(250),
   // MCP endpoint burst limit (requests/minute, Max tier).
   MCP_RATE_PER_MIN: z.coerce.number().int().positive().default(30),
 

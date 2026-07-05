@@ -2,6 +2,7 @@ export * from './env';
 export * from './dotenv';
 export * from './types';
 export * from './tier';
+export * from './topup';
 export * from './channels';
 export * from './sensitivity';
 export * from './logger';

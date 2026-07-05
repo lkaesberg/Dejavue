@@ -272,7 +272,7 @@ _(Original 3-tier matrix; a **Max** tier was added later — only Max is unlimit
 1. Create the Discord application; enable **Monetization** (requires team ownership + eligibility/verification).
 2. In the developer portal, create SKUs: **Plus** (Guild Subscription), **Pro** (Guild Subscription), **Backfill** (Durable OTP), **Top-up** (Consumable OTP). Copy their IDs into env.
 3. Bot scopes/intents: `bot` + `applications.commands`; **Guilds**, **Guild Messages**, **Message Content** (for forum starter messages) intents.
-4. Env vars: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DATABASE_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` (default `deepseek/deepseek-v4-pro`), `SKU_PLUS`, `SKU_PRO`, `SKU_BACKFILL`, `SKU_TOPUP`, `EMBEDDING_MODEL`, `KB_BASE_DOMAIN` (e.g. `dejavue.app`), `KB_REVALIDATE_SECRET`, plus optional per-feature model overrides.
+4. Env vars: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DATABASE_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` (default `deepseek/deepseek-v4-pro`), `SKU_PLUS`, `SKU_PRO`, `SKU_BACKFILL`, `SKU_TOPUP_500`/`SKU_TOPUP_1000`/`SKU_TOPUP_2000`/`SKU_TOPUP_5000`, `EMBEDDING_MODEL`, `KB_BASE_DOMAIN` (e.g. `dejavue.app`), `KB_REVALIDATE_SECRET`, plus optional per-feature model overrides.
 5. Per guild (admin): pick forum channel(s), solved/unsolved tag ids, and a KB subdomain slug via `/dejavue config`.
 6. **Domain + wildcard DNS/TLS** (for the KB): register `KB_BASE_DOMAIN`; point `*.{domain}` (wildcard A/CNAME) at the web app host; provision a **wildcard TLS cert** (Let's Encrypt DNS-01) or use a host with on-demand certs (Caddy/Cloudflare/Vercel). Reserve `www`, `app`, `api`, `docs`.
 
