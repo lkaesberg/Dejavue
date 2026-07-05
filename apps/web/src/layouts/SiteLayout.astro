@@ -20,6 +20,12 @@ interface Props {
   canonical?: string;
 }
 const { title, description, canonical } = Astro.props;
+const origin = new URL(Astro.request.url).origin;
+// OG/Twitter require absolute image URLs. The branded banner (self-hosted, no
+// external CDN) is the shared social card for every marketing page; canonical,
+// when set, is the page's own URL and doubles as og:url.
+const socialImage = `${origin}/media/banner.png`;
+const pageUrl = canonical ?? `${origin}/`;
 ---
 
 <!doctype html>
@@ -34,11 +40,33 @@ const { title, description, canonical } = Astro.props;
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#0A0B14" />
+    {/* Site-name signals for Google (alongside og:site_name + WebSite JSON-LD). */}
+    <meta name="application-name" content="Dejavue" />
     {description && <meta name="description" content={description} />}
     {canonical && <link rel="canonical" href={canonical} />}
+    {/* Let Google index the page and show large image previews + full snippets. */}
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+
+    {/* Open Graph — Discord / Slack / Facebook / LinkedIn link unfurls. */}
+    <meta property="og:site_name" content="Dejavue" />
+    <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     {description && <meta property="og:description" content={description} />}
-    <meta property="og:type" content="website" />
+    <meta property="og:url" content={pageUrl} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="2550" />
+    <meta property="og:image:height" content="900" />
+    <meta property="og:image:alt" content="Dejavue — never answer the same question twice" />
+
+    {/* Twitter / X large-image card. */}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content="Dejavue — never answer the same question twice" />
+
     <slot name="head" />
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; }

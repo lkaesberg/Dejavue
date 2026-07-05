@@ -20,13 +20,15 @@ const DELETION_RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export function registerEvents(client: Client): void {
   client.once(Events.ClientReady, (c) => {
-    logger().info({ user: c.user.tag, guilds: c.guilds.cache.size }, 'Dejavue ready');
+    const shards = c.ws.shards.size;
+    logger().info({ user: c.user.tag, guilds: c.guilds.cache.size, shards }, 'Dejavue ready');
     notifyAsync({
       level: 'success',
       title: '✅ Bot online',
       fields: [
         { name: 'User', value: c.user.tag },
         { name: 'Guilds', value: String(c.guilds.cache.size) },
+        { name: 'Shards', value: String(shards) },
       ],
     });
 

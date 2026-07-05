@@ -71,6 +71,62 @@ const tiers = [
   { name: 'Pro', price: '€9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
   { name: 'Max', price: '€24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', 'Unlimited AI-summarized website pages', '5,000 AI credits / mo', 'MCP server for your answers', 'Everything in Pro'] },
 ];
+
+// ---- SEO: title, description + JSON-LD structured data (marketing home) ----
+// Keyword-forward for Google ("Discord", "duplicate question", "knowledge base")
+// while staying truthful — Dejavue publishes solved threads to an opt-in public KB.
+const pageTitle = 'Dejavue — Discord Duplicate Question Bot & Knowledge Base';
+const pageDescription =
+  'Dejavue is a Discord bot that catches duplicate questions, runs a mark-solved workflow, and turns solved threads into a public, searchable knowledge base.';
+// One @graph so Google links the entities: Organization ← WebSite, and the
+// SoftwareApplication that describes the product itself. Prices mirror the tiers
+// above (Free €0 → Max €24.99); no ratings are claimed (none are real).
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': `${origin}/#organization`,
+      name: 'Dejavue',
+      url: `${origin}/`,
+      logo: `${origin}/media/app-icon-2048.png`,
+      description: pageDescription,
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${origin}/#website`,
+      name: 'Dejavue',
+      url: `${origin}/`,
+      inLanguage: 'en',
+      publisher: { '@id': `${origin}/#organization` },
+    },
+    {
+      '@type': 'SoftwareApplication',
+      '@id': `${origin}/#software`,
+      name: 'Dejavue',
+      url: `${origin}/`,
+      description: pageDescription,
+      applicationCategory: 'BusinessApplication',
+      applicationSubCategory: 'Discord Bot',
+      operatingSystem: 'Discord, Web',
+      publisher: { '@id': `${origin}/#organization` },
+      offers: {
+        '@type': 'AggregateOffer',
+        priceCurrency: 'EUR',
+        lowPrice: '0',
+        highPrice: '24.99',
+        offerCount: 4,
+      },
+      featureList: [
+        'Duplicate question detection',
+        'Semantic search',
+        'AI-drafted answers',
+        'Mark-solved workflow',
+        'Public, searchable knowledge base',
+      ],
+    },
+  ],
+};
 ---
 
 {
@@ -167,11 +223,9 @@ const tiers = [
       </div>
     </Base>
   ) : (
-    <SiteLayout
-      title="Dejavue — never answer the same question twice"
-      description="A Discord bot that catches duplicate questions, drives a mark-solved workflow, and publishes every answer to a public, searchable website Google can find."
-      canonical={`${origin}/`}
-    >
+    <SiteLayout title={pageTitle} description={pageDescription} canonical={`${origin}/`}>
+      <script type="application/ld+json" is:inline set:html={JSON.stringify(structuredData)} slot="head" />
+
       {/* ===== NAV ===== */}
       <nav style="position:sticky; top:0; z-index:50; backdrop-filter:blur(14px); background:rgba(10,11,20,0.72); border-bottom:1px solid rgba(244,245,255,0.07);">
         <div style="max-width:1200px; margin:0 auto; padding:14px clamp(16px,4vw,32px); display:flex; align-items:center; justify-content:space-between; gap:16px;">

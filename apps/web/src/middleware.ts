@@ -20,6 +20,25 @@ function extractSubdomain(host: string): string | null {
 export const onRequest = defineMiddleware(async (context, next) => {
   const rawHost = context.request.headers.get('host') ?? '';
   const host = (rawHost.split(':')[0] ?? '').toLowerCase();
+
+  // Canonicalize the marketing domain's www alias to the bare apex
+  // (www.dejavue.app → dejavue.app) with a permanent redirect, so search engines
+  // consolidate ranking signals on one host instead of splitting them across two
+  // self-canonicalizing copies. Scoped to KB_BASE_DOMAIN so tenant custom domains
+  // — which may legitimately live on www.<their-domain> — are never touched. Runs
+  // before any DB lookup: a redirected request needs no tenant resolution.
+  const baseDomain = getEnv().KB_BASE_DOMAIN;
+  if (host === `www.${baseDomain}`) {
+    // Force https + drop any port so it's a single hop straight to the secure
+    // apex (the base domain is always TLS-served in prod; this branch never
+    // matches localhost). Path + query are preserved by reusing the URL.
+    const url = new URL(context.request.url);
+    url.protocol = 'https:';
+    url.hostname = baseDomain;
+    url.port = '';
+    return context.redirect(url.href, 301);
+  }
+
   const slug = extractSubdomain(rawHost);
   context.locals.slug = slug;
   context.locals.tenant = null;
