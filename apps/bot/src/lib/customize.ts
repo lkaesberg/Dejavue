@@ -21,6 +21,7 @@ import {
   ensureGuildConfig,
   getDb,
   recordPurchaseIntent,
+  isSlugTaken,
   getGuildConfig,
   type GuildConfig,
   type KbAccent,
@@ -349,6 +350,14 @@ export async function handleCustomizeButton(interaction: ButtonInteraction): Pro
   }
   if (interaction.customId === ID.publish) {
     const next = !cfg.kbPublishOptIn;
+    // Can't make the site public without a public address — require a slug or a custom
+    // domain first, so turning it "on" always means it's actually reachable.
+    if (next && !cfg.kbSlug && !cfg.customDomain) {
+      await interaction.reply(
+        eph('Add a **slug** or a **custom domain** in **Edit details** first — then you can turn the site on.'),
+      );
+      return;
+    }
     // Turning the site on may make it publicly reachable — that requires the imprint
     // minimum first (ToS § 4). Passphrase-gated and slug-less sites stay ungated.
     if (next && isPubliclyLive({ ...cfg, kbPublishOptIn: true }) && !imprintComplete(cfg.kbImprint)) {
@@ -418,6 +427,8 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
     if (rawSlug) {
       if (!SLUG_RE.test(rawSlug) || RESERVED_SLUGS.has(rawSlug)) {
         errors.push('Slug must be 2–40 lowercase letters/numbers/hyphens (not a reserved word).');
+      } else if (rawSlug !== cfg.kbSlug && (await isSlugTaken(db, rawSlug, guildId))) {
+        errors.push('That slug is already taken — pick another.');
       } else {
         patch.kbSlug = rawSlug;
       }
@@ -483,7 +494,7 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
       await updateGuildConfig(db, guildId, patch);
     } catch (err) {
       log.warn({ err, guildId }, 'customize details save failed');
-      await interaction.reply(eph('That slug is already taken — pick another.'));
+      await interaction.reply(eph('Couldn’t save — that slug or custom domain is already in use.'));
       return;
     }
     await enqueueRevalidateKb({ guildId, threadId: 'all', action: 'publish' }).catch(() => undefined);

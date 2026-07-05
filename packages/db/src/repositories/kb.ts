@@ -1,4 +1,4 @@
-import { and, cosineDistance, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, cosineDistance, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { embedding, type GuildConfig, guildConfig, type Thread, thread } from '../schema';
 
@@ -31,6 +31,20 @@ export async function getGuildBySlug(db: Database, slug: string): Promise<GuildC
     .where(and(eq(guildConfig.kbSlug, slug), eq(guildConfig.kbPublishOptIn, true)))
     .limit(1);
   return row;
+}
+
+/** True if a *different* guild already owns this slug — slugs are globally unique. */
+export async function isSlugTaken(
+  db: Database,
+  slug: string,
+  exceptGuildId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ guildId: guildConfig.guildId })
+    .from(guildConfig)
+    .where(and(eq(guildConfig.kbSlug, slug), ne(guildConfig.guildId, exceptGuildId)))
+    .limit(1);
+  return Boolean(row);
 }
 
 /** Resolve a guild by its custom domain (one-time purchase), if publishing is opted in. */

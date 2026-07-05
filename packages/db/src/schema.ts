@@ -157,9 +157,9 @@ export const guildConfig = pgTable('guild_config', {
   nudgeEnabled: boolean('nudge_enabled').notNull().default(false),
   nudgeAfterHours: integer('nudge_after_hours').notNull().default(24),
   nudgeHelperRoleId: text('nudge_helper_role_id'),
-  // Public web KB — on by default; set a slug in /dejavue customize to go live, or turn
-  // it off / add a passphrase there. Everything indexed is auto-published within it.
-  kbPublishOptIn: boolean('kb_publish_opt_in').notNull().default(true),
+  // Public web KB — OFF by default; opt in via /dejavue customize, which requires a slug
+  // or custom domain (and a complete imprint) before the site can go live.
+  kbPublishOptIn: boolean('kb_publish_opt_in').notNull().default(false),
   kbSlug: text('kb_slug').unique(),
   // Custom domain for the public KB (one-time purchase). e.g. help.acme.com
   customDomain: text('custom_domain').unique(),
