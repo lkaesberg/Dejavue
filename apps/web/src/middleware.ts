@@ -74,6 +74,28 @@ export const onRequest = defineMiddleware(async (context, next) => {
       const url = new URL(context.request.url);
 
       if (url.pathname === '/unlock' && context.request.method === 'POST') {
+        // Own CSRF guard (Astro's built-in checkOrigin is disabled — see
+        // astro.config.mjs). Compare the browser's Origin host to our real host,
+        // ignoring scheme/port so the TLS-terminating proxy doesn't cause a false
+        // reject. A present-but-mismatched Origin is a cross-site POST → block.
+        const originHeader = context.request.headers.get('origin');
+        if (originHeader) {
+          let originHost: string | null = null;
+          try {
+            originHost = new URL(originHeader).hostname;
+          } catch {
+            originHost = null;
+          }
+          if (originHost === null || originHost.toLowerCase() !== host) {
+            return new Response('Cross-site POST form submissions are forbidden', { status: 403 });
+          }
+        }
+
+        // The proxy terminates TLS, so the socket-derived url.protocol is http;
+        // trust x-forwarded-proto to decide whether the gate cookie is Secure.
+        const forwardedProto = context.request.headers.get('x-forwarded-proto');
+        const isHttps = forwardedProto ? forwardedProto.split(',')[0]!.trim() === 'https' : url.protocol === 'https:';
+
         const form = await context.request.formData();
         const passphrase = String(form.get('passphrase') ?? '');
         if (verifyPassphrase(passphrase, guild.kbPassphraseHash)) {
@@ -82,7 +104,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
             sameSite: 'lax',
             path: '/',
             maxAge: 60 * 60 * 24 * 30,
-            secure: url.protocol === 'https:',
+            secure: isHttps,
           });
           return context.redirect('/', 303);
         }
