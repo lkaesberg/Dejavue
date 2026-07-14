@@ -55,7 +55,7 @@ const httpHeader = isPrivate ? '\nAuthorization: Bearer <passphrase>' : '';
 const programs = [
   { label: 'Claude Desktop', file: 'claude_desktop_config.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "command": "npx",\n      "args": ${remoteArgs}\n    }\n  }\n}`, note: 'Settings → Developer → Edit Config. mcp-remote bridges the remote HTTP server to Claude Desktop. Restart afterward.' },
   { label: 'Claude Code', file: 'terminal', code: `claude mcp add --transport http ${nm} ${mcpUrl}${cliHeader}`, note: 'Run in your project. Use `claude mcp list` to confirm it connected, then ask a question that hits the KB.' },
-  { label: 'Cursor', file: '~/.cursor/mcp.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "url": "${mcpUrl}"${headersBlock}\n    }\n  }\n}`, note: 'Or Settings → MCP → Add new server. Cursor speaks Streamable HTTP natively — no bridge needed.' },
+  { label: 'Cursor', file: '~/.cursor/mcp.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "url": "${mcpUrl}"${headersBlock}\n    }\n  }\n}`, note: 'Or Settings → MCP → Add new server. Cursor speaks Streamable HTTP natively, no bridge needed.' },
   { label: 'VS Code', file: '.vscode/mcp.json', code: `{\n  "servers": {\n    "${nm}": {\n      "type": "http",\n      "url": "${mcpUrl}"${headersBlock}\n    }\n  }\n}`, note: 'Requires GitHub Copilot agent mode. Open the file and click Start, or run “MCP: Add Server”.' },
   { label: 'Windsurf', file: '~/.codeium/windsurf/mcp_config.json', code: `{\n  "mcpServers": {\n    "${nm}": {\n      "serverUrl": "${mcpUrl}"${headersBlock}\n    }\n  }\n}`, note: 'Cascade → MCP panel → Refresh after saving. Windsurf uses `serverUrl` for HTTP servers.' },
   { label: 'Any HTTP client', file: 'Streamable HTTP', code: `POST ${mcpUrl}\nAccept: application/json, text/event-stream\nContent-Type: application/json${httpHeader}\n\n# MCP tool\nsearch_knowledge_base(query: string, limit?: number)`, note: 'Any MCP-compatible client that supports the Streamable HTTP transport can connect to the same endpoint.' },
@@ -70,7 +70,7 @@ const steps = [
 {
   tenant && (
     <Base
-      title={`Connect AI — ${brand}`}
+      title={`Connect AI | ${brand}`}
       description={`Query ${brand}'s knowledge base from Claude, Cursor, VS Code and other MCP clients.`}
       canonical={`${origin}/connect`}
       noindex
@@ -113,7 +113,7 @@ const steps = [
                     <div style="display:flex; gap:11px; align-items:flex-start; margin-bottom:18px; border:1px solid var(--border2); border-radius:var(--rad); background:var(--accentsoft); padding:15px 17px;">
                       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accentline)" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
                       <div style="font-size:13.5px; line-height:1.6; color:var(--textmid);">
-                        <strong style="color:var(--text);">This knowledge base is private.</strong> MCP clients authenticate with the passphrase as a header — not the website login. Replace <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">&lt;passphrase&gt;</code> in the config below with the passphrase you set in <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">/dejavue customize</code>. Requests sent as <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">Authorization: Bearer &lt;passphrase&gt;</code>; without it the server returns <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">401</code>.
+                        <strong style="color:var(--text);">This knowledge base is private.</strong> MCP clients authenticate with the passphrase as a header, not the website login. Replace <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">&lt;passphrase&gt;</code> in the config below with the passphrase you set in <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">/dejavue customize</code>. Requests sent as <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">Authorization: Bearer &lt;passphrase&gt;</code>; without it the server returns <code style="font-family:'JetBrains Mono',monospace; color:var(--accentline);">401</code>.
                       </div>
                     </div>
                   )}

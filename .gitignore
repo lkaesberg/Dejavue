@@ -20,3 +20,8 @@ npm-debug.log*
 
 # os
 .DS_Store
+
+# playwright
+.playwright-mcp
+.playwright-cli
+output/playwright/

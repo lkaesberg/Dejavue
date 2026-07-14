@@ -55,7 +55,7 @@ export function gateHtml(cfg: GuildConfig, opts: { error?: boolean; branded: boo
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>${brand} — private knowledge base</title>
+<title>${brand} | private knowledge base</title>
 <style>
   :root, body { ${vars} }
   * { box-sizing:border-box; }

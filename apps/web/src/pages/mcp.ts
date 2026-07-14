@@ -85,7 +85,7 @@ async function search(
 
 export const OPTIONS: APIRoute = () => new Response(null, { status: 204, headers: CORS });
 export const GET: APIRoute = () =>
-  new Response('Method Not Allowed — POST JSON-RPC (MCP Streamable HTTP).', {
+  new Response('Method Not Allowed. POST JSON-RPC (MCP Streamable HTTP).', {
     status: 405,
     headers: CORS,
   });
@@ -165,7 +165,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
           // Burst protection per tenant — searches are cheap but not free
           // (embedding + vector query), and MCP clients can loop fast.
           if (!takeToken(`mcp:${tenant.guildId}`, limits.mcpRequestsPerMinute)) {
-            responses.push(fail(id, -32000, 'Rate limited — retry in a few seconds.'));
+            responses.push(fail(id, -32000, 'Rate limited. Retry in a few seconds.'));
             break;
           }
           const text = await search(

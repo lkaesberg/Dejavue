@@ -1,0 +1,16 @@
+---
+interface Props {
+  size?: number;
+}
+
+const { size = 18 } = Astro.props;
+---
+
+<img
+  src="/media/discord-symbol-white.svg"
+  alt=""
+  width={size}
+  height={size}
+  aria-hidden="true"
+  style="display:block; flex-shrink:0; object-fit:contain;"
+/>

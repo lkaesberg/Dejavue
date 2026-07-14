@@ -127,7 +127,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
           // missing return a clear 401 JSON rather than the HTML gate.
           if (url.pathname.startsWith('/api/')) {
             return new Response(
-              JSON.stringify({ error: 'This knowledge base is private — a passphrase is required.' }),
+              JSON.stringify({ error: 'This knowledge base is private. A passphrase is required.' }),
               { status: 401, headers: { 'content-type': 'application/json' } },
             );
           }

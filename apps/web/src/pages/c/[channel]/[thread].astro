@@ -125,7 +125,7 @@ const jsonLd = thread
 {
   thread ? (
     <Base
-      title={`${thread.title} — ${brand}`}
+      title={`${thread.title} | ${brand}`}
       description={clean(thread.questionBody || thread.title).slice(0, 160)}
       canonical={`${origin}${threadPath(thread)}`}
     >

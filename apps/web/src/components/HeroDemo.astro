@@ -1,0 +1,1439 @@
+---
+import Echo from './Echo.astro';
+
+const question = 'How do I rotate an API key without downtime?';
+const answer =
+  'Create a second key in Settings → API, deploy it alongside the old one, then revoke the first after traffic has migrated. Both keys stay valid during the overlap, so there is no downtime.';
+---
+
+<div
+  class="hero-demo"
+  data-hero-demo
+  role="img"
+  aria-label="Dejavue demo: a Discord member types a question, Dejavue searches solved threads, writes a sourced answer, and marks the post solved."
+>
+  <div class="hero-demo__glow" aria-hidden="true"></div>
+
+  <div class="hero-demo__back-window hero-demo__back-window--far" aria-hidden="true">
+    <div class="hero-demo__back-servers"><i></i><i></i><i></i></div>
+    <div class="hero-demo__back-channels">
+      <strong>Arcade Labs</strong>
+      <span>FORUMS</span>
+      <b># sdk-support</b>
+      <b># bug-reports</b>
+    </div>
+    <div class="hero-demo__back-main">
+      <div class="hero-demo__back-header"><span>#</span> sdk-support</div>
+      <div class="hero-demo__back-message"><i></i><span></span></div>
+      <div class="hero-demo__back-message"><i></i><span></span></div>
+    </div>
+  </div>
+
+  <div class="hero-demo__back-window hero-demo__back-window--near" aria-hidden="true">
+    <div class="hero-demo__back-servers"><i></i><i></i><i></i></div>
+    <div class="hero-demo__back-channels">
+      <strong>Pixel Foundry</strong>
+      <span>HELP DESK</span>
+      <b># integrations</b>
+      <b># billing-help</b>
+    </div>
+    <div class="hero-demo__back-main">
+      <div class="hero-demo__back-header"><span>#</span> integrations</div>
+      <div class="hero-demo__back-message"><i></i><span></span></div>
+      <div class="hero-demo__back-message"><i></i><span></span></div>
+    </div>
+  </div>
+
+  <div class="hero-demo__window" aria-hidden="true">
+    <div class="hero-demo__server-rail">
+      <div class="hero-demo__server-active">
+        <Echo tile="gradient" round={true} size={29} />
+      </div>
+      <span class="hero-demo__server-divider"></span>
+      <span class="hero-demo__server-icon hero-demo__server-icon--amber">H</span>
+      <span class="hero-demo__server-icon hero-demo__server-icon--blue">A</span>
+      <span class="hero-demo__server-icon hero-demo__server-icon--mint">+</span>
+    </div>
+
+    <aside class="hero-demo__channel-list">
+      <div class="hero-demo__guild-name">
+        <span>Helio Support</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </div>
+      <div class="hero-demo__channel-scroll">
+        <div class="hero-demo__channel-label"><span>⌄</span> FORUMS <b>+</b></div>
+        <div class="hero-demo__channel-item hero-demo__channel-item--active"><span>#</span><strong>api-help</strong></div>
+        <div class="hero-demo__channel-item"><span>#</span>auth-sdk</div>
+        <div class="hero-demo__channel-item"><span>#</span>billing</div>
+        <div class="hero-demo__channel-label"><span>⌄</span> COMMUNITY <b>+</b></div>
+        <div class="hero-demo__channel-item"><span>#</span>general</div>
+        <div class="hero-demo__channel-item"><span>#</span>release-notes</div>
+      </div>
+      <div class="hero-demo__user-panel">
+        <div class="hero-demo__avatar hero-demo__avatar--member"></div>
+        <div><strong>maya_dev</strong><span>Online</span></div>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v4a3 3 0 0 0 6 0v-4M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2M5.5 14h5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path></svg>
+      </div>
+    </aside>
+
+    <div class="hero-demo__content">
+      <div class="hero-demo__chrome">
+        <div class="hero-demo__channel">
+          <span class="hero-demo__hash">#</span>
+          <span>api-help</span>
+          <i></i>
+          <small>API keys and authentication</small>
+        </div>
+        <div class="hero-demo__state">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"></circle><path d="m9.7 9.7 2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>
+          <span class="hero-demo__state-dot"></span>
+          <span data-state-label>New post</span>
+        </div>
+      </div>
+
+      <div class="hero-demo__canvas">
+      <section class="hero-demo__stage hero-demo__compose">
+        <div class="hero-demo__eyebrow">
+          <span class="hero-demo__eyebrow-icon">+</span>
+          New forum post
+        </div>
+        <div class="hero-demo__field-label">What do you need help with?</div>
+        <div class="hero-demo__input" data-question-field>
+          <span data-question-output>{question}</span><span class="hero-demo__caret"></span>
+        </div>
+        <p class="hero-demo__hint">Give your post a clear, searchable title.</p>
+        <div class="hero-demo__details">
+          <div class="hero-demo__avatar hero-demo__avatar--member"></div>
+          <div>
+            <div class="hero-demo__member-name">maya_dev</div>
+            <p>I need to update our production key, but I can&rsquo;t interrupt requests while the services roll over.</p>
+          </div>
+        </div>
+        <div class="hero-demo__compose-footer">
+          <span class="hero-demo__guideline"><span>✓</span> Guidelines checked</span>
+          <span class="hero-demo__post" data-post-button>
+            <span data-post-label>Post question</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </span>
+        </div>
+      </section>
+
+      <section class="hero-demo__stage hero-demo__searching">
+        <div class="hero-demo__posted-question">
+          <div class="hero-demo__avatar hero-demo__avatar--member"></div>
+          <div>
+            <div class="hero-demo__posted-meta"><strong>maya_dev</strong><span>just now</span></div>
+            <div>{question}</div>
+          </div>
+          <span class="hero-demo__badge hero-demo__badge--unsolved"><i></i>unsolved</span>
+        </div>
+
+        <div class="hero-demo__bot-row">
+          <Echo tile="gradient" round={true} size={38} style="flex-shrink:0;" />
+          <div class="hero-demo__bot-body">
+            <div class="hero-demo__bot-meta">
+              <strong>Dejavue</strong><span class="hero-demo__app-badge">APP</span><span>now</span>
+            </div>
+            <div class="hero-demo__search-card">
+              <div class="hero-demo__search-heading">
+                <span class="hero-demo__search-icon">
+                  <svg viewBox="0 0 18 18" aria-hidden="true">
+                    <circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+                    <path d="m11.5 11.5 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                  </svg>
+                </span>
+                <span>Searching solved answers</span>
+                <span class="hero-demo__thinking"><i></i><i></i><i></i></span>
+              </div>
+              <p>Comparing meaning across 1,247 archived threads</p>
+              <div class="hero-demo__scan">
+                <div class="hero-demo__scan-line"></div>
+                <div class="hero-demo__scan-row"><span></span><i></i></div>
+                <div class="hero-demo__scan-row"><span></span><i></i></div>
+                <div class="hero-demo__scan-row"><span></span><i></i></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="hero-demo__stage hero-demo__result">
+        <div class="hero-demo__posted-question hero-demo__posted-question--compact">
+          <div class="hero-demo__avatar hero-demo__avatar--member"></div>
+          <div>
+            <div class="hero-demo__posted-meta"><strong>maya_dev</strong><span>just now</span></div>
+            <div>{question}</div>
+          </div>
+          <div class="hero-demo__status-swap">
+            <span class="hero-demo__badge hero-demo__badge--unsolved"><i></i>unsolved</span>
+            <span class="hero-demo__badge hero-demo__badge--solved"><b>✓</b>solved</span>
+          </div>
+        </div>
+
+        <div class="hero-demo__bot-row">
+          <Echo tile="gradient" round={true} size={38} style="flex-shrink:0;" />
+          <div class="hero-demo__bot-body">
+            <div class="hero-demo__bot-meta">
+              <strong>Dejavue</strong><span class="hero-demo__app-badge">APP</span><span>now</span>
+            </div>
+            <div class="hero-demo__answer-card">
+              <div class="hero-demo__answer-topline">
+                <div>
+                  <strong>I&rsquo;ve seen this before</strong>
+                  <span>3 solved threads match</span>
+                </div>
+                <span class="hero-demo__match-score">96% match</span>
+              </div>
+
+              <div class="hero-demo__match">
+                <span class="hero-demo__match-check">✓</span>
+                <span>Rotating API keys with zero downtime</span>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3 5 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </div>
+
+              <div class="hero-demo__draft-label">
+                <span class="hero-demo__spark">✦</span>
+                Answer from this thread
+              </div>
+              <p class="hero-demo__answer-copy"><span data-answer-output>{answer}</span><span class="hero-demo__answer-caret"></span></p>
+
+              <div class="hero-demo__answer-meta">
+                <span><i>✓</i> Answered from 3 solved threads</span>
+                <span class="hero-demo__time">2.1s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      </div>
+
+      <div class="hero-demo__chatbar">
+        <div class="hero-demo__composer">
+          <span class="hero-demo__composer-add">
+            <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7.25" fill="currentColor"></circle><path d="M9 5.5v7M5.5 9h7" fill="none" stroke="#25272c" stroke-width="1.6" stroke-linecap="round"></path></svg>
+          </span>
+          <span class="hero-demo__composer-placeholder">Message #api-help</span>
+          <span class="hero-demo__composer-tools">
+            <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3.5 7.2h11v7.3h-11zM2.8 4.5h12.4v2.7H2.8zM9 4.5v10M9 4.5C7.5 4.5 6 3.7 6 2.7c0-.8.7-1.2 1.4-1.2C8.6 1.5 9 3 9 4.5Zm0 0c1.5 0 3-.8 3-1.8 0-.8-.7-1.2-1.4-1.2C9.4 1.5 9 3 9 4.5Z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"></path></svg>
+            <b>GIF</b>
+            <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="6.5" fill="none" stroke="currentColor" stroke-width="1.35"></circle><circle cx="6.5" cy="7.3" r=".75" fill="currentColor"></circle><circle cx="11.5" cy="7.3" r=".75" fill="currentColor"></circle><path d="M6.3 10.7c.8 1.1 1.7 1.6 2.7 1.6s1.9-.5 2.7-1.6" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"></path></svg>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const question = 'How do I rotate an API key without downtime?';
+  const answer =
+    'Create a second key in Settings → API, deploy it alongside the old one, then revoke the first after traffic has migrated. Both keys stay valid during the overlap, so there is no downtime.';
+
+  const sleep = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
+
+  for (const demo of document.querySelectorAll<HTMLElement>('[data-hero-demo]')) {
+    const questionOutput = demo.querySelector<HTMLElement>('[data-question-output]');
+    const answerOutput = demo.querySelector<HTMLElement>('[data-answer-output]');
+    const postLabel = demo.querySelector<HTMLElement>('[data-post-label]');
+    const stateLabel = demo.querySelector<HTMLElement>('[data-state-label]');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    if (!questionOutput || !answerOutput || !postLabel || !stateLabel) continue;
+
+    const showCompletedState = () => {
+      demo.dataset.phase = 'answer';
+      demo.classList.remove('is-inputting', 'is-sending', 'is-streaming', 'is-resetting');
+      demo.classList.add('is-complete');
+      questionOutput.textContent = question;
+      answerOutput.textContent = answer;
+      postLabel.textContent = 'Post question';
+      stateLabel.textContent = 'Answered & solved';
+    };
+
+    const typeCharacters = async (target: HTMLElement, text: string) => {
+      target.textContent = '';
+      for (const character of Array.from(text)) {
+        if (reducedMotion.matches) return false;
+        target.textContent += character;
+        const pause = character === '?' ? 150 : character === ' ' ? 22 : 38;
+        await sleep(pause);
+      }
+      return true;
+    };
+
+    const streamWords = async (target: HTMLElement, text: string) => {
+      target.textContent = '';
+      for (const token of text.split(/(\s+)/)) {
+        if (reducedMotion.matches) return false;
+        target.textContent += token;
+        if (token.trim()) await sleep(/[,.]$/.test(token) ? 82 : 42);
+      }
+      return true;
+    };
+
+    const play = async () => {
+      while (demo.isConnected) {
+        if (reducedMotion.matches) {
+          showCompletedState();
+          await sleep(1000);
+          continue;
+        }
+
+        demo.dataset.phase = 'compose';
+        demo.classList.remove('is-complete', 'is-sending', 'is-streaming');
+        questionOutput.textContent = '';
+        answerOutput.textContent = '';
+        postLabel.textContent = 'Post question';
+        stateLabel.textContent = 'New post';
+        await sleep(700);
+
+        demo.classList.add('is-inputting');
+        if (!(await typeCharacters(questionOutput, question))) continue;
+        demo.classList.remove('is-inputting');
+        await sleep(360);
+
+        demo.classList.add('is-sending');
+        postLabel.textContent = 'Posting…';
+        stateLabel.textContent = 'Publishing question';
+        await sleep(520);
+
+        demo.classList.remove('is-sending');
+        demo.dataset.phase = 'search';
+        stateLabel.textContent = 'Searching the archive';
+        await sleep(1750);
+        if (reducedMotion.matches) continue;
+
+        demo.dataset.phase = 'answer';
+        stateLabel.textContent = 'Found 3 matches';
+        await sleep(480);
+
+        demo.classList.add('is-streaming');
+        if (!(await streamWords(answerOutput, answer))) continue;
+        demo.classList.remove('is-streaming');
+        await sleep(260);
+
+        demo.classList.add('is-complete');
+        stateLabel.textContent = 'Answered & solved';
+        await sleep(4600);
+
+        demo.classList.add('is-resetting');
+        await sleep(360);
+        demo.dataset.phase = 'compose';
+        demo.classList.remove('is-complete');
+        await sleep(80);
+        demo.classList.remove('is-resetting');
+      }
+    };
+
+    void play();
+  }
+</script>
+
+<style>
+  .hero-demo {
+    --demo-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --demo-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    position: relative;
+    width: 100%;
+    max-width: 584px;
+    margin-left: auto;
+    isolation: isolate;
+  }
+
+  .hero-demo__glow {
+    position: absolute;
+    inset: -16% -12%;
+    z-index: -1;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124, 58, 237, 0.2), rgba(79, 70, 229, 0.06) 46%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .hero-demo__back-window {
+    --back-detail-opacity: 0.42;
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: 42px 112px minmax(0, 1fr);
+    min-height: 502px;
+    overflow: hidden;
+    border: 1px solid rgba(244, 245, 255, 0.09);
+    border-radius: 15px;
+    background: #111214;
+    box-shadow: 0 20px 54px rgba(0, 0, 0, 0.34);
+    pointer-events: none;
+  }
+
+  .hero-demo__back-window--near {
+    --back-detail-opacity: 0.48;
+    z-index: 1;
+    transform: translate(17px, -17px) scale(0.995);
+  }
+
+  .hero-demo__back-window--far {
+    --back-detail-opacity: 0.24;
+    z-index: 0;
+    transform: translate(33px, -33px) scale(0.99);
+  }
+
+  .hero-demo__back-window > * {
+    opacity: var(--back-detail-opacity);
+  }
+
+  .hero-demo__back-servers,
+  .hero-demo__server-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #0c0d0f;
+  }
+
+  .hero-demo__back-servers {
+    gap: 9px;
+    padding-top: 11px;
+  }
+
+  .hero-demo__back-servers i {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    background: #292b30;
+  }
+
+  .hero-demo__back-servers i:first-child {
+    border-radius: 9px;
+    background: #6757d9;
+  }
+
+  .hero-demo__back-channels,
+  .hero-demo__channel-list {
+    min-width: 0;
+    background: #131518;
+  }
+
+  .hero-demo__back-channels {
+    padding: 13px 10px;
+    color: #8c919b;
+    font-size: 8px;
+  }
+
+  .hero-demo__back-channels strong {
+    display: block;
+    padding-bottom: 13px;
+    color: #d5d8dd;
+    font-size: 9px;
+  }
+
+  .hero-demo__back-channels span {
+    display: block;
+    margin-bottom: 7px;
+    font-size: 6px;
+    letter-spacing: 0.08em;
+  }
+
+  .hero-demo__back-channels b {
+    display: block;
+    margin-top: 7px;
+    font-weight: 500;
+  }
+
+  .hero-demo__back-main {
+    position: relative;
+    background: #181a1e;
+  }
+
+  .hero-demo__back-main::after {
+    content: '';
+    position: absolute;
+    right: 13px;
+    bottom: 12px;
+    left: 13px;
+    height: 30px;
+    border-radius: 7px;
+    background: #282a30;
+    box-shadow: inset 0 0 0 1px rgba(244, 245, 255, 0.025);
+  }
+
+  .hero-demo__back-header {
+    height: 44px;
+    padding: 15px 12px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.42);
+    color: #c9ccd2;
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .hero-demo__back-header span {
+    margin-right: 5px;
+    color: #7d828b;
+  }
+
+  .hero-demo__back-message {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 20px 14px 0;
+  }
+
+  .hero-demo__back-message i {
+    width: 25px;
+    height: 25px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #34373d;
+  }
+
+  .hero-demo__back-message span {
+    width: 62%;
+    height: 6px;
+    border-radius: 99px;
+    background: #2f3238;
+  }
+
+  .hero-demo__window {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 42px 112px minmax(0, 1fr);
+    min-height: 502px;
+    overflow: hidden;
+    border: 1px solid rgba(244, 245, 255, 0.1);
+    border-radius: 15px;
+    background: #101114;
+    box-shadow: 0 36px 86px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(124, 58, 237, 0.04);
+    contain: layout paint;
+  }
+
+  .hero-demo__server-rail {
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .hero-demo__server-active {
+    position: relative;
+  }
+
+  .hero-demo__server-active::before {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: -7px;
+    width: 3px;
+    height: 17px;
+    border-radius: 0 4px 4px 0;
+    background: #f4f5ff;
+  }
+
+  .hero-demo__server-divider {
+    width: 25px;
+    height: 1px;
+    background: #24262b;
+  }
+
+  .hero-demo__server-icon {
+    display: grid;
+    width: 27px;
+    height: 27px;
+    place-items: center;
+    border-radius: 50%;
+    color: #e4e6eb;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .hero-demo__server-icon--amber { background: #9b542f; }
+  .hero-demo__server-icon--blue { background: #315e9d; }
+  .hero-demo__server-icon--mint { background: #173b35; color: #43c6aa; font-size: 15px; font-weight: 400; }
+
+  .hero-demo__channel-list {
+    position: relative;
+    display: flex;
+    min-height: 502px;
+    flex-direction: column;
+    border-right: 1px solid rgba(0, 0, 0, 0.22);
+  }
+
+  .hero-demo__guild-name {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 44px;
+    padding: 0 11px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.42);
+    color: #e4e6eb;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .hero-demo__guild-name svg {
+    width: 12px;
+    height: 12px;
+    color: #9a9fa8;
+  }
+
+  .hero-demo__channel-scroll {
+    padding: 14px 6px;
+  }
+
+  .hero-demo__channel-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin: 10px 4px 5px;
+    color: #858a93;
+    font-size: 6.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  .hero-demo__channel-label:first-child { margin-top: 0; }
+  .hero-demo__channel-label b { margin-left: auto; font-size: 10px; font-weight: 400; }
+
+  .hero-demo__channel-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 27px;
+    padding: 0 7px;
+    border-radius: 4px;
+    color: #8f949e;
+    font-size: 8.5px;
+  }
+
+  .hero-demo__channel-item > span {
+    color: #6f747d;
+    font-size: 13px;
+  }
+
+  .hero-demo__channel-item--active {
+    background: #25272c;
+    color: #eceef1;
+  }
+
+  .hero-demo__channel-item--active strong { font-weight: 600; }
+
+  .hero-demo__user-panel {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 14px;
+    gap: 6px;
+    align-items: center;
+    min-height: 45px;
+    margin-top: auto;
+    padding: 7px;
+    background: #0f1012;
+  }
+
+  .hero-demo__user-panel .hero-demo__avatar {
+    width: 24px;
+    height: 24px;
+  }
+
+  .hero-demo__user-panel strong,
+  .hero-demo__user-panel span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hero-demo__user-panel strong { color: #e4e6eb; font-size: 7.5px; }
+  .hero-demo__user-panel span { margin-top: 1px; color: #7f858e; font-size: 6.5px; }
+  .hero-demo__user-panel svg { width: 12px; height: 12px; color: #8f949e; }
+
+  .hero-demo__content {
+    display: flex;
+    min-width: 0;
+    min-height: 502px;
+    flex-direction: column;
+    background: #191a1e;
+  }
+
+  .hero-demo__chrome {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    padding: 0 12px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.42);
+    background: #1b1c20;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+  }
+
+  .hero-demo__channel {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #f2f3f5;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .hero-demo__channel i {
+    width: 1px;
+    height: 14px;
+    margin-inline: 3px;
+    background: #35373d;
+  }
+
+  .hero-demo__channel small {
+    overflow: hidden;
+    color: #858a93;
+    font-size: 8px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hero-demo__hash {
+    color: #949ba4;
+    font-size: 16px;
+    font-weight: 400;
+  }
+
+  .hero-demo__state {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 130px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: #111214;
+    color: #8d929b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 7px;
+    white-space: nowrap;
+  }
+
+  .hero-demo__state svg {
+    width: 11px;
+    height: 11px;
+    flex: 0 0 auto;
+  }
+
+  .hero-demo__state-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #a78bfa;
+    box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.1);
+  }
+
+  .hero-demo.is-complete .hero-demo__state-dot {
+    background: #2dd4bf;
+    box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.12);
+  }
+
+  .hero-demo__canvas {
+    position: relative;
+    min-height: 412px;
+    opacity: 1;
+    transform: scale(1);
+    transition: opacity 280ms var(--demo-ease-in-out), transform 360ms var(--demo-ease-out);
+  }
+
+  .hero-demo__chatbar {
+    display: flex;
+    height: 46px;
+    flex: 0 0 46px;
+    align-items: flex-start;
+    padding: 0 12px 10px;
+    background: #191a1e;
+  }
+
+  .hero-demo__composer {
+    display: flex;
+    width: 100%;
+    height: 36px;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: #25272c;
+    box-shadow: inset 0 0 0 1px rgba(244, 245, 255, 0.025);
+    color: #a5abb4;
+  }
+
+  .hero-demo__composer-add {
+    display: grid;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    place-items: center;
+    color: #b5bac1;
+  }
+
+  .hero-demo__composer-add svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .hero-demo__composer-placeholder {
+    overflow: hidden;
+    flex: 1;
+    color: #777d87;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hero-demo__composer-tools {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    color: #a5abb4;
+  }
+
+  .hero-demo__composer-tools svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .hero-demo__composer-tools b {
+    display: grid;
+    width: 17px;
+    height: 14px;
+    place-items: center;
+    border-radius: 3px;
+    background: #a5abb4;
+    color: #25272c;
+    font-size: 6px;
+    line-height: 1;
+  }
+
+  .hero-demo.is-resetting .hero-demo__canvas {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  .hero-demo__stage {
+    position: absolute;
+    inset: 0;
+    padding: 13px;
+    opacity: 0;
+    transform: translateY(10px);
+    pointer-events: none;
+    transition: opacity 360ms var(--demo-ease-out), transform 440ms var(--demo-ease-out);
+  }
+
+  .hero-demo__compose,
+  .hero-demo[data-phase='compose'] .hero-demo__compose,
+  .hero-demo[data-phase='search'] .hero-demo__searching,
+  .hero-demo[data-phase='answer'] .hero-demo__result {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .hero-demo[data-phase='search'] .hero-demo__compose,
+  .hero-demo[data-phase='answer'] .hero-demo__compose {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  .hero-demo__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #b5bac1;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .hero-demo__eyebrow-icon {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    place-items: center;
+    border-radius: 6px;
+    background: rgba(124, 58, 237, 0.18);
+    color: #c4b5fd;
+    font-size: 16px;
+    font-weight: 400;
+  }
+
+  .hero-demo__field-label {
+    margin-top: 20px;
+    color: #f2f3f5;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .hero-demo__input {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    margin-top: 9px;
+    padding: 0 14px;
+    border: 1px solid rgba(167, 139, 250, 0.46);
+    border-radius: 9px;
+    background: #101114;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.09);
+    color: #f2f3f5;
+    font-size: 13.5px;
+    line-height: 1.35;
+  }
+
+  .hero-demo__caret,
+  .hero-demo__answer-caret {
+    display: inline-block;
+    width: 1.5px;
+    height: 1.15em;
+    margin-left: 2px;
+    background: #a78bfa;
+    opacity: 0;
+    vertical-align: -0.15em;
+  }
+
+  .hero-demo.is-inputting .hero-demo__caret,
+  .hero-demo.is-streaming .hero-demo__answer-caret {
+    opacity: 1;
+    animation: hero-demo-blink 760ms steps(1, end) infinite;
+  }
+
+  .hero-demo__hint {
+    margin: 7px 0 0;
+    color: #7f858e;
+    font-size: 11px;
+  }
+
+  .hero-demo__details {
+    display: flex;
+    gap: 11px;
+    margin-top: 18px;
+    padding: 14px;
+    border-radius: 10px;
+    background: #141518;
+  }
+
+  .hero-demo__avatar {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+  }
+
+  .hero-demo__avatar--member {
+    background: linear-gradient(145deg, #f0a35d, #d95f32);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  }
+
+  .hero-demo__member-name {
+    color: #f2a35e;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .hero-demo__details p {
+    margin: 3px 0 0;
+    color: #b5bac1;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .hero-demo__compose-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 18px;
+  }
+
+  .hero-demo__guideline {
+    color: #7f858e;
+    font-size: 10.5px;
+  }
+
+  .hero-demo__guideline span {
+    color: #2dd4bf;
+  }
+
+  .hero-demo__post {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 124px;
+    justify-content: center;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #5865f2;
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 600;
+    box-shadow: 0 8px 20px rgba(88, 101, 242, 0.2);
+    transform: scale(1);
+    transition: transform 140ms var(--demo-ease-out), opacity 140ms var(--demo-ease-out);
+  }
+
+  .hero-demo__post svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .hero-demo.is-sending .hero-demo__post {
+    opacity: 0.82;
+    transform: scale(0.97);
+  }
+
+  .hero-demo__posted-question {
+    position: relative;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    padding: 13px 14px;
+    border: 1px solid rgba(244, 245, 255, 0.045);
+    border-radius: 6px;
+    background: #141518;
+    color: #dbdee1;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  .hero-demo__posted-question--compact {
+    padding-block: 11px;
+  }
+
+  .hero-demo__posted-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin-bottom: 3px;
+  }
+
+  .hero-demo__posted-meta strong {
+    color: #f2a35e;
+    font-size: 12.5px;
+  }
+
+  .hero-demo__posted-meta span {
+    color: #7f858e;
+    font-size: 10px;
+  }
+
+  .hero-demo__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 9.5px;
+    font-style: normal;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .hero-demo__badge--unsolved {
+    background: rgba(242, 63, 67, 0.14);
+    color: #ff7b7d;
+  }
+
+  .hero-demo__badge--unsolved i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #f23f43;
+  }
+
+  .hero-demo__badge--solved {
+    background: rgba(35, 165, 90, 0.16);
+    color: #43df91;
+  }
+
+  .hero-demo__badge--solved b {
+    color: #2dd4bf;
+  }
+
+  .hero-demo__status-swap {
+    position: relative;
+    width: 69px;
+    height: 23px;
+  }
+
+  .hero-demo__status-swap .hero-demo__badge {
+    position: absolute;
+    inset: 0 auto auto 0;
+    transition: opacity 260ms var(--demo-ease-out), transform 300ms var(--demo-ease-out);
+  }
+
+  .hero-demo__status-swap .hero-demo__badge--solved {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+
+  .hero-demo.is-complete .hero-demo__status-swap .hero-demo__badge--unsolved {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+
+  .hero-demo.is-complete .hero-demo__status-swap .hero-demo__badge--solved {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .hero-demo__bot-row {
+    display: flex;
+    gap: 11px;
+    margin-top: 14px;
+  }
+
+  .hero-demo__bot-body {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .hero-demo__bot-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 18px;
+  }
+
+  .hero-demo__bot-meta strong {
+    color: #f4f5ff;
+    font-size: 13.5px;
+  }
+
+  .hero-demo__bot-meta > span:last-child {
+    color: #7f858e;
+    font-size: 10px;
+  }
+
+  .hero-demo__app-badge {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #5865f2;
+    color: #fff;
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  .hero-demo__search-card,
+  .hero-demo__answer-card {
+    position: relative;
+    overflow: hidden;
+    margin-top: 6px;
+    border-left: 3px solid #7c3aed;
+    border-radius: 7px;
+    background: #121316;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  }
+
+  .hero-demo__search-card {
+    min-height: 230px;
+    padding: 15px;
+  }
+
+  .hero-demo__search-heading {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #f4f5ff;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .hero-demo__search-icon {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 8px;
+    background: rgba(124, 58, 237, 0.18);
+    color: #c4b5fd;
+  }
+
+  .hero-demo__search-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .hero-demo__thinking {
+    display: inline-flex;
+    gap: 3px;
+    margin-left: 2px;
+  }
+
+  .hero-demo__thinking i {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: #a78bfa;
+    animation: hero-demo-thinking 900ms var(--demo-ease-in-out) infinite;
+  }
+
+  .hero-demo__thinking i:nth-child(2) { animation-delay: 120ms; }
+  .hero-demo__thinking i:nth-child(3) { animation-delay: 240ms; }
+
+  .hero-demo__search-card > p {
+    margin: 8px 0 0;
+    color: #949ba4;
+    font-size: 10px;
+  }
+
+  .hero-demo__scan {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin-top: 21px;
+    overflow: hidden;
+  }
+
+  .hero-demo__scan-line {
+    position: absolute;
+    inset: -20px 0 auto;
+    z-index: 1;
+    height: 42px;
+    background: linear-gradient(180deg, transparent, rgba(167, 139, 250, 0.08), transparent);
+    transform: translateY(-20px);
+    animation: hero-demo-scan 1550ms var(--demo-ease-in-out) infinite;
+  }
+
+  .hero-demo__scan-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 7px;
+    background: #0d0e10;
+  }
+
+  .hero-demo__scan-row span,
+  .hero-demo__scan-row i {
+    display: block;
+    height: 6px;
+    border-radius: 999px;
+    background: #292c31;
+  }
+
+  .hero-demo__scan-row span { width: 68%; }
+  .hero-demo__scan-row i { width: 12%; margin-left: auto; }
+  .hero-demo__scan-row:nth-child(3) span { width: 54%; }
+  .hero-demo__scan-row:nth-child(4) span { width: 61%; }
+
+  .hero-demo__answer-card {
+    padding: 13px 13px 11px;
+  }
+
+  .hero-demo__answer-topline {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .hero-demo__answer-topline > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .hero-demo__answer-topline strong {
+    color: #f4f5ff;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  .hero-demo__answer-topline > div span {
+    color: #949ba4;
+    font-size: 10.5px;
+  }
+
+  .hero-demo__match-score {
+    padding: 4px 7px;
+    border: 1px solid rgba(167, 139, 250, 0.18);
+    border-radius: 999px;
+    background: rgba(124, 58, 237, 0.11);
+    color: #c4b5fd;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .hero-demo__match {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    margin-top: 11px;
+    padding: 8px 9px;
+    border-radius: 7px;
+    background: #0d0e10;
+    color: #dbdee1;
+    font-size: 10.5px;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 340ms var(--demo-ease-out) 120ms, transform 420ms var(--demo-ease-out) 120ms;
+  }
+
+  .hero-demo[data-phase='answer'] .hero-demo__match {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .hero-demo__match-check {
+    color: #2dd4bf;
+    font-size: 11px;
+  }
+
+  .hero-demo__match svg {
+    width: 13px;
+    height: 13px;
+    color: #7f858e;
+  }
+
+  .hero-demo__draft-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 11px;
+    color: #aeb4bd;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .hero-demo__spark {
+    color: #a78bfa;
+    font-size: 12px;
+  }
+
+  .hero-demo__answer-copy {
+    min-height: 72px;
+    margin: 7px 0 0;
+    color: #dbdee1;
+    font-size: 11px;
+    line-height: 1.48;
+  }
+
+  .hero-demo__answer-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(244, 245, 255, 0.07);
+    color: #949ba4;
+    font-size: 9.5px;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 300ms var(--demo-ease-out), transform 360ms var(--demo-ease-out);
+  }
+
+  .hero-demo__answer-meta i {
+    margin-right: 5px;
+    color: #2dd4bf;
+    font-style: normal;
+  }
+
+  .hero-demo__time {
+    color: #6f7596;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .hero-demo.is-complete .hero-demo__answer-meta {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @keyframes hero-demo-blink {
+    0%, 48% { opacity: 1; }
+    49%, 100% { opacity: 0; }
+  }
+
+  @keyframes hero-demo-thinking {
+    0%, 100% { opacity: 0.25; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-2px); }
+  }
+
+  @keyframes hero-demo-scan {
+    0% { opacity: 0; transform: translateY(-20px); }
+    18%, 82% { opacity: 1; }
+    100% { opacity: 0; transform: translateY(130px); }
+  }
+
+  @media (max-width: 900px) {
+    .hero-demo { margin-inline: auto; }
+  }
+
+  @media (max-width: 540px) {
+    .hero-demo__back-window,
+    .hero-demo__window {
+      min-height: 540px;
+      grid-template-columns: 36px minmax(0, 1fr);
+    }
+    .hero-demo__back-window--near { transform: translate(7px, -11px) scale(0.995); }
+    .hero-demo__back-window--far { transform: translate(14px, -22px) scale(0.99); }
+    .hero-demo__back-channels,
+    .hero-demo__channel-list { display: none; }
+    .hero-demo__server-icon { width: 25px; height: 25px; }
+    .hero-demo__server-active::before { left: -4px; }
+    .hero-demo__content { min-height: 540px; }
+    .hero-demo__chrome { min-height: 46px; padding-inline: 14px; }
+    .hero-demo__channel small,
+    .hero-demo__channel i { display: none; }
+    .hero-demo__state { max-width: 116px; }
+    .hero-demo__canvas { min-height: 445px; }
+    .hero-demo__chatbar { height: 49px; flex-basis: 49px; }
+    .hero-demo__stage { padding: 13px; }
+    .hero-demo__field-label { margin-top: 18px; }
+    .hero-demo__details { margin-top: 16px; }
+    .hero-demo__compose-footer { margin-top: 17px; }
+    .hero-demo__posted-question { grid-template-columns: 30px minmax(0, 1fr); }
+    .hero-demo__posted-question > .hero-demo__badge,
+    .hero-demo__status-swap { display: none; }
+    .hero-demo__avatar { width: 30px; height: 30px; }
+    .hero-demo__bot-row { gap: 9px; margin-top: 14px; }
+    .hero-demo__search-card { padding: 16px; }
+    .hero-demo__answer-card { padding: 13px; }
+    .hero-demo__answer-copy { min-height: 100px; font-size: 10.5px; }
+    .hero-demo__answer-meta { font-size: 9px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-demo__compose,
+    .hero-demo__searching {
+      opacity: 0 !important;
+      transform: none !important;
+    }
+
+    .hero-demo__result,
+    .hero-demo__match,
+    .hero-demo__answer-meta,
+    .hero-demo__status-swap .hero-demo__badge--solved {
+      opacity: 1 !important;
+      transform: none !important;
+    }
+
+    .hero-demo__status-swap .hero-demo__badge--unsolved {
+      opacity: 0 !important;
+    }
+
+    .hero-demo__caret,
+    .hero-demo__answer-caret,
+    .hero-demo__thinking i,
+    .hero-demo__scan-line {
+      animation: none !important;
+    }
+
+    .hero-demo__stage,
+    .hero-demo__canvas,
+    .hero-demo__match,
+    .hero-demo__answer-meta,
+    .hero-demo__status-swap .hero-demo__badge {
+      transition: none !important;
+    }
+  }
+</style>

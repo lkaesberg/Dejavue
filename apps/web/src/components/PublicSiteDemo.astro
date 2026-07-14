@@ -1,0 +1,527 @@
+---
+import Echo from './Echo.astro';
+
+const question = 'How do I rotate my API key without downtime?';
+---
+
+<div
+  class="pipe"
+  data-pipe
+  role="img"
+  aria-label="A solved Discord thread in #api-help is automatically published as a page on the Helio help center at helio.dejavue.app, where Google indexes it and shows it as a search result."
+>
+  <div class="pipe__glow" aria-hidden="true"></div>
+
+  <div class="pipe__inner" aria-hidden="true">
+    {/* ---- 01 · the solved thread -------------------------------------- */}
+    <div class="pipe__block pipe__block--discord">
+      <div class="pipe__tag"><span>01</span> Solved in Discord</div>
+      <div class="pipe__ghost"></div>
+      <div class="pipe__discord">
+        <div class="pipe__discord-bar">
+          <div><span>#</span> api-help</div>
+          <span class="pipe__solved"><i>✓</i> solved</span>
+        </div>
+        <div class="pipe__msg">
+          <span class="pipe__avatar pipe__avatar--maya">M</span>
+          <div>
+            <p><strong class="pipe__name--maya">maya_dev</strong><small>Today at 14:02</small></p>
+            <span>{question}</span>
+          </div>
+        </div>
+        <div class="pipe__msg">
+          <span class="pipe__avatar pipe__avatar--alex">A</span>
+          <div>
+            <p><strong class="pipe__name--alex">alex_ops</strong><small>Today at 14:06</small></p>
+            <span>Generate a second key, roll it out to your services, then revoke the old one after traffic has moved.</span>
+            <div class="pipe__accepted"><i>✓</i><strong>Accepted answer</strong><span>full thread kept</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* ---- the publishing beam ------------------------------------------ */}
+    <div class="pipe__flow">
+      <span class="pipe__beam pipe__beam--top"></span>
+      <div class="pipe__node">
+        <Echo tile="gradient" size={34} style="border-radius:9px; flex-shrink:0;" />
+        <div class="pipe__node-copy">
+          <strong>Dejavue publishes the page</strong>
+          <small>helio.dejavue.app/api/rotate-api-key</small>
+        </div>
+        <span class="pipe__node-time">live in 1.8s</span>
+      </div>
+      <div class="pipe__chips">
+        <span><i>✓</i> Q&amp;A schema</span>
+        <span><i>✓</i> sitemap</span>
+        <span><i>✓</i> static HTML</span>
+      </div>
+      <span class="pipe__beam pipe__beam--bottom"></span>
+    </div>
+
+    {/* ---- 02 · the published page + 03 · found on Google --------------- */}
+    <div class="pipe__block pipe__block--site">
+      <div class="pipe__tag"><span>02</span> Live on your website</div>
+      <div class="pipe__browser">
+        <div class="pipe__browser-bar">
+          <span class="pipe__lights"><i></i><i></i><i></i></span>
+          <span class="pipe__url">
+            <svg viewBox="0 0 16 16"><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"></path><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"></rect></svg>
+            helio.dejavue.app
+          </span>
+        </div>
+        <div class="pipe__page">
+          <div class="pipe__page-nav">
+            <div><Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" echoFill="#A78BFA" echoOpacity={0.6} size={22} /><strong>Helio <span>· Help Center</span></strong></div>
+            <span>42 answers</span>
+          </div>
+          <div class="pipe__category">API · category</div>
+          <h3>{question}</h3>
+          <p>Generate a second key from <strong>Settings → API</strong>, roll it out to your services, then revoke the old one. Both keys stay valid during the overlap, so there&rsquo;s no downtime.</p>
+          <div class="pipe__tags"><span>api-keys</span><span>security</span><span>✓ solved</span></div>
+          <div class="pipe__more">
+            <div><i style="width:54%"></i><i style="width:23%"></i></div>
+            <div><i style="width:44%"></i><i style="width:19%"></i></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pipe__google">
+        <div class="pipe__google-head"><span>03</span> Found on Google</div>
+        <div class="pipe__google-bar">
+          <b>G</b>
+          <span>rotate api key without downtime</span>
+          <svg viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"></circle><path d="m13 13 4 4"></path></svg>
+        </div>
+        <div class="pipe__google-result">
+          <div class="pipe__google-url"><span>H</span> helio.dejavue.app › api › rotate-api-key</div>
+          <strong>{question}</strong>
+        </div>
+        <div class="pipe__google-foot"><i>✓</i> Indexed · Q&amp;A rich result</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  for (const pipe of document.querySelectorAll<HTMLElement>('[data-pipe]')) {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    if (reducedMotion.matches) {
+      pipe.classList.add('is-visible');
+      continue;
+    }
+
+    pipe.classList.add('will-animate');
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        pipe.classList.add('is-visible');
+        observer.disconnect();
+      },
+      { threshold: 0.3 },
+    );
+
+    observer.observe(pipe);
+  }
+</script>
+
+<style>
+  .pipe {
+    --pipe-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    width: 100%;
+    max-width: 580px;
+    margin-right: auto;
+    isolation: isolate;
+  }
+
+  .pipe__glow {
+    position: absolute;
+    inset: -12% -14%;
+    z-index: -2;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124, 58, 237, 0.17), rgba(79, 70, 229, 0.05) 48%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .pipe__inner { display: flex; flex-direction: column; padding-bottom: 28px; }
+
+  .pipe__block { position: relative; }
+
+  .pipe__tag {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 11px;
+    color: #9aa0c3;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .pipe__tag span {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    place-items: center;
+    border: 1px solid rgba(167, 139, 250, 0.32);
+    border-radius: 6px;
+    background: rgba(167, 139, 250, 0.12);
+    color: #c4b5fd;
+    font-size: 8.5px;
+  }
+
+  /* ---- 01 · Discord card -------------------------------------------- */
+
+  .pipe__ghost {
+    position: absolute;
+    top: 22px;
+    right: -13px;
+    bottom: -12px;
+    left: 13px;
+    z-index: -1;
+    border: 1px solid rgba(167, 139, 250, 0.16);
+    border-radius: 14px;
+    background: rgba(27, 29, 51, 0.32);
+  }
+
+  .pipe__discord {
+    overflow: hidden;
+    border: 1px solid rgba(244, 245, 255, 0.1);
+    border-radius: 13px;
+    background: #191a1e;
+    box-shadow: 0 22px 48px rgba(0, 0, 0, 0.38);
+  }
+
+  .pipe__discord-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    padding: 0 15px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.42);
+    background: #1b1c20;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+    color: #f2f3f5;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .pipe__discord-bar > div { display: flex; align-items: center; gap: 8px; }
+  .pipe__discord-bar > div span { color: #949ba4; font-size: 16px; font-weight: 400; }
+
+  .pipe__solved {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: rgba(35, 165, 90, 0.16);
+    color: #43df91;
+    font-size: 10.5px;
+  }
+
+  .pipe__solved i { color: #2dd4bf; font-style: normal; }
+
+  .pipe__msg { display: flex; gap: 11px; padding: 13px 15px; color: #dbdee1; font-size: 12.5px; line-height: 1.45; }
+  .pipe__msg + .pipe__msg { padding-top: 4px; }
+  .pipe__msg > div { min-width: 0; }
+  .pipe__msg p { display: flex; align-items: baseline; gap: 7px; margin: 0 0 3px; }
+  .pipe__msg p strong { color: #f2f3f5; font-size: 12px; }
+  .pipe__msg p strong.pipe__name--maya { color: #f2a35e; }
+  .pipe__msg p strong.pipe__name--alex { color: #a78bfa; }
+  .pipe__msg p small { color: #7f858e; font-size: 9.5px; }
+
+  .pipe__avatar {
+    display: grid;
+    flex: 0 0 31px;
+    width: 31px;
+    height: 31px;
+    place-items: center;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .pipe__avatar--maya { background: linear-gradient(145deg, #f0a35d, #d95f32); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+  .pipe__avatar--alex { background: linear-gradient(145deg, #4f46e5, #7c3aed); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+
+  .pipe__accepted {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 9px;
+    padding: 7px 10px;
+    border: 1px solid rgba(45, 212, 191, 0.2);
+    border-radius: 8px;
+    background: rgba(45, 212, 191, 0.08);
+  }
+
+  .pipe__accepted i { display: grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; background: #2dd4bf; color: #08201c; font-size: 9.5px; font-style: normal; }
+  .pipe__accepted strong { color: #dffcf7; font-size: 10.5px; }
+  .pipe__accepted span { margin-left: auto; color: #82aaa4; font-size: 9.5px; }
+
+  /* ---- the beam ------------------------------------------------------ */
+
+  .pipe__flow { display: flex; flex-direction: column; align-items: center; padding: 9px 0; }
+
+  .pipe__beam {
+    position: relative;
+    width: 2px;
+    height: 26px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: rgba(167, 139, 250, 0.18);
+  }
+
+  .pipe__beam::after {
+    position: absolute;
+    inset: -24px 0;
+    background: repeating-linear-gradient(180deg, transparent 0 5px, #a78bfa 5px 11px);
+    content: '';
+  }
+
+  .pipe__beam--bottom::after {
+    background: repeating-linear-gradient(180deg, transparent 0 5px, #58c8bb 5px 11px);
+  }
+
+  .pipe__node {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: min(100%, 400px);
+    margin-top: 9px;
+    padding: 11px 13px;
+    border: 1px solid rgba(167, 139, 250, 0.28);
+    border-radius: 13px;
+    background: linear-gradient(180deg, rgba(79, 70, 229, 0.16), rgba(27, 29, 51, 0.72));
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3);
+  }
+
+  .pipe__node-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+  .pipe__node-copy strong { color: #f4f5ff; font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+  .pipe__node-copy small { overflow: hidden; color: #9aa0c3; font-family: 'JetBrains Mono', monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .pipe__node-time { flex-shrink: 0; color: #2dd4bf; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; }
+
+  .pipe__chips { display: flex; gap: 7px; margin: 9px 0; flex-wrap: wrap; justify-content: center; }
+
+  .pipe__chips span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border: 1px solid rgba(244, 245, 255, 0.1);
+    border-radius: 999px;
+    background: rgba(27, 29, 51, 0.65);
+    color: #b9bdd3;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+  }
+
+  .pipe__chips i { color: #2dd4bf; font-style: normal; }
+
+  /* ---- 02 · browser card --------------------------------------------- */
+
+  .pipe__browser {
+    overflow: hidden;
+    border: 1px solid rgba(244, 245, 255, 0.14);
+    border-radius: 13px;
+    background: #fff;
+    box-shadow: 0 24px 54px rgba(0, 0, 0, 0.42);
+  }
+
+  .pipe__browser-bar {
+    display: grid;
+    grid-template-columns: 64px 1fr 64px;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 11px;
+    background: #ecedf2;
+  }
+
+  .pipe__lights { display: flex; gap: 5px; }
+  .pipe__lights i { width: 8px; height: 8px; border-radius: 50%; background: #ff5f57; }
+  .pipe__lights i:nth-child(2) { background: #febc2e; }
+  .pipe__lights i:nth-child(3) { background: #28c840; }
+
+  .pipe__url {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 22px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: #fff;
+    color: #6b7280;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    white-space: nowrap;
+  }
+
+  .pipe__url svg { width: 10px; height: 10px; fill: none; stroke: #8b91a4; stroke-width: 1.2; }
+
+  .pipe__page { padding: 16px 20px 18px; color: #0e0f1c; }
+  .pipe__page-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .pipe__page-nav > div { display: flex; align-items: center; gap: 8px; }
+  .pipe__page-nav strong { font-family: 'Space Grotesk', sans-serif; font-size: 12.5px; font-weight: 600; letter-spacing: -0.02em; }
+  .pipe__page-nav strong span { font-weight: 500; }
+  .pipe__page-nav > span { color: #9aa0c3; font-size: 9.5px; }
+  .pipe__category { color: #7c3aed; font-family: 'JetBrains Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .pipe__page h3 { margin: 7px 0 0; max-width: 330px; color: #0e0f1c; font-family: 'Space Grotesk', sans-serif; font-size: 19px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.2; }
+  .pipe__page p { margin: 9px 0 0; max-width: 400px; color: #54586e; font-size: 11.5px; line-height: 1.55; }
+  .pipe__page p strong { color: #0e0f1c; }
+  .pipe__tags { display: flex; gap: 6px; margin-top: 13px; flex-wrap: wrap; }
+  .pipe__tags span { padding: 4px 9px; border-radius: 999px; background: #f1f0fb; color: #6d5fe8; font-size: 9px; font-weight: 500; }
+  .pipe__tags span:last-child { background: #e6faf5; color: #0f9b82; font-weight: 600; }
+
+  .pipe__more { margin-top: 17px; padding-top: 15px; border-top: 1px solid #edeef4; }
+  .pipe__more > div { display: flex; flex-direction: column; gap: 6px; }
+  .pipe__more > div + div { margin-top: 13px; }
+  .pipe__more i { display: block; height: 8px; border-radius: 4px; background: #eef0f6; }
+  .pipe__more > div i:last-child { background: #f4f5f9; }
+
+  /* ---- 03 · Google card ----------------------------------------------- */
+
+  .pipe__google {
+    position: absolute;
+    right: -16px;
+    bottom: -26px;
+    width: min(60%, 288px);
+    padding: 12px 13px 11px;
+    border: 1px solid rgba(244, 245, 255, 0.13);
+    border-radius: 13px;
+    background: #202124;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.5);
+    transform: rotate(1.6deg);
+  }
+
+  .pipe__google-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: #9aa0a6;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
+  .pipe__google-head span {
+    display: grid;
+    width: 17px;
+    height: 17px;
+    place-items: center;
+    border-radius: 5px;
+    background: rgba(138, 180, 248, 0.14);
+    color: #8ab4f8;
+    font-size: 7.5px;
+  }
+
+  .pipe__google-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 31px;
+    padding: 0 11px;
+    border: 1px solid #3c4043;
+    border-radius: 999px;
+    background: #303134;
+    color: #e8eaed;
+    font-size: 9.5px;
+  }
+
+  .pipe__google-bar b { color: #8ab4f8; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; }
+  .pipe__google-bar > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pipe__google-bar svg { width: 13px; height: 13px; flex-shrink: 0; fill: none; stroke: #9aa0a6; stroke-linecap: round; stroke-width: 1.6; }
+
+  .pipe__google-result { padding: 11px 2px 0; }
+  .pipe__google-url { display: flex; align-items: center; gap: 6px; color: #bdc1c6; font-size: 8.5px; }
+  .pipe__google-url span { display: grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; background: #3d3866; color: #c4b5fd; font-size: 7px; font-weight: 700; }
+  .pipe__google-result strong { display: block; margin-top: 6px; color: #8ab4f8; font-size: 12px; font-weight: 500; line-height: 1.35; }
+
+  .pipe__google-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(232, 234, 237, 0.08);
+    color: #7fd8cb;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+  }
+
+  .pipe__google-foot i { font-style: normal; }
+
+  /* ---- entrance ------------------------------------------------------- */
+
+  .pipe.will-animate .pipe__block--discord { opacity: 0; transform: translateY(16px); }
+  .pipe.will-animate .pipe__ghost { opacity: 0; transform: translate(-10px, -8px); }
+  .pipe.will-animate .pipe__beam { transform: scaleY(0); transform-origin: top; }
+  .pipe.will-animate .pipe__node { opacity: 0; transform: scale(0.94); }
+  .pipe.will-animate .pipe__chips span { opacity: 0; transform: translateY(7px); }
+  .pipe.will-animate .pipe__block--site .pipe__browser,
+  .pipe.will-animate .pipe__block--site .pipe__tag { opacity: 0; transform: translateY(18px); }
+  .pipe.will-animate .pipe__google { opacity: 0; transform: rotate(5deg) scale(0.9) translate(8px, -10px); }
+
+  .pipe__block--discord { transition: opacity 700ms var(--pipe-ease), transform 700ms var(--pipe-ease); }
+  .pipe__ghost { transition: opacity 800ms var(--pipe-ease) 500ms, transform 800ms var(--pipe-ease) 500ms; }
+  .pipe__beam { transition: transform 450ms var(--pipe-ease) 250ms; }
+  .pipe__beam--bottom { transition-delay: 520ms; }
+  .pipe__node { transition: opacity 550ms var(--pipe-ease) 340ms, transform 550ms var(--pipe-ease) 340ms; }
+  .pipe__chips span { transition: opacity 450ms var(--pipe-ease), transform 450ms var(--pipe-ease); }
+  .pipe__chips span:nth-child(1) { transition-delay: 440ms; }
+  .pipe__chips span:nth-child(2) { transition-delay: 510ms; }
+  .pipe__chips span:nth-child(3) { transition-delay: 580ms; }
+  .pipe__block--site .pipe__browser,
+  .pipe__block--site .pipe__tag { transition: opacity 700ms var(--pipe-ease) 640ms, transform 700ms var(--pipe-ease) 640ms; }
+  .pipe__google { transition: opacity 600ms var(--pipe-ease) 950ms, transform 600ms var(--pipe-ease) 950ms; }
+
+  .pipe.is-visible .pipe__block--discord,
+  .pipe.is-visible .pipe__node,
+  .pipe.is-visible .pipe__chips span,
+  .pipe.is-visible .pipe__block--site .pipe__browser,
+  .pipe.is-visible .pipe__block--site .pipe__tag { opacity: 1; transform: none; }
+  .pipe.is-visible .pipe__ghost { opacity: 1; transform: none; }
+  .pipe.is-visible .pipe__beam { transform: scaleY(1); }
+  .pipe.is-visible .pipe__google { opacity: 1; transform: rotate(1.6deg); }
+
+  /* ambient flow, only once visible */
+  .pipe.is-visible .pipe__beam::after { animation: pipe-flow 1.6s linear infinite; }
+
+  @keyframes pipe-flow {
+    from { transform: translateY(0); }
+    to { transform: translateY(22px); }
+  }
+
+  @media (max-width: 900px) {
+    .pipe { margin: 6px auto 30px; }
+  }
+
+  @media (max-width: 520px) {
+    .pipe__inner { padding-bottom: 0; }
+    .pipe__msg small { display: none; }
+    .pipe__accepted span { display: none; }
+    .pipe__node-copy small { display: none; }
+    .pipe__node-time { display: none; }
+    .pipe__page { padding: 14px 15px 16px; }
+    .pipe__page h3 { font-size: 16.5px; }
+    .pipe__more { display: none; }
+    .pipe__google { position: static; width: min(94%, 300px); margin: 14px 0 0 auto; transform: rotate(0.8deg); }
+    .pipe.is-visible .pipe__google { transform: rotate(0.8deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pipe *, .pipe *::before, .pipe *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>

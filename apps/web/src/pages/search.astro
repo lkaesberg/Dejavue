@@ -97,7 +97,7 @@ const badgeText = (r: KbSearchResult): string =>
 {
   tenant ? (
     <Base
-      title={query ? `${query} — search · ${brand}` : `Search — ${brand}`}
+      title={query ? `${query} | search · ${brand}` : `Search | ${brand}`}
       description={`Search the ${brand} knowledge base.`}
       canonical={`${origin}/search`}
       noindex
@@ -139,7 +139,7 @@ const badgeText = (r: KbSearchResult): string =>
               {query !== '' && (
                 <div style="font-size:12.5px; color:var(--textmut); margin-top:8px; line-height:1.5;">
                   {semanticActive
-                    ? 'Ranked by meaning — runs an embedding for this search.'
+                    ? 'Ranked by meaning. Runs an embedding for this search.'
                     : semanticAllowed
                       ? 'Exact keyword matching. Flip on Semantic search when a query needs meaning.'
                       : 'Exact keyword matching. Semantic (meaning-based) search is available on Plus & up.'}

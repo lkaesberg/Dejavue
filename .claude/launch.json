@@ -6,6 +6,19 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@dejavue/web", "dev", "--port", "4322"],
       "port": 4322
+    },
+    {
+      "name": "web-alt",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@dejavue/web", "dev", "--port", "4323"],
+      "port": 4323
+    },
+    {
+      "name": "web-auto",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "exec pnpm --filter @dejavue/web dev --port \"$PORT\""],
+      "port": 4324,
+      "autoPort": true
     }
   ]
 }

@@ -1,9 +1,14 @@
 ---
 import { getEnv } from '@dejavue/core';
 import { channelGuidelinesOf, getDb, getPublishedThreads, type Thread } from '@dejavue/db';
+import AssistantDemo from '../components/AssistantDemo.astro';
+import DiscordIcon from '../components/DiscordIcon.astro';
 import Echo from '../components/Echo.astro';
+import HeroDemo from '../components/HeroDemo.astro';
 import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
+import PublicSiteDemo from '../components/PublicSiteDemo.astro';
+import SearchDemo from '../components/SearchDemo.astro';
 import Base from '../layouts/Base.astro';
 import { channelPath, threadPath } from '../lib/slug';
 import SiteLayout from '../layouts/SiteLayout.astro';
@@ -57,25 +62,19 @@ const addUrl = env.DISCORD_CLIENT_ID
 const featBtn =
   'background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; box-shadow:0 10px 24px rgba(124,58,237,0.35);';
 const ghostBtn = 'background:rgba(244,245,255,0.06); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF;';
-const steps = [
-  { num: '1', title: 'Someone posts', body: 'A new forum thread lands. Dejavue reads the question and checks for duplicates — keyword on Free, semantic on Plus+.' },
-  { num: '2', title: 'Matches surface', body: 'If it has seen it before, it replies with the closest solved threads — plus an AI-drafted answer on Plus and up.' },
-  { num: '3', title: 'Mark as solved', body: 'OP, mod, or admin resolves it. The accepted answer and full transcript are captured and the tag flips to solved.' },
-  { num: '4', title: 'Archived & searchable', body: 'It is embedded for semantic search, summarized, and — if opted in — published to your public, searchable website.' },
-];
 // AI usage is metered in AI credits: 1 credit = 1,000 model tokens (a drafted
 // answer ≈ 0.8 credits, a thread summary ≈ 3). Keep in sync with README + core.
 const tiers = [
-  { name: 'Free', price: '€0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', featured: false, cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public website on your subdomain'] },
-  { name: 'Plus', price: '€4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', featured: false, cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Public website · no Dejavue branding', 'Stale-question nudges · full analytics'] },
-  { name: 'Pro', price: '€9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', featured: true, cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
-  { name: 'Max', price: '€24.99', per: '/mo', tag: 'Unlimited scale plus the MCP server.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', featured: false, cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', 'Unlimited AI-summarized website pages', '5,000 AI credits / mo', 'MCP server for your answers', 'Everything in Pro'] },
+  { name: 'Free', price: '€0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', pill: '', pillStyle: '', cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public website on your subdomain'] },
+  { name: 'Plus', price: '€4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', pill: '', pillStyle: '', cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Public website · no Dejavue branding', 'Stale-question nudges · full analytics'] },
+  { name: 'Pro', price: '€9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', pill: 'MOST POPULAR', pillStyle: 'background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff;', cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
+  { name: 'Max', price: '€24.99', per: '/mo', tag: 'Unlimited scale, plus your answers inside Claude & ChatGPT.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', pill: 'CLAUDE & CHATGPT', pillStyle: 'background:linear-gradient(135deg,#2DD4BF,#5EEAD4); color:#052E28;', cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', 'Unlimited AI-summarized website pages', '5,000 AI credits / mo', 'Your answers inside Claude & ChatGPT (MCP)', 'Everything in Pro'] },
 ];
 
 // ---- SEO: title, description + JSON-LD structured data (marketing home) ----
 // Keyword-forward for Google ("Discord", "duplicate question", "knowledge base")
 // while staying truthful — Dejavue publishes solved threads to an opt-in public KB.
-const pageTitle = 'Dejavue — Discord Duplicate Question Bot & Knowledge Base';
+const pageTitle = 'Dejavue | Discord Duplicate Question Bot & Knowledge Base';
 const pageDescription =
   'Dejavue is a Discord bot that catches duplicate questions, runs a mark-solved workflow, and turns solved threads into a public, searchable knowledge base.';
 // One @graph so Google links the entities: Organization ← WebSite, and the
@@ -132,8 +131,8 @@ const structuredData = {
 {
   tenant ? (
     <Base
-      title={`${brand} — Knowledge Base`}
-      description={`Search ${brand}'s solved answers — kept up to date by the community.`}
+      title={`${brand} Knowledge Base`}
+      description={`Search ${brand}'s solved answers, kept up to date by the community.`}
       canonical={`${origin}/`}
     >
       <KbNav />
@@ -142,7 +141,7 @@ const structuredData = {
       <div class="kb-hero">
         <div class="kb-hero-inner">
             <h1 style="font-family:var(--headfont); font-weight:700; font-size:clamp(30px,5.2vw,46px); letter-spacing:-0.03em; margin:0; line-height:1.06;">How can we help?</h1>
-            <p style="font-size:clamp(15px,1.6vw,17px); color:var(--textmid); margin:13px 0 0;">Search {brand}'s solved answers — kept up to date by the community.</p>
+            <p style="font-size:clamp(15px,1.6vw,17px); color:var(--textmid); margin:13px 0 0;">Search {brand}'s solved answers, kept up to date by the community.</p>
             <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:12px; max-width:600px; margin:26px auto 0; background:var(--surface); border:1.5px solid var(--border2); border-radius:var(--rad); padding:15px 18px; box-shadow:0 10px 30px rgba(20,21,42,0.07);">
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
               <input type="search" name="q" placeholder={`Search ${threads.length} answers…`} aria-label="Search the knowledge base" style="flex:1; min-width:0; border:none; outline:none; background:transparent; font-size:16px; color:var(--text);" />
@@ -181,7 +180,7 @@ const structuredData = {
           {/* channels */}
           <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin:30px 0 13px;">Channels</div>
           {categories.length === 0 ? (
-            <p style="font-size:14px; color:var(--textmut);">No published answers yet — check back soon.</p>
+            <p style="font-size:14px; color:var(--textmut);">No published answers yet. Check back soon.</p>
           ) : (
             <div class="cat-grid">
               {categories.map((c) => {
@@ -234,11 +233,10 @@ const structuredData = {
             <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:21px; letter-spacing:-0.04em;">dejavue</span>
           </div>
           <div class="site-nav-links">
-            <a href="#how" style="font-size:14px; color:#9AA0C3;">How it works</a>
-            <a href="#features" style="font-size:14px; color:#9AA0C3;">Features</a>
-            <a href="#kb" style="font-size:14px; color:#9AA0C3;">Website</a>
+            <a href="#kb" style="font-size:14px; color:#9AA0C3;">Knowledge Base</a>
+            <a href="#mcp" style="font-size:14px; color:#9AA0C3;">MCP</a>
             <a href="#pricing" style="font-size:14px; color:#9AA0C3;">Pricing</a>
-            <a class="cta" href={addUrl} style="font-size:14px; font-weight:600; color:#F4F5FF; background:linear-gradient(135deg,#4F46E5,#7C3AED); padding:10px 18px; border-radius:10px; box-shadow:0 6px 18px rgba(124,58,237,0.35);">Add to Discord</a>
+            <a class="cta" href={addUrl} style="display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:#F4F5FF; background:linear-gradient(135deg,#4F46E5,#7C3AED); padding:10px 18px; border-radius:10px; box-shadow:0 6px 18px rgba(124,58,237,0.35);"><DiscordIcon size={17} />Add to Discord</a>
           </div>
         </div>
       </nav>
@@ -253,11 +251,10 @@ const structuredData = {
               <span style="width:6px; height:6px; border-radius:50%; background:#2DD4BF; box-shadow:0 0 0 4px rgba(45,212,191,0.18);"></span>
               A Discord bot for help &amp; Q&amp;A forums
             </div>
-            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(34px,8vw,62px); line-height:1.02; letter-spacing:-0.038em; margin:24px 0 0;">Never answer the same question twice.</h1>
-            <p style="font-size:clamp(16px,2.4vw,19px); line-height:1.55; color:#9AA0C3; margin:24px 0 0; max-width:520px;">Dejavue catches duplicate questions the moment they're posted, surfaces answers from past solved threads, and publishes every solution to a public, searchable website — so people find answers on Google before they even ask.</p>
+            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(34px,8vw,62px); line-height:1.02; letter-spacing:-0.038em; margin:24px 0 0;">Stop answering the same questions.</h1>
+            <p style="font-size:clamp(16px,2.4vw,19px); line-height:1.55; color:#9AA0C3; margin:24px 0 0; max-width:520px;">Dejavue uses past solutions to answer duplicates, giving your moderators less work.</p>
             <div style="display:flex; gap:14px; margin-top:36px; flex-wrap:wrap;">
-              <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);">Add to Discord — free</a>
-              <a href="#how" style="display:inline-flex; align-items:center; gap:9px; background:rgba(244,245,255,0.05); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px;">See how it works</a>
+              <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:15px 26px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);"><DiscordIcon />Add to Discord</a>
             </div>
             <div style="display:flex; align-items:center; gap:22px; margin-top:30px; color:#6F7596; font-size:13px; flex-wrap:wrap;">
               <span style="display:inline-flex; align-items:center; gap:7px;"><span style="color:#2DD4BF;">✓</span> Free tier, no card</span>
@@ -265,181 +262,48 @@ const structuredData = {
             </div>
           </div>
 
-          {/* discord mockup */}
-          <div style="position:relative;">
-            <div style="position:absolute; inset:-6% -4% -6% -4%; border-radius:50%; background:radial-gradient(circle, rgba(124,58,237,0.22), rgba(10,11,20,0) 70%);"></div>
-            <div style="position:relative; animation:dvFloat 7s ease-in-out infinite;">
-              <div style="background:#313338; border-radius:16px; overflow:hidden; box-shadow:0 30px 70px rgba(0,0,0,0.55); border:1px solid rgba(0,0,0,0.3);">
-                <div style="padding:16px 18px; border-bottom:1px solid rgba(0,0,0,0.25); display:flex; align-items:center; gap:10px;">
-                  <span style="color:#949BA4; font-size:18px;">#</span>
-                  <span style="font-weight:600; font-size:15px; color:#F2F3F5;">how do I rotate my API key?</span>
-                  <span style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; background:rgba(242,63,67,0.14); color:#F77; font-size:11px; font-weight:600; padding:4px 9px; border-radius:6px;"><span style="width:6px;height:6px;border-radius:50%;background:#F23F43;"></span>unsolved</span>
-                </div>
-                <div style="padding:16px 18px; display:flex; gap:12px;">
-                  <div style="width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg,#F0883E,#E0632C); flex-shrink:0;"></div>
-                  <div>
-                    <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-weight:600; font-size:14px; color:#F2A35E;">maya_dev</span><span style="font-size:11px; color:#949BA4;">Today at 14:02</span></div>
-                    <div style="font-size:14px; color:#DBDEE1; margin-top:3px; line-height:1.45;">Anyone know how to rotate the API key without downtime? Can't find it in settings.</div>
-                  </div>
-                </div>
-                <div style="padding:0 18px 18px;">
-                  <div style="display:flex; gap:12px;">
-                    <Echo tile="gradient" round={true} size={38} style="flex-shrink:0;" />
-                    <div style="flex:1; min-width:0;">
-                      <div style="display:flex; align-items:center; gap:7px;"><span style="font-weight:600; font-size:14px; color:#F4F5FF;">Dejavue</span><span style="background:#5865F2; color:#fff; font-size:9px; font-weight:600; padding:1px 5px; border-radius:4px; letter-spacing:0.02em;">APP</span><span style="font-size:11px; color:#949BA4;">14:02</span></div>
-                      <div style="margin-top:7px; background:#2B2D31; border-left:4px solid #7C3AED; border-radius:6px; padding:14px 16px;">
-                        <div style="display:flex; align-items:center; gap:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; color:#F4F5FF;">I&rsquo;ve seen this before</div>
-                        <div style="font-size:12.5px; color:#B5BAC1; margin-top:4px;">3 solved threads look like a match:</div>
-                        <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
-                          <div style="display:flex; align-items:center; gap:10px; background:#1E1F22; border-radius:8px; padding:10px 12px;"><span style="color:#2DD4BF; font-size:13px;">✓</span><span style="font-size:13px; color:#DBDEE1; flex:1; min-width:0;">Rotating API keys with zero downtime</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; font-weight:600;">96%</span></div>
-                          <div style="display:flex; align-items:center; gap:10px; background:#1E1F22; border-radius:8px; padding:10px 12px;"><span style="color:#2DD4BF; font-size:13px;">✓</span><span style="font-size:13px; color:#DBDEE1; flex:1; min-width:0;">Where to find key management settings</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; font-weight:600;">89%</span></div>
-                          <div style="display:flex; align-items:center; gap:10px; background:#1E1F22; border-radius:8px; padding:10px 12px;"><span style="color:#2DD4BF; font-size:13px;">✓</span><span style="font-size:13px; color:#DBDEE1; flex:1; min-width:0;">API key best practices &amp; expiry</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; font-weight:600;">81%</span></div>
-                        </div>
-                        <div style="display:flex; gap:8px; margin-top:13px; flex-wrap:wrap;">
-                          <span style="background:#248046; color:#fff; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:6px;">Use top answer &amp; close</span>
-                          <span style="background:#4E5058; color:#fff; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:6px;">Not a duplicate</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* Signature product loop: post → search → sourced answer → solved. */}
+          <HeroDemo />
         </div>
       </header>
-
-      {/* ===== HOW IT WORKS ===== */}
-      <section id="how" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px); border-top:1px solid rgba(244,245,255,0.06);">
-        <div style="max-width:1200px; margin:0 auto;">
-          <div style="text-align:center; max-width:640px; margin:0 auto;">
-            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">The loop</div>
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Detect → solve → archive → search</h2>
-            <p style="font-size:17px; line-height:1.55; color:#9AA0C3; margin:16px 0 0;">Every solved thread makes the next answer faster. Dejavue closes the loop automatically.</p>
-          </div>
-          <div class="steps-grid" style="margin-top:52px;">
-            {steps.map((s) => (
-              <div style="background:linear-gradient(180deg, rgba(27,29,51,0.9), rgba(20,21,38,0.6)); border:1px solid rgba(244,245,255,0.07); border-radius:18px; padding:26px 22px;">
-                <div style="display:flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:11px; background:rgba(124,58,237,0.16); border:1px solid rgba(167,139,250,0.25); font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; color:#C4B5FD;">{s.num}</div>
-                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; margin-top:18px; letter-spacing:-0.01em;">{s.title}</div>
-                <div style="font-size:14px; line-height:1.5; color:#9AA0C3; margin-top:8px;">{s.body}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ===== FEATURES BENTO ===== */}
-      <section id="features" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px);">
-        <div style="max-width:1200px; margin:0 auto;">
-          <div style="max-width:640px;">
-            <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Features</div>
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Built for forums that move fast</h2>
-          </div>
-          <div class="bento" style="margin-top:48px;">
-            <div class="bento-lg" style="background:linear-gradient(155deg, rgba(79,70,229,0.18), rgba(27,29,51,0.5)); border:1px solid rgba(167,139,250,0.18); border-radius:20px; padding:32px; display:flex; flex-direction:column;">
-              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Semantic search</div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:24px; letter-spacing:-0.02em; margin:10px 0 0;">Finds the answer, not the keyword</h3>
-              <p style="font-size:14.5px; line-height:1.55; color:#9AA0C3; margin:12px 0 0; max-width:380px;">pgvector embeddings match questions by meaning, so &ldquo;rotate my key&rdquo; finds &ldquo;cycle credentials&rdquo;. Keyword on Free, semantic from Plus up.</p>
-              <div style="margin-top:auto; padding-top:24px;">
-                <div style="background:#13141F; border:1px solid rgba(244,245,255,0.08); border-radius:12px; padding:12px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><span style="color:#6F7596;">/</span><span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#DBDEE1;">dejavue search</span><span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#A78BFA;">cycle credentials</span></div>
-              </div>
-            </div>
-            <div class="bento-3" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:28px;">
-              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Mark-solved workflow</div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:21px; letter-spacing:-0.02em; margin:9px 0 12px;">One click flips the tag</h3>
-              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(242,63,67,0.14); color:#F77; font-size:12px; font-weight:600; padding:5px 11px; border-radius:7px;"><span style="width:6px;height:6px;border-radius:50%;background:#F23F43;"></span>unsolved</span>
-                <span style="color:#6F7596; font-size:18px;">&rarr;</span>
-                <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(35,165,90,0.16); color:#3BE08A; font-size:12px; font-weight:600; padding:5px 11px; border-radius:7px;"><span style="color:#2DD4BF;">✓</span>solved</span>
-              </div>
-              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:14px 0 0;">Button, modal, or right-click → Mark as Answer. The accepted answer and full transcript are captured every time.</p>
-            </div>
-            <div class="bento-3" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:28px;">
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase; white-space:nowrap;">AI answers</div>
-                <span style="background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap;">PLUS &amp; UP</span>
-              </div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:21px; letter-spacing:-0.02em; margin:9px 0 12px;">Drafts answers from solved threads</h3>
-              <p style="font-size:14px; line-height:1.5; color:#9AA0C3; margin:0;">Drafted answers from Plus; website summaries, knowledge-gap clustering, and auto-FAQ on Pro &amp; Max — metered in monthly AI credits, topped up any time.</p>
-            </div>
-            <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
-              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Analytics</div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Resolution rate &amp; top helpers</h3>
-              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">Time-to-resolution and most-asked, surfaced in Discord.</p>
-            </div>
-            <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
-              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Nudges</div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Stale questions get a ping</h3>
-              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">Ping a helper role on a timer so nothing rots unanswered.</p>
-            </div>
-            <div class="bento-2" style="background:rgba(27,29,51,0.55); border:1px solid rgba(244,245,255,0.07); border-radius:20px; padding:26px;">
-              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#A78BFA; letter-spacing:0.12em; text-transform:uppercase;">Backfill</div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; letter-spacing:-0.02em; margin:9px 0 4px;">Import your whole history</h3>
-              <p style="font-size:13.5px; line-height:1.5; color:#9AA0C3; margin:0;">On setup, past threads are imported up to your tier — deduped and, if your website's on, published.</p>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* ===== KB SHOWCASE ===== */}
       <section id="kb" style="padding:clamp(48px,8vw,80px) clamp(16px,4vw,32px);">
         <div class="kb-grid" style="max-width:1200px; margin:0 auto;">
+          <PublicSiteDemo />
           <div>
             <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Your public website</div>
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,38px); letter-spacing:-0.03em; margin:14px 0 0;">Your answers, indexed by Google</h2>
-            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Every solved thread becomes a page on your own public website — a fast, near-zero-JS help center at <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">slug.dejavue.app</span> or a custom domain you own. It updates itself: each monitored channel becomes a category, and every page carries the accepted answer plus the full discussion — so visitors and Google find answers before anyone opens Discord.</p>
-            <ul style="list-style:none; padding:0; margin:24px 0 0; display:flex; flex-direction:column; gap:12px;">
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Your own subdomain — or a custom domain you own</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Each channel becomes a category; every page shows the answer + full thread</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Built for SEO: QA &amp; FAQ structured data, auto-generated sitemap, near-zero-JS pages</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Clean, AI-summarized answer pages on Pro &amp; Max</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Privacy-first: opt-in per server, aliased usernames, optional passphrase</li>
-              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Unlimited pages, refreshed automatically as questions get solved</li>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,38px); letter-spacing:-0.03em; margin:14px 0 0;">A free FAQ your users can search</h2>
+            <p style="font-size:16.5px; line-height:1.6; color:#9AA0C3; margin:18px 0 0;">Solved threads publish themselves to <span style="color:#C4B5FD; font-family:'JetBrains Mono',monospace; font-size:14px;">yourdomain.dejavue.app</span> (or your own domain), where your users and Google find them.</p>
+            <ul style="list-style:none; padding:0; margin:26px 0 0; display:flex; flex-direction:column; gap:13px;">
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Builds and updates itself</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Every answer ranks on Google</li>
+              <li style="display:flex; gap:10px; font-size:15px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Private by default: opt-in, aliased usernames</li>
             </ul>
-          </div>
-          <div style="border-radius:16px; overflow:hidden; box-shadow:0 30px 70px rgba(0,0,0,0.5); border:1px solid rgba(244,245,255,0.1);">
-            <div style="background:#EFEFF4; height:40px; display:flex; align-items:center; padding:0 14px; gap:7px;">
-              <span style="width:11px; height:11px; border-radius:50%; background:#FF5F57;"></span>
-              <span style="width:11px; height:11px; border-radius:50%; background:#FEBC2E;"></span>
-              <span style="width:11px; height:11px; border-radius:50%; background:#28C840;"></span>
-              <div style="margin-left:12px; background:#fff; border-radius:7px; height:24px; flex:1; max-width:300px; display:flex; align-items:center; padding:0 12px; font-size:12px; color:#6B7280; font-family:'JetBrains Mono',monospace;">helio.dejavue.app</div>
-            </div>
-            <div style="background:#FFFFFF; padding:30px 32px; color:#0E0F1C; min-height:330px;">
-              <div style="display:flex; align-items:center; gap:9px; margin-bottom:22px;">
-                <Echo tile="none" bubbleFill="#4F46E5" checkFill="#2DD4BF" echoFill="#A78BFA" echoOpacity={0.6} size={26} />
-                <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:17px; letter-spacing:-0.03em; color:#0E0F1C;">Helio · Help Center</span>
-                <span style="margin-left:auto; font-size:12px; color:#9AA0C3;">42 answers</span>
-              </div>
-              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#7C3AED; letter-spacing:0.1em; text-transform:uppercase;">API · category</div>
-              <h3 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-0.02em; margin:10px 0 6px; color:#0E0F1C; line-height:1.2;">How do I rotate my API key without downtime?</h3>
-              <p style="font-size:14px; line-height:1.6; color:#54586E; margin:12px 0 0;">Generate a second key from <strong style="color:#0E0F1C;">Settings → API</strong>, roll it out to your services, then revoke the old one. Both keys stay valid during the overlap, so there's no downtime.</p>
-              <div style="display:flex; gap:8px; margin-top:20px; flex-wrap:wrap;">
-                <span style="background:#F1F0FB; color:#6D5FE8; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">api-keys</span>
-                <span style="background:#F1F0FB; color:#6D5FE8; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px;">security</span>
-                <span style="background:#E6FAF5; color:#0F9B82; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">✓ solved</span>
-              </div>
-            </div>
+            <SearchDemo />
           </div>
         </div>
       </section>
 
-      {/* ===== MCP CALLOUT ===== */}
-      <section style="padding:clamp(36px,6vw,48px) clamp(16px,4vw,32px);">
+      {/* ===== AI ASSISTANT CALLOUT ===== */}
+      <section id="mcp" style="padding:clamp(36px,6vw,48px) clamp(16px,4vw,32px);">
         <div style="max-width:1200px; margin:0 auto;">
-          <div class="mcp-grid" style="position:relative; overflow:hidden; border-radius:24px; border:1px solid rgba(167,139,250,0.22); background:linear-gradient(135deg, rgba(79,70,229,0.22), rgba(124,58,237,0.12)); padding:clamp(28px,5vw,48px) clamp(20px,4vw,52px);">
+          <div class="assistant-grid" style="position:relative; overflow:hidden; border-radius:24px; border:1px solid rgba(167,139,250,0.22); background:linear-gradient(135deg, rgba(79,70,229,0.22), rgba(124,58,237,0.12)); padding:clamp(28px,5vw,44px) clamp(20px,4vw,48px);">
             <div style="position:absolute; right:-60px; top:-60px; width:320px; height:320px; border-radius:50%; background:radial-gradient(circle, rgba(45,212,191,0.16), rgba(10,11,20,0) 70%);"></div>
             <div style="position:relative;">
-              <span style="display:inline-block; background:#0A0B14; color:#2DD4BF; font-size:11px; font-weight:600; padding:4px 11px; border-radius:999px; letter-spacing:0.04em;">MAX TIER</span>
-              <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(26px,4.5vw,34px); letter-spacing:-0.03em; margin:16px 0 0;">Your community is an MCP server</h2>
-              <p style="font-size:16px; line-height:1.6; color:#CfCfE6; margin:14px 0 0; max-width:480px;">Each Max guild exposes its published answers as a Streamable HTTP MCP server. Point Claude or any MCP client at it and let your AI answer from the questions your community already solved.</p>
+              <span style="display:inline-block; background:#2DD4BF; color:#052E28; font-size:11px; font-weight:700; padding:4px 11px; border-radius:999px; letter-spacing:0.04em;">MAX TIER</span>
+              {/* The rotating model name is aria-hidden; screen readers get the stable "Claude". */}
+              <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(26px,4.5vw,34px); letter-spacing:-0.03em; line-height:1.16; margin:16px 0 0;">
+                Ask <span style="position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap;">Claude</span><span class="model-rotate" data-model-rotator aria-hidden="true" style="white-space:nowrap;"><span data-model-headline>Fable 5</span><i class="model-caret" aria-hidden="true"></i></span>.<br />Get your community&rsquo;s answer.
+              </h2>
+              <p style="font-size:16px; line-height:1.6; color:#CfCfE6; margin:14px 0 0; max-width:480px;">Max makes your published answers searchable by the AI assistants your members already use. Ask about your product in Claude or ChatGPT, and instead of guessing, it answers with the fix your community already wrote.</p>
+              <ul style="list-style:none; padding:0; margin:22px 0 0; display:flex; flex-direction:column; gap:11px;">
+                <li style="display:flex; gap:10px; font-size:14.5px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Works in Claude, ChatGPT, Cursor, and anywhere else your members ask</li>
+                <li style="display:flex; gap:10px; font-size:14.5px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> Every answer cites the solved thread it came from</li>
+                <li style="display:flex; gap:10px; font-size:14.5px; color:#DBDEE1;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span> One link to connect, no code (it speaks MCP, for those who do)</li>
+              </ul>
             </div>
-            <div style="position:relative; background:#0A0B14; border:1px solid rgba(244,245,255,0.1); border-radius:14px; padding:20px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.7; overflow-x:auto;">
-              <div style="color:#6F7596;"># add to your MCP client</div>
-              <div style="color:#A78BFA; margin-top:6px;">helio.dejavue.app<span style="color:#F4F5FF;">/mcp</span></div>
-              <div style="color:#6F7596; margin-top:14px;"># exposes</div>
-              <div style="color:#2DD4BF; margin-top:6px;">search_knowledge_base<span style="color:#9AA0C3;">(query)</span></div>
-            </div>
+            <AssistantDemo />
           </div>
         </div>
       </section>
@@ -450,13 +314,13 @@ const structuredData = {
           <div style="text-align:center; max-width:600px; margin:0 auto;">
             <div style="font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.2em; text-transform:uppercase; color:#A78BFA; font-weight:500;">Pricing</div>
             <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,5vw,40px); letter-spacing:-0.03em; margin:14px 0 0;">Per server, billed in Discord</h2>
-            <p style="font-size:16px; line-height:1.55; color:#9AA0C3; margin:14px 0 0;">Keyword features are free forever. Semantic search anchors the middle; AI is metered in credits — a taster on Plus, serious budgets on Pro &amp; Max.</p>
+            <p style="font-size:16px; line-height:1.55; color:#9AA0C3; margin:14px 0 0;">Keyword features are free forever. Semantic search anchors the middle; AI is metered in credits: a taster on Plus, serious budgets on Pro &amp; Max.</p>
           </div>
           <div class="pricing-grid" style="margin-top:48px;">
             {tiers.map((t) => (
               <div style={`position:relative; background:${t.bg}; border:1px solid ${t.border}; border-radius:20px; padding:28px 24px; display:flex; flex-direction:column;`}>
-                {t.featured && (
-                  <span style="position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff; font-size:10px; font-weight:600; padding:4px 12px; border-radius:999px; letter-spacing:0.04em; white-space:nowrap;">MOST POPULAR</span>
+                {t.pill && (
+                  <span style={`position:absolute; top:-11px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:600; padding:4px 12px; border-radius:999px; letter-spacing:0.04em; white-space:nowrap; ${t.pillStyle}`}>{t.pill}</span>
                 )}
                 <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:20px; letter-spacing:-0.01em;">{t.name}</div>
                 <div style="display:flex; align-items:baseline; gap:4px; margin-top:10px;">
@@ -470,24 +334,23 @@ const structuredData = {
                     <li style="display:flex; gap:9px; font-size:13.5px; color:#DBDEE1; line-height:1.45;"><span style="color:#2DD4BF; flex-shrink:0;">✓</span><span>{f}</span></li>
                   ))}
                 </ul>
-                <a href={addUrl} style={`display:block; text-align:center; margin-top:22px; padding:12px; border-radius:11px; font-size:14px; font-weight:600; ${t.btnStyle}`}>{t.cta}</a>
+                <a href={addUrl} style={`display:flex; align-items:center; justify-content:center; gap:8px; text-align:center; margin-top:22px; padding:12px; border-radius:11px; font-size:14px; font-weight:600; ${t.btnStyle}`}>{t.cta === 'Add to Discord' && <DiscordIcon size={17} />}{t.cta}</a>
               </div>
             ))}
           </div>
-          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">Importing your existing history is free, up to each tier's indexed-message limit. One-time add-ons — <span style="color:#9AA0C3;">Custom domain · €29.99</span>, <span style="color:#9AA0C3;">AI top-up · +250 credits for €1.99 (stacks, never expires)</span>.</p>
+          <p style="text-align:center; font-size:13px; color:#6F7596; margin-top:28px;">Importing your existing history is free, up to each tier's indexed-message limit. One-time add-ons: <span style="color:#9AA0C3;">Custom domain · €29.99</span>, <span style="color:#9AA0C3;">AI top-up · +250 credits for €1.99 (stacks, never expires)</span>.</p>
         </div>
       </section>
 
       {/* ===== CTA ===== */}
       <section style="padding:clamp(24px,5vw,40px) clamp(16px,4vw,32px) clamp(56px,9vw,88px);">
         <div style="max-width:1000px; margin:0 auto; text-align:center; position:relative;">
-          <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:560px; height:360px; max-width:100%; background:radial-gradient(circle, rgba(124,58,237,0.22), rgba(10,11,20,0) 70%); pointer-events:none;"></div>
+          <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:560px; height:360px; max-width:100%; background:radial-gradient(ellipse, rgba(124,58,237,0.22), rgba(10,11,20,0) 70%); pointer-events:none;"></div>
           <div style="position:relative;">
             <Echo tile="gradient" round={false} size={64} style="margin:0 auto; border-radius:16px; box-shadow:0 14px 36px rgba(124,58,237,0.4);" />
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(30px,6vw,44px); letter-spacing:-0.03em; margin:26px 0 0; line-height:1.05;">Stop answering the same question twice.</h2>
-            <div style="display:flex; gap:14px; justify-content:center; margin-top:32px; flex-wrap:wrap;">
-              <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:16px 30px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);">Add to Discord — free</a>
-              <a href="#pricing" style="display:inline-flex; align-items:center; gap:9px; background:rgba(244,245,255,0.05); border:1px solid rgba(244,245,255,0.16); color:#F4F5FF; font-size:15px; font-weight:600; padding:16px 30px; border-radius:12px;">See pricing</a>
+            <h2 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(30px,6vw,44px); letter-spacing:-0.03em; margin:26px 0 0; line-height:1.05;">Your time is valuable. Save it now.</h2>
+            <div style="display:flex; justify-content:center; margin-top:32px;">
+              <a href={addUrl} style="display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#F4F5FF; font-size:15px; font-weight:600; padding:16px 30px; border-radius:12px; box-shadow:0 12px 30px rgba(124,58,237,0.4);"><DiscordIcon />Add to Discord</a>
             </div>
           </div>
         </div>
@@ -499,7 +362,6 @@ const structuredData = {
           <div style="display:flex; align-items:center; gap:10px;">
             <Echo tile="none" bubbleFill="#F4F5FF" checkFill="#2DD4BF" showEcho={false} size={22} />
             <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:16px; letter-spacing:-0.03em;">dejavue</span>
-            <span style="font-size:13px; color:#6F7596; margin-left:8px;">Déjà vu, handled.</span>
           </div>
           <div style="display:flex; gap:24px; font-size:13px; color:#9AA0C3; flex-wrap:wrap;">
             <a href="/terms" style="color:#9AA0C3;">Terms of Service</a>
@@ -511,3 +373,34 @@ const structuredData = {
     </SiteLayout>
   )
 }
+
+<style>
+  /* Typewriter caret for the rotating model name in the AI-assistant callout.
+     The type/delete loop lives in AssistantDemo.astro and toggles .is-morphing. */
+  .model-caret {
+    display: inline-block;
+    width: 0;
+    height: 0.78em;
+    border-radius: 2px;
+    background: #a78bfa;
+    opacity: 0;
+    vertical-align: -0.04em;
+    transition: opacity 200ms ease;
+  }
+
+  .model-rotate.is-morphing .model-caret {
+    width: 3px;
+    margin-left: 4px;
+    opacity: 1;
+    animation: model-caret-blink 700ms steps(1, end) infinite;
+  }
+
+  @keyframes model-caret-blink {
+    0%, 55% { opacity: 1; }
+    56%, 100% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .model-caret { display: none; }
+  }
+</style>
