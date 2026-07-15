@@ -74,11 +74,15 @@ const pageUrl = canonical ?? `${origin}/`;
       *, *::before, *::after { box-sizing: border-box; }
       /* Decorative glows deliberately extend past their sections. Clip them on
          the document scroll root as well as the body so mobile browsers cannot
-         pan sideways into that off-canvas area. */
-      html { scrollbar-gutter: stable; overflow-x: hidden; }
+         pan sideways into that off-canvas area. Use `clip`, not `hidden`:
+         `overflow-x: hidden` coerces `overflow-y` to `auto`, turning html/body
+         into scroll containers and breaking the sticky nav. `overflow-x: clip`
+         pairs legally with `overflow-y: visible`, so it clips the horizontal
+         overflow without making these elements scroll — keeping position:sticky. */
+      html { scrollbar-gutter: stable; overflow-x: clip; }
       /* Scoped to .site-theme so it can't leak into the KB (light) layout, whose
          global body rule is bundled into the same page. */
-      body.site-theme { margin: 0; background: #0A0B14; font-family: 'Inter', system-ui, sans-serif; color: #F4F5FF; overflow-x: hidden; }
+      body.site-theme { margin: 0; background: #0A0B14; font-family: 'Inter', system-ui, sans-serif; color: #F4F5FF; overflow-x: clip; }
       body.site-theme a { text-decoration: none; }
       ::selection { background: rgba(124,58,237,0.4); color: #fff; }
 
