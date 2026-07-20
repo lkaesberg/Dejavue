@@ -12,7 +12,7 @@ import {
 import { childLogger, getEnv, SEARCH_PRESET_SIMILARITY } from '@dejavue/core';
 import {
   type ChannelMode,
-  createBackfillJob,
+  countIndexedMessages,
   ensureChannelSync,
   ensureGuildConfig,
   getDb,
@@ -23,17 +23,17 @@ import {
   setChannelGuidelines,
   updateGuildConfig,
 } from '@dejavue/db';
-import { enqueueBackfill } from '@dejavue/queue';
+import { botPermissionWarning } from '../lib/botPerms';
 import { refreshChannelTopic } from '../lib/channelFit';
 import { handleCustomize } from '../lib/customize';
 import { COLOR, searchResultsEmbed } from '../lib/embeds';
 import { ensureForumTags } from '../lib/forum';
 import { handleInsights, handleSettings, renderSetupHub } from '../lib/hubs';
-import { allTargets, type ReindexTarget, startReindex } from '../lib/reindexTrigger';
+import { allTargets, type ReindexTarget, startForumImport, startReindex } from '../lib/reindexTrigger';
 import { eph } from '../lib/reply';
 import { getGuildTier, limitsFor } from '../lib/tier';
 import { scheduleTrackedCapture } from '../lib/trackedChannel';
-import { upsellPayload } from '../lib/upsell';
+import { channelCapUpsellLine, upsellPayload } from '../lib/upsell';
 import type { SlashCommand } from './types';
 
 const log = childLogger({ mod: 'cmd:dejavue' });
@@ -146,10 +146,10 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
 
   const picked = interaction.options.getChannel('channel', false);
   if (!picked) {
-    await interaction.reply({
-      ...(await renderSetupHub(interaction.guild)),
-      flags: MessageFlags.Ephemeral,
-    });
+    // Defer first: renderSetupHub does several DB round-trips and could otherwise
+    // blow Discord's 3s window into a hard "did not respond".
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.editReply(await renderSetupHub(interaction.guild));
     return;
   }
 
@@ -170,7 +170,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       await interaction.editReply(
         upsellPayload({
           title: 'Upgrade for more forum channels',
-          description: `Your plan monitors up to ${limits.maxForumChannels} forum channel(s). Upgrade to **Plus** (3), **Pro** (5), or **Max** (unlimited).`,
+          description: `Your plan monitors up to ${limits.maxForumChannels} forum channel(s). ${channelCapUpsellLine('forum')}`,
           skuId: getEnv().SKU_PLUS,
         }),
       );
@@ -203,11 +203,16 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
         log.warn({ err, channel: forum.id }, 'failed to build channel topic'),
       );
     }
-    const bfJob = await createBackfillJob(db, { guildId, channelId: forum.id, entitlementId: null });
-    await enqueueBackfill({ backfillJobId: bfJob.id });
+    const imp = await startForumImport(interaction, forum.id);
+    const importNote = imp.resumed
+      ? ' 📥 An import of this channel is already running — it resumes where it left off.'
+      : imp.posted
+        ? ' 📥 Importing existing threads now — the progress message below updates live and turns ✅ when everything is in.'
+        : ' 📥 Importing existing threads in the background — run `/dejavue setup` (no options) to watch the status.';
     const note =
-      ' Importing existing threads in the background — they appear as they finish. Everything indexed ' +
-      'is published to your knowledge base automatically; run `/dejavue rescan` anytime to refresh.';
+      `${importNote} Everything indexed ` +
+      'is published to your knowledge base automatically; run `/dejavue rescan` anytime to refresh.' +
+      botPermissionWarning(forum, 'forum');
     await interaction.editReply(
       mode === 'knowledge'
         ? `✅ Now archiving <#${forum.id}> as a **knowledge** channel — every thread is added automatically.${note}`
@@ -222,7 +227,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       await interaction.editReply(
         upsellPayload({
           title: 'Upgrade to track more channels',
-          description: `Your plan indexes up to ${limits.maxTrackedChannels} normal channel(s). Upgrade to **Plus** (3), **Pro** (10), or **Max** (unlimited).`,
+          description: `Your plan indexes up to ${limits.maxTrackedChannels} normal channel(s). ${channelCapUpsellLine('tracked')}`,
           skuId: getEnv().SKU_PLUS,
         }),
       );
@@ -236,7 +241,8 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply(
       `✅ Now indexing <#${channel.id}> as a knowledge base. I'll capture recent conversations now — ` +
         'everything indexed is searchable and published to your knowledge base automatically.\n' +
-        '_Run `/dejavue rescan` to re-scan full history, or `/dejavue setup` (no options) for status._',
+        '_Run `/dejavue rescan` to re-scan full history, or `/dejavue setup` (no options) for status._' +
+        botPermissionWarning(channel, 'text'),
     );
     return;
   }
@@ -318,8 +324,11 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
     results = await keywordSearch(db, { guildId, query, limit: 5 });
   }
 
+  // On an empty result, tell a fresh server "nothing indexed yet" instead of
+  // implying their keywords were wrong.
+  const nothingIndexed = results.length === 0 && (await countIndexedMessages(db, guildId)) === 0;
   await interaction.editReply({
-    embeds: [searchResultsEmbed(guildId, query, results, !limits.removeBranding)],
+    embeds: [searchResultsEmbed(guildId, query, results, !limits.removeBranding, { nothingIndexed })],
   });
 }
 

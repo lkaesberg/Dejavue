@@ -72,6 +72,10 @@ const EnvSchema = z.object({
   QUOTA_CREDITS_MAX: z.coerce.number().int().positive().default(5_000),
   // MCP endpoint burst limit (requests/minute, Max tier).
   MCP_RATE_PER_MIN: z.coerce.number().int().positive().default(30),
+  // How many channel history jobs (backfill / reindex) the worker runs in parallel.
+  // Each re-embeds on a CPU model, so parallelism trades throughput for memory — raise
+  // on a roomy host, keep at 1 on a memory-constrained one to avoid OOM.
+  CHANNEL_JOB_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   // Dev-only: force a tier regardless of entitlements (e.g. 'pro' locally so all
   // features are exercisable without real SKUs). Leave unset in production.

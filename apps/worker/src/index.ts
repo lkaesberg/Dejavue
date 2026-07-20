@@ -1,6 +1,6 @@
 import '@dejavue/core/env-preload';
 import { createServer, type Server } from 'node:http';
-import { installCrashHandlers, logger, notify, notifyAsync } from '@dejavue/core';
+import { getEnv, installCrashHandlers, logger, notify, notifyAsync } from '@dejavue/core';
 import { getSql } from '@dejavue/db';
 import {
   type BackfillForumJob,
@@ -30,6 +30,13 @@ import { handleSummarizeThread } from './jobs/summarizeThread';
 
 const log = logger();
 installCrashHandlers('worker');
+
+// How many channel history jobs (backfill / reindex) may run in parallel. Bounded so a
+// "Reindex all" over many channels makes visible progress on several at once instead of
+// serializing behind the first, while the shared REST queue still throttles Discord.
+// Each job re-embeds on a CPU model, so this also trades memory for throughput — hence
+// env-tunable (CHANNEL_JOB_CONCURRENCY), conservative default, set to 1 on a small host.
+const CHANNEL_JOB_CONCURRENCY = getEnv().CHANNEL_JOB_CONCURRENCY;
 
 /**
  * Liveness endpoint for deploy orchestration: 200 when the DB is reachable.
@@ -61,10 +68,21 @@ async function main(): Promise<void> {
   await work<NudgeStaleJob>(QUEUES.NUDGE_STALE, handleNudgeStale);
   await work<RevalidateKbJob>(QUEUES.REVALIDATE_KB, handleRevalidateKb);
   await work<IngestAttachmentJob>(QUEUES.INGEST_ATTACHMENT, handleIngestAttachment);
-  // Backfill is long-running; cap concurrency to 1 to be gentle on Discord REST.
-  await work<BackfillForumJob>(QUEUES.BACKFILL_FORUM, handleBackfillForum, { batchSize: 1 });
-  // Reindex is also long-running (paginates full history + re-embeds); same cap.
-  await work<ReindexChannelJob>(QUEUES.REINDEX_CHANNEL, handleReindexChannel, { batchSize: 1 });
+  // Backfill/reindex each paginate a channel's full history and re-embed on a CPU
+  // model, so one job runs for minutes. They all share ONE discord.js REST client
+  // whose queue already enforces Discord's rate limits, so a few channels can run at
+  // once safely. localConcurrency spawns that many parallel workers; without it (the
+  // old batchSize:1 default of localConcurrency:1) a multi-channel "Reindex all"
+  // processed strictly one channel at a time and the rest sat stuck in "reindexing"
+  // for the whole run. batchSize stays 1 so each worker claims exactly one job.
+  await work<BackfillForumJob>(QUEUES.BACKFILL_FORUM, handleBackfillForum, {
+    batchSize: 1,
+    localConcurrency: CHANNEL_JOB_CONCURRENCY,
+  });
+  await work<ReindexChannelJob>(QUEUES.REINDEX_CHANNEL, handleReindexChannel, {
+    batchSize: 1,
+    localConcurrency: CHANNEL_JOB_CONCURRENCY,
+  });
 
   // Hourly stale-question sweep (Plus+). Other generative jobs are on-demand.
   await schedule(QUEUES.NUDGE_STALE, '0 * * * *');

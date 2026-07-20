@@ -6,6 +6,7 @@ export interface StaleThread {
   threadRowId: string;
   threadId: string;
   channelId: string;
+  title: string;
 }
 
 export async function listGuildsWithNudges(db: Database): Promise<GuildConfig[]> {
@@ -24,6 +25,7 @@ export async function getStaleUnansweredThreads(
       threadRowId: thread.id,
       threadId: thread.threadId,
       channelId: thread.channelId,
+      title: thread.title,
     })
     .from(thread)
     .where(

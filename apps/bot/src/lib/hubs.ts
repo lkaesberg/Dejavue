@@ -27,7 +27,6 @@ import {
   getEnv,
 } from '@dejavue/core';
 import {
-  type ChannelSync,
   channelMode,
   checkQuota,
   type QuotaStatus,
@@ -38,6 +37,7 @@ import {
   ensureGuildConfig,
   getDb,
   getGuildConfig,
+  listActiveBackfillJobs,
   listActiveReindexJobs,
   listChannelSync,
   resolutionStats,
@@ -51,6 +51,7 @@ import { runFaq, runGaps } from './generate';
 import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
 import { allTargets, startReindex } from './reindexTrigger';
+import { channelSyncDisplay, joinChannelLines, type LiveJobDisplay } from './syncDisplay';
 import { getGuildTier, limitsFor } from './tier';
 import { prepareTopUpSkus } from './topUp';
 import { premiumButtonRows, upsellPayload } from './upsell';
@@ -80,13 +81,6 @@ const ID = {
 
 const isAdmin = (i: { memberPermissions?: { has(p: bigint): boolean } | null }): boolean =>
   !!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
-
-const sinceLabel = (ms: number): string => {
-  const s = Math.max(1, Math.round((Date.now() - ms) / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  return `${Math.round(s / 3600)}h`;
-};
 
 // ---------------------------------------------------------------------------
 // Settings hub — stale nudges, channel-fit, off-topic guard (all Plus)
@@ -185,54 +179,25 @@ export async function handleSettings(interaction: ChatInputCommandInteraction): 
     await interaction.reply(eph('You need the **Manage Server** permission to change settings.'));
     return;
   }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const limits = limitsFor(await getGuildTier(interaction.guildId!));
   if (!limits.semanticSearch) {
-    await interaction.reply({
-      ...upsellPayload({
+    await interaction.editReply(
+      upsellPayload({
         title: 'Settings are Plus features',
         description:
           'Stale-question nudges, channel-fit suggestions and the off-topic guard are part of **Plus**.',
         skuId: getEnv().SKU_PLUS,
       }),
-      flags: MessageFlags.Ephemeral,
-    });
+    );
     return;
   }
-  await interaction.reply({ ...(await renderSettingsHub(interaction.guildId!)), flags: MessageFlags.Ephemeral });
+  await interaction.editReply(await renderSettingsHub(interaction.guildId!));
 }
 
 // ---------------------------------------------------------------------------
 // Setup (channel) hub — status + per-channel freshness + remove / reindex / demo
 // ---------------------------------------------------------------------------
-
-function staleReasonLabel(reason: string | null): string {
-  switch (reason) {
-    case 'cap':
-      return 'index full';
-    case 'gap':
-      return 'catching up';
-    case 'delete':
-    case 'edit':
-      return 'syncing changes';
-    default:
-      return 'behind';
-  }
-}
-
-function channelSyncDisplay(
-  sync: ChannelSync | undefined,
-  live: { processed: number; total: number } | undefined,
-): string {
-  if (live) {
-    const pct = live.total > 0 ? ` ${Math.round((live.processed / live.total) * 100)}%` : '';
-    return `⏳ reindexing…${pct}`;
-  }
-  if (!sync || sync.state === 'never') return '⛔ not yet indexed';
-  if (sync.state === 'reindexing') return '⏳ reindexing…';
-  if (sync.state === 'stale') return `⚠️ ${staleReasonLabel(sync.staleReason)}`;
-  const when = sync.lastReindexAt ? `, reindexed ${sinceLabel(sync.lastReindexAt.getTime())} ago` : '';
-  return `✅ up to date · ${sync.indexedMessageCount.toLocaleString()} msgs${when}`;
-}
 
 export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> {
   const db = getDb();
@@ -254,9 +219,14 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
       : '';
 
   const syncMap = new Map((await listChannelSync(db, guildId)).map((r) => [r.channelId, r]));
-  const liveMap = new Map(
-    (await listActiveReindexJobs(db, guildId)).map((j) => [j.channelId, { processed: j.processed, total: j.total }]),
-  );
+  // Live overlay: a running first-setup import or re-scan beats the stored sync state.
+  const liveMap = new Map<string, LiveJobDisplay>();
+  for (const j of await listActiveBackfillJobs(db, guildId)) {
+    liveMap.set(j.channelId, { processed: j.processed, total: j.total, flavor: 'import' });
+  }
+  for (const j of await listActiveReindexJobs(db, guildId)) {
+    liveMap.set(j.channelId, { processed: j.processed, total: j.total, flavor: 'rescan' });
+  }
   const line = (id: string, suffix = ''): string =>
     `${channelSyncDisplay(syncMap.get(id), liveMap.get(id))}\n<#${id}>${suffix}`;
   // Channels past the tier's cap (e.g. after a downgrade) stay configured but
@@ -290,13 +260,13 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
       {
         name: `Forums (${cfg?.forumChannelIds.length ?? 0} / ${channelCap})`,
         value: cfg?.forumChannelIds.length
-          ? cfg.forumChannelIds.map(forumLine).join('\n')
+          ? joinChannelLines(cfg.forumChannelIds.map(forumLine))
           : '_none — `/dejavue setup #forum mode`_',
       },
       {
         name: `Tracked channels (${cfg?.trackedChannelIds.length ?? 0})`,
         value: cfg?.trackedChannelIds.length
-          ? cfg.trackedChannelIds.map((id) => line(id)).join('\n')
+          ? joinChannelLines(cfg.trackedChannelIds.map((id) => line(id)))
           : '_none — `/dejavue setup #channel`_',
       },
       {
@@ -348,6 +318,7 @@ function formatDuration(seconds: number | null): string {
 }
 
 export async function handleInsights(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guildId = interaction.guildId!;
   const db = getDb();
   const limits = limitsFor(await getGuildTier(guildId));
@@ -361,6 +332,11 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
       { name: 'Open', value: String(counts.open), inline: true },
       { name: 'Unsolved', value: String(counts.unsolved), inline: true },
     );
+  if (total === 0) {
+    embed.setDescription(
+      'No questions tracked yet — add a help channel with `/dejavue setup`, or hit **Create demo** in `/dejavue setup` to try it out.',
+    );
+  }
 
   if (limits.analytics === 'full') {
     const [stats, helpers] = await Promise.all([resolutionStats(db, guildId), topHelpers(db, guildId, 5)]);
@@ -413,7 +389,7 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
     const skus = [...topUpSkus, ...(maxSku ? [maxSku] : [])];
     if (skus.length > 0) components.push(...premiumButtonRows(skus));
   }
-  await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
+  await interaction.editReply({ embeds: [embed], components });
 }
 
 /** Render `▰▰▰▰▰▰▱▱▱▱ 620 / 1,000 credits (+250 top-up) · ≈ 470 drafts left`. */
@@ -498,7 +474,8 @@ export async function handleHubButton(interaction: ButtonInteraction): Promise<v
       const { runDemo } = await import('./demo');
       const res = await runDemo(interaction.guild);
       await interaction.editReply(
-        `✅ Created <#${res.forumId}> with **${res.solved}** solved examples and **${res.fresh}** fresh questions.`,
+        `✅ Created <#${res.forumId}> with **${res.solved}** solved examples and **${res.fresh}** fresh questions.\n` +
+          `_Done exploring? Just delete <#${res.forumId}> and I'll clean everything up automatically._`,
       );
     } catch {
       await interaction.editReply('Demo failed — I need permission to create a forum channel.');

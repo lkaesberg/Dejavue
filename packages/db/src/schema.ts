@@ -476,6 +476,8 @@ export const backfillJob = pgTable(
     total: integer('total').notNull().default(0),
     processed: integer('processed').notNull().default(0),
     failed: integer('failed').notNull().default(0),
+    // The one live progress message the worker continuously edits (null → silent import).
+    statusChannelId: text('status_channel_id'),
     statusMessageId: text('status_message_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

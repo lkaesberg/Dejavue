@@ -32,9 +32,10 @@ export async function handleNudgeStale(job: NudgeStaleJob): Promise<void> {
     for (const t of stale) {
       try {
         const mention = cfg.nudgeHelperRoleId ? `<@&${cfg.nudgeHelperRoleId}> ` : '';
+        const title = t.title?.trim() ? `**"${t.title.trim().slice(0, 150)}"** ` : 'This question ';
         await postMessage(
           t.threadId,
-          `${mention}⏳ This question has been open for ${cfg.nudgeAfterHours}h without a solution — anyone able to help?`,
+          `${mention}⏳ ${title}has been waiting ${cfg.nudgeAfterHours}h without a solution — anyone able to help?`,
         );
         await markThreadNudged(db, t.threadRowId);
       } catch (err) {

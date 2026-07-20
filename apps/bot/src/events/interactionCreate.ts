@@ -79,20 +79,16 @@ async function acceptDuplicate(
     if (dupTag) await applyTag(channel, dupTag).catch(() => undefined);
   }
 
+  // A borrowed answer has no helper in *this* thread — don't pass answerAuthorId, so
+  // accepting a duplicate never inflates anyone's top-helpers count.
   await solveThread(channel, {
     answerText: answerText || `Duplicate of ${url}`,
-    answerAuthorId: solverId,
     solverId,
   });
   await closeThread(channel);
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
-  if (interaction.customId === DISMISS_BUTTON_ID) {
-    await interaction.message.delete().catch(() => undefined);
-    return;
-  }
-
   const channel = interaction.channel;
   if (!channel || !channel.isThread() || !forumParent(channel)) {
     await interaction.reply(eph('Use this inside a forum post.'));
@@ -101,6 +97,13 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
   const isOp = await isThreadOp(channel, interaction.user.id);
   if (!canResolveThread(interaction.memberPermissions, isOp)) {
     await interaction.reply(eph(NO_PERMISSION_MESSAGE));
+    return;
+  }
+
+  if (interaction.customId === DISMISS_BUTTON_ID) {
+    // Ack first (avoids Discord's "interaction failed" flash), then remove the suggestion.
+    await interaction.deferUpdate();
+    await interaction.message.delete().catch(() => undefined);
     return;
   }
 
@@ -175,6 +178,9 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     }
   } catch (err) {
     log.error({ err }, 'interaction handler failed');
-    await safeReply(interaction, 'Something went wrong handling that.');
+    await safeReply(
+      interaction,
+      '⚠️ Something went wrong handling that — please try again in a moment. If it keeps happening, check that I have the permissions listed in `/dejavue setup`.',
+    );
   }
 }

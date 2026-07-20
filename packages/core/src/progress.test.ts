@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { genProgressEmbed, reindexProgressEmbed, renderProgressBar } from './progress';
+import { backfillProgressEmbed, genProgressEmbed, reindexProgressEmbed, renderProgressBar } from './progress';
 
 describe('renderProgressBar', () => {
   it('renders a percentage bar', () => {
@@ -34,6 +34,39 @@ describe('reindexProgressEmbed', () => {
     const e = reindexProgressEmbed({ channelLabel: '#x', kind: 'forum', phase: 'failed', error: 'boom' });
     expect(e.description).toContain('boom');
     expect(e.description).toContain('rescan');
+  });
+});
+
+describe('backfillProgressEmbed', () => {
+  it('renders the importing phase with a progress bar', () => {
+    const e = backfillProgressEmbed({ channelLabel: '<#1>', phase: 'importing', done: 3, total: 10 });
+    expect(e.title).toContain('Importing existing posts');
+    expect(e.description).toContain('%');
+    expect(e.description).toContain('3 / 10');
+  });
+
+  it('summarizes the done state as up to date', () => {
+    const e = backfillProgressEmbed({ channelLabel: '<#1>', phase: 'done', done: 42, total: 42 });
+    expect(e.title).toContain('up to date');
+    expect(e.description).toContain('Imported 42 posts');
+    expect(e.description).toContain('indexed automatically');
+  });
+
+  it('mentions failed imports in the done state', () => {
+    const e = backfillProgressEmbed({ channelLabel: '<#1>', phase: 'done', done: 40, total: 42, failedCount: 2 });
+    expect(e.description).toContain('2 could not be imported');
+  });
+
+  it('explains the cap when the import stopped early', () => {
+    const e = backfillProgressEmbed({ channelLabel: '<#1>', phase: 'done', done: 10, total: 42, capped: true });
+    expect(e.title).toContain('index full');
+    expect(e.description).toContain('rescan');
+  });
+
+  it('renders a resumable failure', () => {
+    const e = backfillProgressEmbed({ channelLabel: '<#1>', phase: 'failed', error: 'boom' });
+    expect(e.description).toContain('boom');
+    expect(e.description).toContain('Progress is saved');
   });
 });
 

@@ -283,14 +283,12 @@ export async function handleCustomize(interaction: ChatInputCommandInteraction):
     await interaction.reply(eph('You need the **Manage Server** permission to customize the knowledge base.'));
     return;
   }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guildId = interaction.guildId!;
   const db = getDb();
   const cfg = await ensureGuildConfig(db, guildId);
   const tier = await getGuildTier(guildId);
-  await interaction.reply({
-    ...hubPayload(cfg, tier, getEnv().KB_BASE_DOMAIN),
-    flags: MessageFlags.Ephemeral,
-  });
+  await interaction.editReply(hubPayload(cfg, tier, getEnv().KB_BASE_DOMAIN));
 }
 
 async function rerender(

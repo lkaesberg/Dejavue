@@ -1,13 +1,17 @@
 import { buildEmbeddingText, embed, embeddingModelId } from '@dejavue/ai';
-import { childLogger, getEnv } from '@dejavue/core';
+import { backfillProgressEmbed, childLogger, getEnv } from '@dejavue/core';
 import {
   channelMode,
+  completeReindex,
   countIndexedMessages,
+  countIndexedMessagesInChannel,
+  ensureChannelSync,
   getBackfillJob,
   getDb,
   getGuildConfig,
   getThreadByDiscordId,
   listEmbeddedThreadIdsInChannel,
+  markChannelStale,
   markEntitlementConsumed,
   semanticSearch,
   setDuplicateOf,
@@ -24,6 +28,7 @@ import {
   fetchStarterMessage,
   type RawThread,
 } from '../lib/discordRest';
+import { LiveProgress } from '../lib/progress';
 import { guildLimits } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:backfill-forum' });
@@ -42,7 +47,15 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   const bf = await getBackfillJob(db, job.backfillJobId);
   if (!bf || bf.status === 'completed') return;
 
+  // The one live progress message posted at setup (null → silent import).
+  const live =
+    bf.statusChannelId && bf.statusMessageId
+      ? new LiveProgress({ channelId: bf.statusChannelId, messageId: bf.statusMessageId })
+      : null;
+  const label = `<#${bf.channelId}>`;
+
   await updateBackfillJob(db, bf.id, { status: 'running' });
+  live?.update(backfillProgressEmbed({ channelLabel: label, phase: 'listing', done: 0 }));
   const cfg = await getGuildConfig(db, bf.guildId);
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model); // the actual active model id for provenance
@@ -70,6 +83,14 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   } catch (err) {
     log.error({ err, jobId: bf.id }, 'backfill: failed to list threads');
     await updateBackfillJob(db, bf.id, { status: 'failed' });
+    await markChannelStale(db, bf.guildId, bf.channelId, 'forum', 'gap').catch(() => undefined);
+    await live?.fail(
+      backfillProgressEmbed({
+        channelLabel: label,
+        phase: 'failed',
+        error: 'Could not read the channel history.',
+      }),
+    );
     return;
   }
 
@@ -77,6 +98,9 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   // canonical — acyclic and stable across re-imports.
   all.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
   await updateBackfillJob(db, bf.id, { total: all.length });
+  live?.update(
+    backfillProgressEmbed({ channelLabel: label, phase: 'importing', done: bf.processed, total: all.length }),
+  );
 
   // Tier limit: stop importing once at the unified index cap.
   let indexedMessages = await countIndexedMessages(db, bf.guildId);
@@ -171,6 +195,14 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
         failed,
         processedThreadIds: [...processed],
       });
+      live?.update(
+        backfillProgressEmbed({
+          channelLabel: label,
+          phase: 'importing',
+          done: processedCount,
+          total: all.length,
+        }),
+      );
     }
   }
 
@@ -180,6 +212,42 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
     processedThreadIds: [...processed],
     status: 'completed',
   });
+
+  // Flip the channel's freshness so the setup hub shows "✅ up to date" instead of
+  // "not yet indexed" after the first import. `all` is sorted ascending, so the last
+  // id is the newest thread (= its starter message id, a valid watermark). Using
+  // completeReindex also stamps lastReindexAt, which both feeds "scanned X ago" and
+  // keeps the hourly auto-rescan throttle from re-scanning right after the import.
+  try {
+    if (cappedOut) {
+      await markChannelStale(db, bf.guildId, bf.channelId, 'forum', 'cap');
+    } else {
+      // ensure (not get): the upgrade-triggered backfill path never calls
+      // ensureChannelSync, so the row may not exist yet — completeReindex is a bare
+      // UPDATE that would silently no-op without it.
+      const sync = await ensureChannelSync(db, bf.guildId, bf.channelId, 'forum');
+      if (sync.state !== 'reindexing') {
+        const count = await countIndexedMessagesInChannel(db, bf.guildId, bf.channelId);
+        await completeReindex(db, bf.guildId, bf.channelId, {
+          indexedMessageCount: count,
+          lastIndexedMessageId: all.at(-1)?.id ?? null,
+        });
+      }
+    }
+  } catch (err) {
+    log.warn({ err, jobId: bf.id }, 'backfill: failed to update channel sync');
+  }
+  await live?.finalize(
+    backfillProgressEmbed({
+      channelLabel: label,
+      phase: 'done',
+      done: processedCount,
+      total: all.length,
+      failedCount: failed,
+      capped: cappedOut,
+    }),
+  );
+
   // Consume any legacy durable backfill entitlement once the job durably completes.
   if (bf.entitlementId) await markEntitlementConsumed(db, bf.entitlementId);
   log.info(

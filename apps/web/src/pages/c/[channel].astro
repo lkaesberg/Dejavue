@@ -142,7 +142,7 @@ const fmtBytes = (n: number | undefined): string =>
       <KbNav />
       <div class="kb-inner">
         <ChannelRail channels={channels} activeChannelId={channelId} topics={topics} isPaid={isPaid} />
-        <main class="kb-main">
+        <main class="kb-main" id="kb-main" tabindex="-1">
             <div style="padding:26px 0 40px;">
               <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--textmut);">
                 <a href="/" class="kb-link">Help Center</a>

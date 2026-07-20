@@ -91,6 +91,70 @@ export function reindexProgressEmbed(s: ReindexProgressState): ProgressEmbed {
   }
 }
 
+export type BackfillPhase = 'queued' | 'listing' | 'importing' | 'done' | 'failed';
+
+export interface BackfillProgressState {
+  channelLabel: string; // e.g. "<#123>" — caller formats the mention/name
+  phase: BackfillPhase;
+  done?: number;
+  total?: number;
+  /** Threads that errored during import. */
+  failedCount?: number;
+  /** Import stopped early at the plan's index cap. */
+  capped?: boolean;
+  error?: string;
+}
+
+/** The first-setup history import — same live-message pattern as reindex. */
+export function backfillProgressEmbed(s: BackfillProgressState): ProgressEmbed {
+  const head = `📥 Importing existing posts from ${s.channelLabel}`;
+  switch (s.phase) {
+    case 'queued':
+      return {
+        title: head,
+        description: 'Queued — starting shortly. This message updates automatically.',
+        color: COLOR_PROGRESS,
+      };
+    case 'listing':
+      return {
+        title: head,
+        description: `Scanning history… ${(s.done ?? 0).toLocaleString()} threads found.`,
+        color: COLOR_PROGRESS,
+      };
+    case 'importing':
+      return {
+        title: head,
+        description: `Importing posts… ${renderProgressBar(s.done ?? 0, s.total ?? 0)}\n${(
+          s.done ?? 0
+        ).toLocaleString()} / ${(s.total ?? 0).toLocaleString()}`,
+        color: COLOR_PROGRESS,
+      };
+    case 'done': {
+      if (s.capped) {
+        return {
+          title: `⚠️ ${s.channelLabel} — import stopped (index full)`,
+          description:
+            `Imported ${(s.done ?? 0).toLocaleString()} of ${(s.total ?? 0).toLocaleString()} posts, ` +
+            "then hit your plan's index cap. Upgrade or remove a channel, then run `/dejavue rescan` to import the rest.",
+          color: COLOR_FAIL,
+        };
+      }
+      const parts = [`Imported ${(s.done ?? 0).toLocaleString()} posts.`];
+      if (s.failedCount && s.failedCount > 0) {
+        parts.push(`⚠️ ${s.failedCount.toLocaleString()} could not be imported.`);
+      }
+      parts.push('New posts are indexed automatically from now on.');
+      return { title: `✅ ${s.channelLabel} is up to date`, description: parts.join(' '), color: COLOR_DONE };
+    }
+    case 'failed':
+      return {
+        title: `⚠️ Import of ${s.channelLabel} hit a snag`,
+        description: `${s.error ?? 'Something went wrong.'}\nProgress is saved — run \`/dejavue setup\` on the channel again to resume.`,
+        color: COLOR_FAIL,
+      };
+  }
+}
+
 export type GenKind = 'faq' | 'cluster';
 export type GenPhase = 'queued' | 'working' | 'done' | 'failed';
 

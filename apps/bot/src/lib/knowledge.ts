@@ -3,13 +3,10 @@ import { embedContentHash } from '@dejavue/ai';
 import { childLogger } from '@dejavue/core';
 import {
   channelMode,
-  countIndexedMessagesInChannel,
-  ensureChannelSync,
   ensureGuildConfig,
   getDb,
   getThreadByDiscordId,
   markChannelStale,
-  markChannelSynced,
   setLastEmbedMsgCount,
   setPublished,
   setThreadLabels,
@@ -18,6 +15,7 @@ import {
   upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
+import { refreshForumFreshness } from './channelFreshness';
 import { keyedTrailingDebounce } from './debounce';
 import { fetchStarterWithRetry, fetchTranscript, forumParent, threadLabels } from './forum';
 import { atIndexCap } from './tier';
@@ -156,10 +154,7 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
     if (embedQueued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
   }
 
-  // Keep per-channel freshness current for the /dejavue setup hub (don't clobber a reindex).
-  const sync = await ensureChannelSync(db, guildId, forum.id, 'forum');
-  if (sync.state !== 'reindexing') {
-    const count = await countIndexedMessagesInChannel(db, guildId, forum.id);
-    await markChannelSynced(db, guildId, forum.id, 'forum', null, count);
-  }
+  // Keep per-channel freshness current for the /dejavue setup hub (don't clobber a
+  // running reindex or first-setup import).
+  await refreshForumFreshness(guildId, forum.id);
 }

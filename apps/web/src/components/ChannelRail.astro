@@ -21,6 +21,33 @@ interface Props {
 const { channels, activeChannelId = null, topics = [], isPaid = false } = Astro.props;
 ---
 
+<details class="kb-mobile-nav">
+  <summary>
+    <span>Browse channels</span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+  </summary>
+  <div class="kb-mobile-list">
+    {
+      channels.map((c) => {
+        const active = c.id === activeChannelId;
+        return (
+          <a
+            href={channelPath(c)}
+            class="kb-row"
+            style={`display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; color:${active ? 'var(--accentline)' : 'var(--textmid)'}; background:${active ? 'var(--accentsoft)' : 'transparent'};`}
+          >
+            <span style="display:flex; align-items:center; gap:9px; min-width:0;">
+              <span style={`width:8px; height:8px; border-radius:50%; flex-shrink:0; background:${channelDot(c.id)};`} />
+              <span style="font-size:14px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{c.name}</span>
+            </span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 8px; border-radius:999px; flex-shrink:0; color:var(--chiptext); background:var(--chipbg);">{c.count}</span>
+          </a>
+        );
+      })
+    }
+  </div>
+</details>
+
 <aside class="kb-rail">
   <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; padding:0 10px 10px;">Browse channels</div>
   <div style="display:flex; flex-direction:column; gap:2px;">

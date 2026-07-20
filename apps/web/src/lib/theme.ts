@@ -44,6 +44,7 @@ export function themeVars(cfg: ThemeInput): string {
         text: '#F1F2F8', textmid: '#B4B8CE', textmut: '#838AA6',
         chipbg: '#262A38', chiptext: '#A2A7C2', inputbg: '#1F2230', footerbg: '#171922',
         ansbg: 'rgba(45,212,191,0.08)', ansborder: 'rgba(45,212,191,0.32)',
+        solvedbg: 'rgba(45,212,191,0.14)', solvedfg: '#3FE0C4',
         accentsoft: ac.softD, accentline: ac.lineD,
       }
     : {
@@ -52,6 +53,7 @@ export function themeVars(cfg: ThemeInput): string {
         text: '#14152A', textmid: '#565A73', textmut: '#9398B4',
         chipbg: '#F4F4F9', chiptext: '#9398B4', inputbg: '#F5F5FA', footerbg: '#FCFCFE',
         ansbg: '#F4FDFA', ansborder: '#B7EFE2',
+        solvedbg: '#E6FAF5', solvedfg: '#0F9B82',
         accentsoft: ac.softL, accentline: ac.lineL,
       };
 
@@ -61,6 +63,7 @@ export function themeVars(cfg: ThemeInput): string {
     `--text:${palette.text}`, `--textmid:${palette.textmid}`, `--textmut:${palette.textmut}`,
     `--chipbg:${palette.chipbg}`, `--chiptext:${palette.chiptext}`, `--inputbg:${palette.inputbg}`, `--footerbg:${palette.footerbg}`,
     `--ansbg:${palette.ansbg}`, `--ansborder:${palette.ansborder}`,
+    `--solvedbg:${palette.solvedbg}`, `--solvedfg:${palette.solvedfg}`,
     `--accent:${ac.a}`, `--accent2:${ac.b}`, `--accentsoft:${palette.accentsoft}`, `--accentline:${palette.accentline}`,
     `--rad:${sharp ? '6px' : '14px'}`, `--radsm:${sharp ? '5px' : '10px'}`,
     `--headfont:${headfont}`,

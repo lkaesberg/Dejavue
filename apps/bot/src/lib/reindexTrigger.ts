@@ -3,17 +3,65 @@ import {
   type ChatInputCommandInteraction,
   EmbedBuilder,
 } from 'discord.js';
-import { reindexProgressEmbed } from '@dejavue/core';
+import { backfillProgressEmbed, type ProgressEmbed, reindexProgressEmbed } from '@dejavue/core';
 import {
+  createBackfillJob,
   createReindexJob,
   ensureChannelSync,
+  getActiveBackfillJob,
   getActiveReindexJob,
   getDb,
   setReindexing,
 } from '@dejavue/db';
-import { enqueueReindexChannel } from '@dejavue/queue';
+import { enqueueBackfill, enqueueReindexChannel } from '@dejavue/queue';
 
 export type ReindexTarget = { id: string; kind: 'forum' | 'tracked' };
+
+/** Post the initial "queued" embed the worker will keep editing (null ids when not sendable). */
+async function postProgressMessage(
+  channel: (ChatInputCommandInteraction | ButtonInteraction)['channel'],
+  embed: ProgressEmbed,
+): Promise<{ statusChannelId: string | null; statusMessageId: string | null }> {
+  try {
+    if (channel?.isSendable()) {
+      const msg = await channel.send({
+        embeds: [new EmbedBuilder().setTitle(embed.title).setDescription(embed.description).setColor(embed.color)],
+      });
+      return { statusChannelId: msg.channelId, statusMessageId: msg.id };
+    }
+  } catch {
+    /* no send perms — the job still runs without a live message */
+  }
+  return { statusChannelId: null, statusMessageId: null };
+}
+
+/**
+ * Kick the automatic first-setup history import for a forum, with a live progress
+ * message in the channel the admin ran /dejavue setup from (the setup reply itself is
+ * ephemeral, which the worker can't edit). Skips when an import is already running.
+ */
+export async function startForumImport(
+  interaction: ChatInputCommandInteraction,
+  forumId: string,
+): Promise<{ resumed: boolean; posted: boolean }> {
+  const db = getDb();
+  const guildId = interaction.guildId!;
+  if (await getActiveBackfillJob(db, guildId, forumId)) return { resumed: true, posted: false };
+
+  const { statusChannelId, statusMessageId } = await postProgressMessage(
+    interaction.channel,
+    backfillProgressEmbed({ channelLabel: `<#${forumId}>`, phase: 'queued' }),
+  );
+  const job = await createBackfillJob(db, {
+    guildId,
+    channelId: forumId,
+    entitlementId: null,
+    statusChannelId,
+    statusMessageId,
+  });
+  await enqueueBackfill({ backfillJobId: job.id });
+  return { resumed: false, posted: statusMessageId != null };
+}
 
 /**
  * Kick a durable reindex for each target and post the single live-progress message the
@@ -39,20 +87,10 @@ export async function startReindex(
     await ensureChannelSync(db, guildId, t.id, syncKind);
     await setReindexing(db, guildId, t.id, syncKind);
 
-    let statusChannelId: string | null = null;
-    let statusMessageId: string | null = null;
-    try {
-      if (channel?.isSendable()) {
-        const e = reindexProgressEmbed({ channelLabel: `<#${t.id}>`, kind: t.kind, phase: 'queued' });
-        const msg = await channel.send({
-          embeds: [new EmbedBuilder().setTitle(e.title).setDescription(e.description).setColor(e.color)],
-        });
-        statusChannelId = msg.channelId;
-        statusMessageId = msg.id;
-      }
-    } catch {
-      /* no send perms — reindex still runs without a live message */
-    }
+    const { statusChannelId, statusMessageId } = await postProgressMessage(
+      channel,
+      reindexProgressEmbed({ channelLabel: `<#${t.id}>`, kind: t.kind, phase: 'queued' }),
+    );
     const job = await createReindexJob(db, {
       guildId,
       channelId: t.id,

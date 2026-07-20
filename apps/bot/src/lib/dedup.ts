@@ -1,9 +1,10 @@
-import type { ThreadChannel } from 'discord.js';
+import type { BaseMessageOptions, ThreadChannel } from 'discord.js';
 import { activeForumChannels, childLogger, dedupMinSimilarity, getEnv } from '@dejavue/core';
 import {
   channelMode,
   checkQuota,
   commitGeneration,
+  countIndexedMessages,
   getDb,
   getGuildConfig,
   getThreadByDiscordId,
@@ -16,7 +17,14 @@ import {
   updateGuildConfig,
 } from '@dejavue/db';
 import { assessChannel, ensureChannelTopics } from './channelFit';
-import { channelFitMessage, channelGuardMessage, duplicatesMessage } from './embeds';
+import {
+  channelFitMessage,
+  channelGuardMessage,
+  draftingMessage,
+  duplicatesMessage,
+  noMatchesMessage,
+  searchingMessage,
+} from './embeds';
 import { applyTag, ensureWrongChannelTag, fetchStarterWithRetry, forumParent } from './forum';
 import { closeThread } from './solve';
 import { getGuildTier, limitsFor, monitoredForum } from './tier';
@@ -24,6 +32,8 @@ import { getGuildTier, limitsFor, monitoredForum } from './tier';
 const log = childLogger({ mod: 'dedup' });
 
 const DEBOUNCE_MS = 4000;
+// How long the "looks like a new question" notice stays before it removes itself.
+const NO_MATCH_TTL_MS = 30_000;
 // How readily to flag a reworded post as a duplicate: the guild's chosen preset
 // or custom similarity % (/dejavue settings) resolves to a cosine floor via
 // dedupMinSimilarity. bge-small cosine for genuine paraphrases sits ~0.65–0.85.
@@ -31,13 +41,98 @@ const DEBOUNCE_MS = 4000;
 /** Threads we've already scheduled, so threadCreate + messageCreate collapse to one run. */
 const scheduled = new Set<string>();
 
+/** Minimal shape of the live searching placeholder held across the debounce. */
+export interface LivePlaceholderMessage {
+  edit(payload: BaseMessageOptions): Promise<unknown>;
+  delete(): Promise<unknown>;
+}
+export type Placeholder = Promise<LivePlaceholderMessage | null>;
+
+/** Remove the searching placeholder (dead-end paths, errors). Never throws. */
+export async function discardPlaceholder(placeholder: Placeholder): Promise<void> {
+  const msg = await placeholder.catch(() => null);
+  await msg?.delete().catch(() => undefined);
+}
+
+/**
+ * Edit the placeholder in place. Returns false when there is no placeholder or the
+ * edit failed (message deleted by a mod, thread gone) so callers can fall back.
+ */
+export async function editPlaceholder(
+  placeholder: Placeholder,
+  payload: BaseMessageOptions,
+): Promise<boolean> {
+  const msg = await placeholder.catch(() => null);
+  if (!msg) return false;
+  try {
+    await msg.edit(payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Edit the placeholder into a transient notice that removes itself after ttlMs
+ * (the no-match outcome). No placeholder → stay silent; never throws.
+ */
+export async function editPlaceholderTransient(
+  placeholder: Placeholder,
+  payload: BaseMessageOptions,
+  ttlMs: number,
+): Promise<void> {
+  const msg = await placeholder.catch(() => null);
+  if (!msg) return;
+  try {
+    await msg.edit(payload);
+  } catch {
+    return;
+  }
+  const timer = setTimeout(() => void msg.delete().catch(() => undefined), ttlMs);
+  timer.unref?.();
+}
+
+/**
+ * The live "Searching solved answers…" message, posted at schedule time so it shows
+ * during the debounce + search. Skipped on guilds with nothing indexed yet (a fresh
+ * install would answer "new question" to every post — stay quiet instead).
+ */
+function postSearchingPlaceholder(thread: ThreadChannel): Placeholder {
+  return (async () => {
+    try {
+      const [limits, indexed] = await Promise.all([
+        getGuildTier(thread.guildId).then(limitsFor),
+        countIndexedMessages(getDb(), thread.guildId),
+      ]);
+      if (indexed === 0) return null;
+      return await thread.send(
+        searchingMessage({
+          indexedCount: indexed,
+          semantic: limits.semanticSearch,
+          showBranding: !limits.removeBranding,
+        }),
+      );
+    } catch (err) {
+      log.debug({ err, threadId: thread.id }, 'failed to post searching placeholder');
+      return null;
+    }
+  })();
+}
+
 /** Debounced, idempotent-by-thread-id duplicate detection. */
 export function scheduleDedup(thread: ThreadChannel): void {
   if (scheduled.has(thread.id)) return;
   scheduled.add(thread.id);
   const timer = setTimeout(() => {
-    void runDedup(thread)
-      .catch((err) => log.warn({ err, threadId: thread.id }, 'dedup run failed'))
+    // Post the "Searching…" placeholder only when the debounce actually fires — a
+    // restart during the quiet debounce window then leaves nothing stuck on-screen.
+    const placeholder = postSearchingPlaceholder(thread);
+    void runDedup(thread, placeholder)
+      .catch(async (err) => {
+        log.warn({ err, threadId: thread.id }, 'dedup run failed');
+        // Never leave a stuck "Searching…" behind.
+        await discardPlaceholder(placeholder);
+      })
       .finally(() => scheduled.delete(thread.id));
   }, DEBOUNCE_MS);
   timer.unref();
@@ -95,6 +190,7 @@ async function maybeGuardOrSuggest(
   queryVector: number[],
   cfg: GuildConfig,
   showBranding: boolean,
+  finish: (payload: BaseMessageOptions) => Promise<void>,
 ): Promise<boolean> {
   try {
     const db = getDb();
@@ -128,7 +224,9 @@ async function maybeGuardOrSuggest(
           log.warn({ err, threadId: thread.id }, 'failed to apply wrong-channel tag');
         }
       }
-      await thread.send(channelGuardMessage(wrong.channelId, showBranding)).catch(() => undefined);
+      // Resolve the searching placeholder into the guard notice BEFORE closing —
+      // closeThread locks + archives, after which edits would fail.
+      await finish(channelGuardMessage(wrong.channelId, showBranding));
       await closeThread(thread).catch(() => undefined);
       return true;
     }
@@ -142,26 +240,48 @@ async function maybeGuardOrSuggest(
   }
 }
 
-async function runDedup(thread: ThreadChannel): Promise<void> {
+async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promise<void> {
   const db = getDb();
   const guildId = thread.guildId;
   const forum = forumParent(thread);
   const cfg = await getGuildConfig(db, guildId);
-  if (forum && !(await monitoredForum(guildId, cfg, forum.id))) return;
+  if (forum && !(await monitoredForum(guildId, cfg, forum.id))) {
+    await discardPlaceholder(placeholder);
+    return;
+  }
   // Knowledge channels are a pure archive — never post duplicate reminders.
-  if (forum && channelMode(cfg, forum.id) === 'knowledge') return;
+  if (forum && channelMode(cfg, forum.id) === 'knowledge') {
+    await discardPlaceholder(placeholder);
+    return;
+  }
 
   // Don't suggest duplicates on a post that's already solved (also keeps the
   // /demo seed posts quiet, since they're persisted solved before this fires).
   const existing = await getThreadByDiscordId(db, guildId, thread.id);
-  if (existing?.status === 'solved') return;
+  if (existing?.status === 'solved') {
+    await discardPlaceholder(placeholder);
+    return;
+  }
 
   const body = await fetchStarterWithRetry(thread);
   const query = [thread.name, body].join('\n').trim();
-  if (!query) return;
+  if (!query) {
+    await discardPlaceholder(placeholder);
+    return;
+  }
 
   const limits = limitsFor(await getGuildTier(guildId));
+  const showBranding = !limits.removeBranding;
+  // Edit the live placeholder into the outcome; fall back to a fresh message when
+  // a mod deleted it mid-search.
+  const finish = async (payload: BaseMessageOptions): Promise<void> => {
+    if (await editPlaceholder(placeholder, payload)) return;
+    await thread
+      .send(payload)
+      .catch((err) => log.warn({ err, threadId: thread.id }, 'failed to post dedup outcome'));
+  };
 
+  const searchStarted = Date.now();
   let matches: SearchMatch[];
   let queryVector: number[] | undefined;
   if (limits.semanticSearch) {
@@ -184,22 +304,27 @@ async function runDedup(thread: ThreadChannel): Promise<void> {
   } else {
     matches = await keywordSearch(db, { guildId, query, limit: 3, excludeThreadId: thread.id });
   }
+  const elapsedMs = Date.now() - searchStarted;
 
   // Channel-fit advisory + off-topic guard (Plus+, opt-in). Runs before the no-matches
   // early return. If the guard auto-closes the thread, skip duplicate suggestions.
   if ((cfg?.channelFitCheck || cfg?.guardEnabled) && forum && queryVector) {
-    const closed = await maybeGuardOrSuggest(thread, forum.id, queryVector, cfg, !limits.removeBranding);
+    const closed = await maybeGuardOrSuggest(thread, forum.id, queryVector, cfg, showBranding, finish);
     if (closed) return;
   }
 
-  if (matches.length === 0) return;
+  if (matches.length === 0) {
+    // Edit-only (no send fallback): guilds without a placeholder stay silent, as before.
+    await editPlaceholderTransient(placeholder, noMatchesMessage(showBranding), NO_MATCH_TTL_MS);
+    return;
+  }
 
+  // Show the intermediate "drafting…" state only when a draft will actually be attempted.
+  if (limits.aiDrafts && getEnv().OPENROUTER_API_KEY) {
+    await editPlaceholder(placeholder, draftingMessage(matches.length, showBranding));
+  }
   const draft = limits.aiDrafts
     ? await maybeDraft(guildId, query, matches, limits.monthlyCredits)
     : undefined;
-  try {
-    await thread.send(duplicatesMessage(guildId, matches, !limits.removeBranding, draft));
-  } catch (err) {
-    log.warn({ err, threadId: thread.id }, 'failed to post duplicate suggestion');
-  }
+  await finish(duplicatesMessage(guildId, matches, showBranding, { draft, elapsedMs }));
 }

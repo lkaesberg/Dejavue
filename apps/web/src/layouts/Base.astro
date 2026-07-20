@@ -24,10 +24,18 @@ interface Props {
   description?: string;
   canonical?: string;
   noindex?: boolean;
+  /** Social-card image (Open Graph / Twitter). Defaults to the tenant logo when set. */
+  ogImage?: string;
+  /** og:type — 'website' for listings, 'article' for a single answer page. */
+  ogType?: string;
 }
-const { title, description, canonical, noindex } = Astro.props;
+const { title, description, canonical, noindex, ogType = 'website' } = Astro.props;
 const cfg = Astro.locals.cfg;
 const vars = themeVars(cfg);
+const brand = brandOf(cfg, Astro.locals.tenant?.slug ?? undefined);
+// Only a real, absolute image URL unfurls; a data: favicon does not, so fall back to
+// the tenant's uploaded logo (if any) rather than emitting a useless tag.
+const ogImage = Astro.props.ogImage ?? cfg?.kbLogoUrl ?? null;
 
 // Favicon = the KB's logo. With no uploaded logo, fall back to a branded square (accent
 // gradient + brand initial) that matches the nav's logo placeholder.
@@ -53,7 +61,16 @@ const css = `
     font-family:'Inter', system-ui, sans-serif; color:var(--text); background:var(--bg); }
   body.kb-theme a { color: inherit; text-decoration: none; }
   input { font-family: inherit; }
-  ::selection { background: rgba(124,58,237,0.22); }
+  ::selection { background: var(--accentsoft); }
+
+  /* Keyboard focus: a visible ring everywhere (overrides the inline outline:none on
+     search/filter inputs, which otherwise leaves keyboard users with no focus cue). */
+  .kb-theme :focus-visible { outline: 2px solid var(--accentline) !important; outline-offset: 2px; border-radius: 3px; }
+  /* Skip link: off-screen until focused, then pinned top-left for keyboard/AT users. */
+  .kb-skip { position: absolute; left: -9999px; top: 0; z-index: 100; }
+  .kb-skip:focus { left: 12px; top: 12px; background: var(--surface); color: var(--text);
+    border: 1px solid var(--border2); border-radius: var(--radsm); padding: 9px 14px; font-size: 14px; font-weight: 600; }
+  [id="kb-main"]:focus { outline: none; }
 
   /* Full-bleed bars with a shared inner bound. */
   .kb-header { position:sticky; top:0; z-index:50; background:var(--bg); border-bottom:1px solid var(--border); }
@@ -86,7 +103,21 @@ const css = `
   .kb-row:hover { background: var(--surface2); }
   .kb-card-hover:hover { border-color: var(--accentline) !important; background: var(--surface2); }
 
-  @media (max-width: 980px) { .kb-rail { display:none; } .kb-main { padding-left:0; } }
+  /* Rendered Discord markdown in answers/transcripts (see lib/discordText.ts). */
+  .kb-mdlink { color: var(--accentline); text-decoration: underline; word-break: break-word; }
+  .kb-code-inline { font-family:'JetBrains Mono', monospace; font-size:0.88em; background:var(--surface2); border:1px solid var(--border); border-radius:5px; padding:1px 5px; }
+  .kb-code { font-family:'JetBrains Mono', monospace; font-size:13px; line-height:1.5; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin:8px 0; overflow-x:auto; white-space:pre; }
+  .kb-code code { background:none; border:none; padding:0; }
+
+  /* Mobile channel nav: the rail hides < 980px, so surface the channel list as a
+     collapsible menu above the content instead of stranding phone visitors. */
+  .kb-mobile-nav { display:none; }
+  .kb-mobile-nav > summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; margin:14px 0 0; border:1px solid var(--border); border-radius:var(--radsm); background:var(--surface2); font-size:14px; font-weight:600; color:var(--text); }
+  .kb-mobile-nav > summary::-webkit-details-marker { display:none; }
+  .kb-mobile-nav[open] > summary { border-bottom-left-radius:0; border-bottom-right-radius:0; }
+  .kb-mobile-nav .kb-mobile-list { border:1px solid var(--border); border-top:none; border-radius:0 0 var(--radsm) var(--radsm); overflow:hidden; }
+
+  @media (max-width: 980px) { .kb-rail { display:none; } .kb-main { padding-left:0; } .kb-mobile-nav { display:block; flex:0 0 100%; width:100%; } }
   @media (max-width: 860px) { .kb-article { grid-template-columns:1fr; } }
 `;
 ---
@@ -102,11 +133,20 @@ const css = `
     {canonical && <link rel="canonical" href={canonical} />}
     {noindex && <meta name="robots" content="noindex" />}
     <meta property="og:title" content={title} />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:site_name" content={brand} />
+    {description && <meta property="og:description" content={description} />}
+    {canonical && <meta property="og:url" content={canonical} />}
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    <meta name="twitter:card" content={ogImage ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    {ogImage && <meta name="twitter:image" content={ogImage} />}
     <style is:global set:html={css}></style>
     <slot name="head" />
   </head>
   <body class="kb-theme">
+    <a href="#kb-main" class="kb-skip">Skip to content</a>
     <slot />
   </body>
 </html>

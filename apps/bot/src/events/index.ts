@@ -8,6 +8,7 @@ import { reconcileDeletions } from '../lib/threadReconcile';
 import { onChannelDelete } from './channelDelete';
 import { onChannelUpdate } from './channelUpdate';
 import { onEntitlementCreate, onEntitlementDelete, onEntitlementUpdate } from './entitlements';
+import { onGuildCreate } from './guildCreate';
 import { onInteraction } from './interactionCreate';
 import { onMessageCreate } from './messageCreate';
 import { onMessageDelete, onMessageDeleteBulk, onMessageUpdate } from './messageMutations';
@@ -64,6 +65,9 @@ export function registerEvents(client: Client): void {
     setInterval(() => void channelFitReconcile(c), RECONCILE_INTERVAL_MS).unref();
   });
 
+  client.on(Events.GuildCreate, (guild) => {
+    void onGuildCreate(guild);
+  });
   client.on(Events.ThreadCreate, (thread, newlyCreated) => {
     void onThreadCreate(thread, newlyCreated);
   });

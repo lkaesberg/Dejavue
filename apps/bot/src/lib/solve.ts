@@ -15,6 +15,7 @@ import {
   upsertThread,
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
+import { refreshForumFreshness } from './channelFreshness';
 import { keyedTrailingDebounce } from './debounce';
 import { SOLVE_BUTTON_ID, solvedNotice } from './embeds';
 import {
@@ -101,6 +102,15 @@ async function captureQuestionTranscript(thread: ThreadChannel): Promise<void> {
       }).catch((err) => log.warn({ err, threadId: thread.id }, 'failed to re-embed edited thread'));
     }
   }
+
+  // A new message was scanned on top of already-indexed history — re-confirm the
+  // channel as up to date in the /dejavue setup hub.
+  const forum = forumParent(thread);
+  if (forum) {
+    await refreshForumFreshness(thread.guildId, forum.id).catch((err) =>
+      log.warn({ err, threadId: thread.id }, 'freshness update failed'),
+    );
+  }
 }
 
 /** Apply the per-forum "unsolved" tag to a freshly created post (never to a solved one). */
@@ -156,6 +166,7 @@ async function resolveControlPrompt(
   thread: ThreadChannel,
   removeSolvedPrompt: boolean,
   opts: SolveOptions,
+  answerAuthorId: string | null,
 ): Promise<void> {
   const msg = opts.controlMessageId
     ? await thread.messages.fetch(opts.controlMessageId).catch(() => null)
@@ -166,7 +177,6 @@ async function resolveControlPrompt(
     return;
   }
   const showBranding = !limitsFor(await getGuildTier(thread.guildId)).removeBranding;
-  const answerAuthorId = opts.answer?.author.id ?? opts.answerAuthorId ?? opts.solverId;
   await msg
     .edit(solvedNotice({ showBranding, solverId: opts.solverId, answerAuthorId }))
     .catch(() => undefined);
@@ -180,7 +190,15 @@ export async function solveThread(
   const db = getDb();
   const guildId = thread.guildId;
   const cfg = await ensureGuildConfig(db, guildId);
-  await ensureThreadRow(thread);
+  const existingRow = await ensureThreadRow(thread);
+
+  // Credit the answerer only when we actually know who wrote the solution: an
+  // explicitly-picked reply (context menu — even the OP's own), or a typed answer from
+  // someone who isn't the asker. A borrowed duplicate answer, or an OP marking their
+  // own post solved by hand, credits no one — keeps the top-helpers stats honest.
+  const answerAuthorId =
+    opts.answer?.author.id ??
+    (opts.answerAuthorId && opts.answerAuthorId !== existingRow.opUserId ? opts.answerAuthorId : null);
 
   const forum = forumParent(thread);
   if (forum) {
@@ -203,7 +221,7 @@ export async function solveThread(
     discordThreadId: thread.id,
     answerMessageId: opts.answer?.id ?? null,
     answerText: opts.answer?.content ?? opts.answerText ?? null,
-    answerAuthorId: opts.answer?.author.id ?? opts.answerAuthorId ?? opts.solverId,
+    answerAuthorId,
   });
   if (!row) return undefined;
 
@@ -247,7 +265,15 @@ export async function solveThread(
   }
 
   // Declutter: remove the "select the answer" control prompt (or, if disabled, mark it).
-  await resolveControlPrompt(thread, cfg.removeSolvedPrompt, opts).catch(() => undefined);
+  await resolveControlPrompt(thread, cfg.removeSolvedPrompt, opts, answerAuthorId).catch(() => undefined);
+
+  // Solving indexes the post — re-confirm the channel as up to date (covers the
+  // button/context-menu path where no messageCreate fires).
+  if (forum) {
+    await refreshForumFreshness(guildId, forum.id).catch((err) =>
+      log.warn({ err, threadId: thread.id }, 'freshness update failed'),
+    );
+  }
 
   return row;
 }

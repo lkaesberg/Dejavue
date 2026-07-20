@@ -12,7 +12,7 @@ import ChannelRail from '../../../components/ChannelRail.astro';
 import KbFooter from '../../../components/KbFooter.astro';
 import KbNav from '../../../components/KbNav.astro';
 import Base from '../../../layouts/Base.astro';
-import { resolveMentions } from '../../../lib/discordText';
+import { renderDiscordMarkdown, resolveMentions } from '../../../lib/discordText';
 import { channelPath, extractThreadId, threadPath } from '../../../lib/slug';
 import { brandOf, channelKind } from '../../../lib/theme';
 
@@ -90,6 +90,11 @@ const aliasOf = (id: string): string => labels.get(id) ?? 'Member';
 // Mentioned users get the same anonymization as speakers ("@Original poster",
 // "@Helper 2"); a mentioned non-participant falls back to "@Member".
 const clean = (s: string): string => resolveMentions(s, aliasOf);
+// Render Discord markdown (bold/italic/code/links) to safe HTML for display; `clean`
+// stays plain text for meta/JSON-LD/filter indexes.
+const md = (s: string): string => renderDiscordMarkdown(s, aliasOf);
+const askUrl =
+  thread && tenant ? `https://discord.com/channels/${tenant.guildId}/${thread.channelId}` : discordUrl;
 const avatarOf = (id: string): { initial: string; bg: string } =>
   thread && id === thread.opUserId
     ? { initial: 'O', bg: 'linear-gradient(135deg,#F0883E,#E0632C)' }
@@ -128,12 +133,13 @@ const jsonLd = thread
       title={`${thread.title} | ${brand}`}
       description={clean(thread.questionBody || thread.title).slice(0, 160)}
       canonical={`${origin}${threadPath(thread)}`}
+      ogType="article"
     >
       <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
       <KbNav query="" />
       <div class="kb-inner">
         <ChannelRail channels={channels} activeChannelId={thread.channelId} topics={topics} isPaid={limits.generative} />
-        <main class="kb-main">
+        <main class="kb-main" id="kb-main" tabindex="-1">
           <div class="kb-article">
             {/* main column */}
             <div style="min-width:0; padding:26px clamp(0px,3vw,32px) 44px 0;">
@@ -145,14 +151,14 @@ const jsonLd = thread
 
             <div style="display:flex; align-items:center; gap:8px; margin-top:20px; flex-wrap:wrap;">
               {channelName && (
-                <span style="background:#EEF6FF; color:#2563EB; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">{channelName}</span>
+                <span style="background:var(--accentsoft); color:var(--accentline); font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">{channelName}</span>
               )}
               {thread.channelId && (() => {
                 const kind = channelKind(cfg, thread.channelId);
                 return <span style={`font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px; background:${kind.bg}; color:${kind.fg};`}>{kind.label}</span>;
               })()}
               {isSolved && (
-                <span style="display:inline-flex; align-items:center; gap:6px; background:#E6FAF5; color:#0F9B82; font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">✓ Solved</span>
+                <span style="display:inline-flex; align-items:center; gap:6px; background:var(--solvedbg); color:var(--solvedfg); font-size:12px; font-weight:600; padding:5px 11px; border-radius:999px;">✓ Solved</span>
               )}
             </div>
 
@@ -186,10 +192,10 @@ const jsonLd = thread
             {acceptedAnswer && (
               <div style="margin-top:22px; border:1px solid var(--ansborder); background:var(--ansbg); border-radius:var(--rad); padding:22px 24px;">
                 <div style="display:flex; align-items:center; gap:9px;">
-                  <span style="display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; background:#2DD4BF; color:#fff; font-size:13px; font-weight:700;">✓</span>
-                  <span style="font-family:var(--headfont); font-weight:600; font-size:14px; color:#0F9B82;">Accepted answer</span>
+                  <span style="display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; background:var(--solvedfg); color:#fff; font-size:13px; font-weight:700;">✓</span>
+                  <span style="font-family:var(--headfont); font-weight:600; font-size:14px; color:var(--solvedfg);">Accepted answer</span>
                 </div>
-                <p style="font-size:15.5px; line-height:1.65; color:var(--text); margin:15px 0 0; white-space:pre-wrap;">{clean(acceptedAnswer)}</p>
+                <div style="font-size:15.5px; line-height:1.65; color:var(--text); margin:15px 0 0; white-space:pre-wrap;" set:html={md(acceptedAnswer)} />
               </div>
             )}
 
@@ -200,7 +206,7 @@ const jsonLd = thread
             {transcript.length > 0 && (
               <div style="margin-top:32px;">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-                  <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Full discussion</div>
+                  <h2 style="margin:0; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Full discussion</h2>
                   <div style="display:flex; align-items:center; gap:8px; background:var(--inputbg); border:1px solid var(--border); border-radius:var(--radsm); padding:6px 11px;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--textmut)" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
                     <input id="kb-msg-filter" type="search" placeholder="Filter messages…" aria-label="Filter messages" style="border:none; outline:none; background:transparent; font-size:12.5px; color:var(--text); width:150px;" />
@@ -219,11 +225,11 @@ const jsonLd = thread
                             <span style="font-weight:600; font-size:14px; color:var(--text); white-space:nowrap;">{aliasOf(m.authorId)}</span>
                             <span style="font-size:12px; color:var(--textmut); white-space:nowrap;">{fmtTime(m.createdAt)}</span>
                             {accepted && (
-                              <span style="display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:#0F9B82; background:#E6FAF5; padding:2px 8px; border-radius:999px;">✓ Accepted answer</span>
+                              <span style="display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:var(--solvedfg); background:var(--solvedbg); padding:2px 8px; border-radius:999px;">✓ Accepted answer</span>
                             )}
                           </div>
                           {m.content && (
-                            <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`}>{clean(m.content)}</div>
+                            <div style={`font-size:14px; line-height:1.6; color:${accepted ? 'var(--text)' : 'var(--textmid)'}; margin-top:4px; white-space:pre-wrap;${accepted ? ' border-left:3px solid #2DD4BF; background:var(--ansbg); border-radius:0 8px 8px 0; padding:10px 14px;' : ''}`} set:html={md(m.content)} />
                           )}
                           {atts.length > 0 && (
                             <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
@@ -266,7 +272,7 @@ const jsonLd = thread
             {transcript.length === 0 && thread.questionBody && (
               <div style="margin-top:30px;">
                 <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">{acceptedAnswer ? 'Question' : 'Details'}</div>
-                <div style="font-size:15px; line-height:1.65; color:var(--textmid); margin-top:12px; white-space:pre-wrap;">{clean(thread.questionBody)}</div>
+                <div style="font-size:15px; line-height:1.65; color:var(--textmid); margin-top:12px; white-space:pre-wrap;" set:html={md(thread.questionBody)} />
               </div>
             )}
 
@@ -280,13 +286,19 @@ const jsonLd = thread
                 ))}
               </div>
             )}
+
+            {/* Still-stuck escape hatch: route unresolved visitors back to the source channel to ask. */}
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-top:28px; padding:16px 18px; border:1px solid var(--border2); border-radius:var(--rad); background:var(--surface2);">
+              <span style="font-size:14px; color:var(--textmid);">Didn't find your answer?</span>
+              <a href={askUrl} target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:9px 16px; border-radius:var(--radsm); white-space:nowrap;">Ask on Discord ↗</a>
+            </div>
           </div>
 
           {/* sidebar */}
           <aside style="min-width:0; padding:34px 0 24px;">
             {related.length > 0 && (
               <>
-                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Related</div>
+                <h2 style="margin:0; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Related</h2>
                 <div style="display:flex; flex-direction:column; gap:3px; margin-top:13px;">
                   {related.map((r) => (
                     <a href={threadPath(r)} class="kb-row" style="display:flex; gap:9px; padding:11px 12px; border-radius:var(--radsm); align-items:flex-start;">
@@ -299,7 +311,7 @@ const jsonLd = thread
             )}
             {duplicates.length > 0 && (
               <div style={related.length > 0 ? 'margin-top:24px;' : ''}>
-                <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Also asked as</div>
+                <h2 style="margin:0; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600;">Also asked as</h2>
                 <div style="display:flex; flex-direction:column; gap:9px; margin-top:13px;">
                   {duplicates.map((d) => (
                     <a class="kb-link" href={`https://discord.com/channels/${tenant!.guildId}/${d.threadId}`} target="_blank" rel="noopener" style="display:flex; gap:7px; font-size:13px; line-height:1.4; color:var(--accentline);">

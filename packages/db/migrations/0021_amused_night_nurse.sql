@@ -1,0 +1,1 @@
+ALTER TABLE "backfill_job" ADD COLUMN "status_channel_id" text;

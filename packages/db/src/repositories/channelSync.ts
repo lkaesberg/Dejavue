@@ -146,6 +146,25 @@ export async function setReindexing(
     });
 }
 
+/**
+ * Finalize a FAILED reindex: force the channel out of 'reindexing' to 'stale' so it isn't
+ * stuck showing "re-scanning…" forever and can be retried. This is the reindex's OWN
+ * terminal outcome (it set 'reindexing'), so — unlike {@link markChannelStale}, which
+ * deliberately won't clobber an in-flight reindex from a live-capture race — it must win.
+ * A bare UPDATE, like {@link completeReindex}; the row exists (setReindexing created it).
+ */
+export async function failReindex(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  reason: string,
+): Promise<void> {
+  await db
+    .update(channelSync)
+    .set({ state: 'stale', staleReason: reason, updatedAt: new Date() })
+    .where(and(eq(channelSync.guildId, guildId), eq(channelSync.channelId, channelId)));
+}
+
 /** Finalize a completed reindex: synced + watermark proof + fresh counts. */
 export async function completeReindex(
   db: Database,

@@ -117,43 +117,102 @@ export function duplicateResolvedNotice(
   return { embeds: [embed], components: [] };
 }
 
+/**
+ * Live placeholder posted while dedup searches the archive; edited in place with
+ * the outcome (matches / no matches / guard notice).
+ */
+export function searchingMessage(opts: {
+  indexedCount: number;
+  semantic: boolean;
+  showBranding: boolean;
+}): BaseMessageOptions {
+  const how = opts.semantic ? 'Comparing meaning across' : 'Matching keywords across';
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('🔎 Searching solved answers…')
+      .setDescription(`${how} **${opts.indexedCount.toLocaleString('en-US')}** indexed messages…`),
+    opts.showBranding,
+  );
+  return { embeds: [embed], components: [] };
+}
+
+/** Replaces the searching placeholder when no similar solved posts were found. */
+export function noMatchesMessage(showBranding: boolean): BaseMessageOptions {
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('✨ Looks like a new question')
+      .setDescription('No similar solved posts found — someone will be along to help soon.'),
+    showBranding,
+  );
+  return { embeds: [embed], components: [] };
+}
+
+/** Intermediate state while the AI answer draft is generated (Plus+). */
+export function draftingMessage(matchCount: number, showBranding: boolean): BaseMessageOptions {
+  const posts = matchCount === 1 ? 'post matches' : 'posts match';
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR_DUPLICATE)
+      .setTitle("💡 I've seen this before")
+      .setDescription(
+        `**${matchCount} solved ${posts}** — drafting a suggested answer from the top one… ✍️`,
+      ),
+    showBranding,
+  );
+  return { embeds: [embed], components: [] };
+}
+
 /** Suggestion posted when a new post looks like a duplicate of past solved posts. */
 export function duplicatesMessage(
   guildId: string,
   matches: SearchMatch[],
   showBranding: boolean,
-  draft?: string,
+  opts?: { draft?: string; elapsedMs?: number },
 ): BaseMessageOptions {
-  const embed = withBranding(
-    new EmbedBuilder()
-      .setColor(COLOR_DUPLICATE)
-      .setTitle('💡 This may already be answered')
-      .setDescription(
-        'I found similar solved posts — one of these might save you a wait:\n\n' +
-          matches
-            .map((m, i) => {
-              const pct = m.kind === 'semantic' ? ` · ${Math.round(m.score * 100)}% match` : '';
-              const where = m.channelName ? ` · #${m.channelName}` : '';
-              return `**${i + 1}.** [${m.title}](${threadUrl(guildId, m.threadId)})${where}${pct}`;
-            })
-            .join('\n'),
-      ),
-    showBranding,
-  );
-  if (draft) {
-    embed.addFields({ name: '🤖 Possible answer (AI draft)', value: draft.slice(0, 1024) });
+  const posts = matches.length === 1 ? 'post matches' : 'posts match';
+  const embed = new EmbedBuilder()
+    .setColor(COLOR_DUPLICATE)
+    .setTitle("💡 I've seen this before")
+    .setDescription(
+      `**${matches.length} solved ${posts}** — one of these might save you a wait:\n\n` +
+        matches
+          .map((m, i) => {
+            const pct = m.kind === 'semantic' ? ` · ${Math.round(m.score * 100)}% match` : '';
+            const where = m.channelName ? ` · #${m.channelName}` : '';
+            return `**${i + 1}.** [${m.title}](${threadUrl(guildId, m.threadId)})${where}${pct}`;
+          })
+          .join('\n'),
+    );
+  const footerParts: string[] = [];
+  if (opts?.elapsedMs != null) footerParts.push(`Found in ${(opts.elapsedMs / 1000).toFixed(1)}s`);
+  if (showBranding) footerParts.push(BRAND_FOOTER);
+  if (footerParts.length > 0) embed.setFooter({ text: footerParts.join(' · ') });
+  if (opts?.draft) {
+    embed.addFields({ name: '✦ Suggested answer (AI draft)', value: opts.draft.slice(0, 1024) });
   }
 
-  const components: ActionRowBuilder<ButtonBuilder>[] = [];
-  const top = matches[0];
   const row = new ActionRowBuilder<ButtonBuilder>();
-  if (top) {
+  if (matches.length === 1) {
     row.addComponents(
       new ButtonBuilder()
-        .setCustomId(`${ACCEPT_BUTTON_PREFIX}${top.threadId}`)
-        .setLabel('Use top answer & close')
+        .setCustomId(`${ACCEPT_BUTTON_PREFIX}${matches[0]!.threadId}`)
+        .setLabel('Use this answer & close')
         .setEmoji('✅')
         .setStyle(ButtonStyle.Success),
+    );
+  } else {
+    // One accept button per listed match, so the asker can pick the one that actually
+    // fits — not just the top hit. Dedup lists at most 3, so 3 + dismiss ≤ Discord's 5.
+    matches.forEach((m, i) =>
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${ACCEPT_BUTTON_PREFIX}${m.threadId}`)
+          .setLabel(`Use #${i + 1}`)
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+      ),
     );
   }
   row.addComponents(
@@ -162,8 +221,7 @@ export function duplicatesMessage(
       .setLabel('Not a duplicate')
       .setStyle(ButtonStyle.Secondary),
   );
-  components.push(row);
-  return { embeds: [embed], components };
+  return { embeds: [embed], components: [row] };
 }
 
 /** Advisory: this question looks like a better fit for another channel (Plus, opt-in). */
@@ -233,10 +291,15 @@ export function searchResultsEmbed(
   query: string,
   results: SearchMatch[],
   showBranding: boolean,
+  opts?: { nothingIndexed?: boolean },
 ): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOR).setTitle(`Search: ${query}`.slice(0, 256));
   if (results.length === 0) {
-    embed.setDescription('No solved posts matched. Try different keywords.');
+    embed.setDescription(
+      opts?.nothingIndexed
+        ? "No answers indexed yet — mark some questions solved (or add a channel with `/dejavue setup`), then search again."
+        : 'No solved posts matched. Try different keywords.',
+    );
   } else {
     embed.setDescription(
       results

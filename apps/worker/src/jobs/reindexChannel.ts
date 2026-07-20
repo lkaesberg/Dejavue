@@ -13,13 +13,13 @@ import {
   countIndexedMessages,
   countIndexedMessagesInChannel,
   deleteThreadsByDiscordIds,
+  failReindex,
   getDb,
   getGuildConfig,
   getReindexJob,
   getThreadByDiscordId,
   type GuildConfig,
   listThreadIdsByChannel,
-  markChannelStale,
   type ReindexJob,
   semanticSearch,
   setDuplicateOf,
@@ -82,13 +82,10 @@ export async function handleReindexChannel(job: ReindexChannelJob): Promise<void
   } catch (err) {
     log.error({ err, jobId: rj.id }, 'reindex failed');
     await updateReindexJob(db, rj.id, { status: 'failed' });
-    await markChannelStale(
-      db,
-      rj.guildId,
-      rj.channelId,
-      rj.kind === 'forum' ? 'forum' : 'channel',
-      'reindex failed',
-    ).catch(() => undefined);
+    // failReindex (not markChannelStale): the channel is in 'reindexing' from setReindexing,
+    // and markChannelStale deliberately won't overwrite that — which would pin a failed
+    // reindex at "re-scanning…" forever. This forces it to 'stale' so it's retryable.
+    await failReindex(db, rj.guildId, rj.channelId, 'reindex failed').catch(() => undefined);
     await live?.fail(
       reindexProgressEmbed({
         channelLabel: label,
@@ -135,12 +132,14 @@ async function reindexForum(
   live?.update(reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'listing', done: all.length }));
 
   // 2. INDEX — force re-embed every thread (not skip-if-present like backfill).
-  const seen = new Set<string>();
+  // `seen` = the COMPLETE listing (every thread Discord returned), built up front so the
+  // prune in step 3 is correct even if indexing stops early at the cap. Deriving it from
+  // the loop instead would omit everything after an early `break` and prune live threads.
+  const seen = new Set(all.map((t) => t.id));
   const processed = new Set(rj.processedThreadIds);
   let processedCount = rj.processed;
   let indexed = await countIndexedMessages(db, rj.guildId);
   for (const t of all) {
-    seen.add(t.id);
     if (processed.has(t.id)) continue;
     if (indexed >= limits.indexCap) break;
     try {

@@ -1,5 +1,20 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { type Tier, tierLimits } from '@dejavue/core';
 import { COLOR } from './embeds';
+
+/**
+ * "Upgrade to **Plus** (5), **Pro** (10), or **Max** (unlimited)." — the per-tier
+ * channel caps derived from tierLimits so the upsell copy can never drift from the
+ * limits actually enforced.
+ */
+export function channelCapUpsellLine(kind: 'forum' | 'tracked'): string {
+  const cap = (tier: Tier): string => {
+    const limits = tierLimits(tier);
+    const n = kind === 'forum' ? limits.maxForumChannels : limits.maxTrackedChannels;
+    return Number.isFinite(n) ? String(n) : 'unlimited';
+  };
+  return `Upgrade to **Plus** (${cap('plus')}), **Pro** (${cap('pro')}), or **Max** (${cap('max')}).`;
+}
 
 export interface UpsellOptions {
   title: string;

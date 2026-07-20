@@ -65,9 +65,9 @@ const ghostBtn = 'background:rgba(244,245,255,0.06); border:1px solid rgba(244,2
 // AI usage is metered in AI credits: 1 credit = 1,000 model tokens (a drafted
 // answer ≈ 0.8 credits, a thread summary ≈ 3). Keep in sync with README + core.
 const tiers = [
-  { name: 'Free', price: '€0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', pill: '', pillStyle: '', cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public website on your subdomain'] },
-  { name: 'Plus', price: '€4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', pill: '', pillStyle: '', cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Public website · no Dejavue branding', 'Stale-question nudges · full analytics'] },
-  { name: 'Pro', price: '€9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', pill: 'MOST POPULAR', pillStyle: 'background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff;', cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
+  { name: 'Free', price: '€0', per: '', tag: 'Keyword detection for a single forum.', bg: 'rgba(27,29,51,0.45)', border: 'rgba(244,245,255,0.08)', pill: '', pillStyle: '', cta: 'Add to Discord', btnStyle: ghostBtn, feats: ['1 forum channel', '1 tracked text channel', 'Keyword duplicate detection', 'Mark-solved + archive (500 messages)', 'Basic counts', 'Public website on your subdomain'] },
+  { name: 'Plus', price: '€4.99', per: '/mo', tag: 'Semantic search with a taste of AI answers.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(244,245,255,0.1)', pill: '', pillStyle: '', cta: 'Choose Plus', btnStyle: ghostBtn, feats: ['5 forum channels', '5 tracked text channels', 'Semantic duplicate detection', 'AI-drafted answers · 25 credits / mo', '5,000 indexed messages', 'Public website · no Dejavue branding', 'Stale-question nudges · full analytics'] },
+  { name: 'Pro', price: '€9.99', per: '/mo', tag: 'The full AI suite: summaries, clustering & auto-FAQ.', bg: 'linear-gradient(180deg, rgba(79,70,229,0.2), rgba(27,29,51,0.6))', border: 'rgba(167,139,250,0.4)', pill: 'MOST POPULAR', pillStyle: 'background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff;', cta: 'Choose Pro', btnStyle: featBtn, feats: ['10 forum channels', '15 tracked text channels', 'Semantic + AI-drafted answers', '50,000 indexed messages', 'AI summaries · clustering · auto-FAQ', '1,000 AI credits / mo (≈1,200 drafts)', 'AI-summarized website pages'] },
   { name: 'Max', price: '€24.99', per: '/mo', tag: 'Unlimited scale, plus your answers inside Claude & ChatGPT.', bg: 'rgba(27,29,51,0.55)', border: 'rgba(45,212,191,0.3)', pill: 'CLAUDE & CHATGPT', pillStyle: 'background:linear-gradient(135deg,#2DD4BF,#5EEAD4); color:#052E28;', cta: 'Choose Max', btnStyle: ghostBtn, feats: ['Unlimited channels & archive', 'Unlimited AI-summarized website pages', '5,000 AI credits / mo', 'Your answers inside Claude & ChatGPT (MCP)', 'Everything in Pro'] },
 ];
 
@@ -158,11 +158,11 @@ const structuredData = {
           </div>
         </div>
 
-        <div class="kb-home">
+        <main class="kb-home" id="kb-main" tabindex="-1">
           {/* most asked */}
           {mostAsked.length > 0 && (
             <>
-              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin-bottom:13px;">Most asked</div>
+              <h2 style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin:0 0 13px;">Most asked</h2>
               <div style="border:1px solid var(--border); border-radius:var(--rad); overflow:hidden; background:var(--surface);">
                 {mostAsked.map((q) => (
                   <a href={threadPath(q)} class="kb-row" style="display:flex; align-items:center; gap:13px; padding:15px 18px; border-bottom:1px solid var(--border);">
@@ -178,7 +178,7 @@ const structuredData = {
           )}
 
           {/* channels */}
-          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin:30px 0 13px;">Channels</div>
+          <h2 style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--textmut); font-weight:600; margin:30px 0 13px;">Channels</h2>
           {categories.length === 0 ? (
             <p style="font-size:14px; color:var(--textmut);">No published answers yet. Check back soon.</p>
           ) : (
@@ -209,7 +209,7 @@ const structuredData = {
               })}
             </div>
           )}
-        </div>
+        </main>
 
         <KbFooter note={`Updated daily · ${threads.length} answers indexed`} />
     </Base>

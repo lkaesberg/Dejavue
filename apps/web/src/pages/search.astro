@@ -105,7 +105,7 @@ const badgeText = (r: KbSearchResult): string =>
       <KbNav />
       <div class="kb-inner">
         <ChannelRail channels={channels} activeChannelId={channelFilter ?? null} topics={topics} isPaid={isPaid} />
-        <main class="kb-main">
+        <main class="kb-main" id="kb-main" tabindex="-1">
             <div style="padding:26px 0 40px;">
               {/* search field */}
               <form action="/search" method="get" role="search" style="display:flex; align-items:center; gap:11px; background:var(--surface); border:1.5px solid var(--accent); border-radius:var(--rad); padding:13px 18px; box-shadow:0 4px 16px rgba(109,95,232,0.1);">
@@ -151,7 +151,14 @@ const badgeText = (r: KbSearchResult): string =>
                 {query === '' ? (
                   <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">Type a question above to search the knowledge base.</p>
                 ) : results.length === 0 ? (
-                  <p style="font-size:14px; color:var(--textmut); padding:18px 2px;">No matches for “{query}”.</p>
+                  <div style="padding:22px 2px;">
+                    <p style="font-size:15px; color:var(--text); margin:0; font-weight:600;">No matches for “{query}”.</p>
+                    <p style="font-size:14px; color:var(--textmid); margin:8px 0 0; line-height:1.6;">
+                      Try fewer or different words
+                      {semanticAllowed && !semanticActive && (<>, or <a href={toggleHref} style="color:var(--accentline); font-weight:600;">turn on semantic search</a> to match by meaning</>)}
+                      . You can also <a href="/" style="color:var(--accentline); font-weight:600;">browse all channels</a>.
+                    </p>
+                  </div>
                 ) : (
                   results.map((r) => (
                     <a href={threadPath(r)} class="kb-row" style="display:block; padding:18px 2px; border-bottom:1px solid var(--border);">
@@ -168,7 +175,7 @@ const badgeText = (r: KbSearchResult): string =>
                           <div style="display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap;">
                             <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--textmut);">{cfg?.customDomain ?? `${tenant.slug}.dejavue.app`}</span>
                             {r.channel && (
-                              <span style="background:#EEF6FF; color:#2563EB; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px;">{r.channel}</span>
+                              <span style="background:var(--accentsoft); color:var(--accentline); font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px;">{r.channel}</span>
                             )}
                             {r.labels.map((l) => (
                               <span style="background:var(--chipbg); color:var(--chiptext); font-size:11px; font-weight:500; padding:2px 9px; border-radius:999px;">{l}</span>
