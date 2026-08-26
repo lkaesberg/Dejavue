@@ -135,9 +135,12 @@ services:
     # is terminated by Cloudflare (the wildcard is proxied); this router only
     # listens on the http entrypoint — check the Cloudflare SSL mode before
     # switching it to Full/strict.
+    # No traefik.docker.network here on purpose: that label is container-scoped,
+    # so setting it would override the network Coolify picked for this stack and
+    # leave every router (including Coolify's own dejavue.app one) with no
+    # reachable backend.
     labels:
       - traefik.enable=true
-      - traefik.docker.network=coolify
       - traefik.http.routers.dejavue-kb.entrypoints=http
       - traefik.http.routers.dejavue-kb.rule=HostRegexp(`^.+\.dejavue\.app$`)
       - traefik.http.routers.dejavue-kb.service=dejavue-kb
