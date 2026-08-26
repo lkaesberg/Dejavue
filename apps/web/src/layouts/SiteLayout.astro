@@ -88,6 +88,9 @@ const pageUrl = canonical ?? `${origin}/`;
 
       /* ---- Responsive marketing grids ---- */
       .site-nav-links { display: flex; align-items: center; gap: 30px; }
+      /* Nav links that pair an icon with a label. Kept out of the inline styles so the
+         max-width:760px rule below can still hide them with `display:none`. */
+      .nav-icon-link { display: inline-flex; align-items: center; gap: 7px; }
       .hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 60px; align-items: center; }
       .kb-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 56px; align-items: center; }
       .assistant-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 44px; align-items: center; }
