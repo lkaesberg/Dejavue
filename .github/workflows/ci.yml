@@ -1,6 +1,7 @@
 name: CI
 
-# Typecheck + tests on every push and pull request. Deployment lives in deploy.yml.
+# Typecheck + tests on every push and pull request. Deployment is handled by Coolify
+# (autodeploy from main via the repo webhook) — see docker-compose.coolify.yml.
 on:
   push:
     branches: [main]

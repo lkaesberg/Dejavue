@@ -1,0 +1,159 @@
+# Production stack, deployed by Coolify (Docker Compose build pack) from `main`.
+#
+# Deliberately separate from docker-compose.yml so the self-hosting quickstart in
+# the README stays a plain `docker compose up`. Differences from that file:
+#   - no host ports: Coolify's Traefik reaches `web` over the internal network,
+#     and Postgres is only visible to the other services;
+#   - no .env: every value comes from the app's Environment Variables in Coolify,
+#     and a missing required one (`:?`) fails the deploy instead of booting a
+#     half-configured bot;
+#   - defaults are repeated here where the app has one (e.g. EMBEDDING_DIM), so an
+#     unset variable never reaches the app as an empty string — zod would reject
+#     "" for the coerced/enum vars.
+#
+# Coolify: Build Pack = Docker Compose · Compose file = /docker-compose.coolify.yml
+
+x-env: &env
+  DATABASE_URL: postgres://dejavue:${POSTGRES_PASSWORD:?}@postgres:5432/dejavue
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  # pino-pretty isn't bundled into the images — JSON logs everywhere.
+  LOG_PRETTY: "0"
+
+  DISCORD_TOKEN: ${DISCORD_TOKEN:?}
+  DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+
+  # Premium Apps SKU ids — an empty one hides that product (falsy == unset).
+  SKU_PLUS: ${SKU_PLUS:-}
+  SKU_PRO: ${SKU_PRO:-}
+  SKU_MAX: ${SKU_MAX:-}
+  SKU_BACKFILL: ${SKU_BACKFILL:-}
+  SKU_TOPUP_500: ${SKU_TOPUP_500:-}
+  SKU_TOPUP_1000: ${SKU_TOPUP_1000:-}
+  SKU_TOPUP_2000: ${SKU_TOPUP_2000:-}
+  SKU_TOPUP_5000: ${SKU_TOPUP_5000:-}
+  SKU_CUSTOM_DOMAIN: ${SKU_CUSTOM_DOMAIN:-}
+
+  # Embeddings. To point them at another OpenAI-compatible API, add
+  # EMBEDDING_BASE_URL / EMBEDDING_API_KEY here as well — they must be absent
+  # rather than empty, so they are not listed with a "" fallback.
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-small-en-v1.5}
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
+
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4-pro}
+  OPENROUTER_APP_URL: ${OPENROUTER_APP_URL:-https://dejavue.app}
+  OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Dejavue}
+
+  KB_BASE_DOMAIN: ${KB_BASE_DOMAIN:-dejavue.app}
+  KB_PUBLIC_URL: ${KB_PUBLIC_URL:-https://dejavue.app}
+  KB_REVALIDATE_SECRET: ${KB_REVALIDATE_SECRET:?}
+
+  QUOTA_CREDITS_PLUS: ${QUOTA_CREDITS_PLUS:-25}
+  QUOTA_CREDITS_PRO: ${QUOTA_CREDITS_PRO:-1000}
+  QUOTA_CREDITS_MAX: ${QUOTA_CREDITS_MAX:-5000}
+  MCP_RATE_PER_MIN: ${MCP_RATE_PER_MIN:-30}
+  CHANNEL_JOB_CONCURRENCY: ${CHANNEL_JOB_CONCURRENCY:-2}
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: dejavue:latest
+  environment: *env
+  restart: unless-stopped
+
+services:
+  postgres:
+    # Pinned Postgres major + pgvector build (don't use `latest`).
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dejavue
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: dejavue
+    volumes:
+      - dejavue_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dejavue -d dejavue']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Runs migrations once, then exits; the apps wait for it to succeed.
+  migrate:
+    <<: *app
+    command: ['pnpm', '--filter', '@dejavue/db', 'migrate']
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    <<: *app
+    command: ['pnpm', '--filter', '@dejavue/bot', 'start']
+    # Persist the downloaded CPU embedding model across restarts.
+    volumes:
+      - dejavue_models:/app/.models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ['pnpm', '--filter', '@dejavue/worker', 'start']
+    volumes:
+      - dejavue_models:/app/.models
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:8090/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    <<: *app
+    command: ['pnpm', '--filter', '@dejavue/web', 'start']
+    environment:
+      <<: *env
+      HOST: '0.0.0.0'
+      PORT: '4321'
+    expose:
+      - '4321'
+    # Coolify routes the apex (dejavue.app) via the domain set on this service.
+    # Tenant subdomains ({slug}.dejavue.app) are wildcards, which Coolify's domain
+    # field can't express, so they get their own Traefik router here. TLS for them
+    # is terminated by Cloudflare (the wildcard is proxied); this router only
+    # listens on the http entrypoint — check the Cloudflare SSL mode before
+    # switching it to Full/strict.
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.dejavue-kb.entrypoints=http
+      - traefik.http.routers.dejavue-kb.rule=HostRegexp(`^.+\.dejavue\.app$`)
+      - traefik.http.routers.dejavue-kb.service=dejavue-kb
+      - traefik.http.services.dejavue-kb.loadbalancer.server.port=4321
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:4321/ >/dev/null || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  dejavue_pgdata:
+  dejavue_models:
