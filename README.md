@@ -1,79 +1,199 @@
-# Dejavue
+<!--
+*** Built using the Best-README-Template.
+-->
+<!-- PROJECT LOGO -->
+<br />
+<p align="center">
+<a><img src="images/app-icon-2048-rounded.png" alt="Dejavue" width="128" height="128" title="Dejavue"></a>
+  <h3 align="center">Dejavue</h3>
+  <p align="center">
+    Stop answering the same question twice — duplicate detection and a searchable knowledge base for Discord<br />
+    <p align="center">
+  <a href="https://github.com/lkaesberg/Dejavue/actions/workflows/ci.yml"><img src="https://github.com/lkaesberg/Dejavue/actions/workflows/ci.yml/badge.svg" alt="Build Status"></a>
+  <a href="https://github.com/lkaesberg/Dejavue/blob/main/LICENSE"><img src="https://img.shields.io/github/license/lkaesberg/Dejavue" alt="License"></a>
+  <a href="https://github.com/lkaesberg/Dejavue/network/members"><img src="https://img.shields.io/github/forks/lkaesberg/Dejavue?style=social" alt="GitHub forks"></a>
+  <a href="https://github.com/lkaesberg/Dejavue/stargazers"><img src="https://img.shields.io/github/stars/lkaesberg/Dejavue?style=social" alt="GitHub stars"></a>
+</p>
+    <p>
+    <a href="https://github.com/lkaesberg/Dejavue/issues">Report Bug</a>
+    ·
+    <a href="https://github.com/lkaesberg/Dejavue/issues">Request Feature</a>
+    </p>
+    <a href="https://dejavue.app/">🌐 Website</a>
+  </p>
+</p>
 
-**Dejavue** is a Discord bot for help/Q&A **forum channels**. It catches duplicate questions the
-moment they're posted, drives a clean *mark-solved* workflow, and turns every solved thread into a
-searchable archive — inside Discord, on a public, SEO-friendly website, and (on the top tier) as an
+---
+
+<!-- TABLE OF CONTENTS -->
+<details open="open">
+  <summary><h2 style="display: inline-block">📋 Table of Contents</h2></summary>
+  <ol>
+    <li><a href="#-about">About</a></li>
+    <li><a href="#-features">Features</a></li>
+    <li><a href="#-usage">Usage</a></li>
+    <li><a href="#-commands">Commands</a></li>
+    <li><a href="#-tiers">Tiers</a></li>
+    <li><a href="#-built-with">Built With</a></li>
+    <li>
+      <a href="#-self-hosting">Self Hosting</a>
+      <ul>
+        <li><a href="#docker-recommended">Docker (Recommended)</a></li>
+        <li><a href="#manual-installation">Manual Installation</a></li>
+        <li><a href="#discord-application-setup">Discord Application Setup</a></li>
+        <li><a href="#configuration-options">Configuration Options</a></li>
+      </ul>
+    </li>
+    <li><a href="#-architecture">Architecture</a></li>
+    <li><a href="#-mcp-server">MCP Server</a></li>
+    <li><a href="#-privacy">Privacy</a></li>
+    <li><a href="#-contributing">Contributing</a></li>
+    <li><a href="#-license">License</a></li>
+  </ol>
+</details>
+
+---
+
+## 📖 About
+
+**Dejavue** is a Discord bot for help and Q&A channels. It catches duplicate questions the moment
+they're posted, drives a clean *mark-solved* workflow, and turns every solved thread into a
+searchable archive — inside Discord, on a public SEO-friendly website, and (on the top tier) as an
 **MCP server** your AI tools can query.
 
-It's monetized per-server through **Discord Premium Apps**, with pricing aligned to cost: keyword
-features are free, semantic search anchors the mid tier, and generative AI is metered in **AI credits**
-(1 credit = 1,000 tokens) — a small taster budget on Plus, serious budgets on Pro/Max.
+It's useful for any server where the same questions keep coming back:
+
+- **Developer tools & SaaS communities** — the same setup error, asked weekly
+- **Game studios** — crash reports and "how do I…" threads
+- **Open-source projects** — questions your docs don't answer yet
+
+### How it works
+
+1. **Someone posts** in a monitored channel → Dejavue reads the question and checks for duplicates
+   (keyword on Free, semantic on Plus+). If it finds similar solved posts, it replies with the
+   matches — plus, on Plus and up, an **AI-drafted answer**.
+2. **Someone resolves it**: click **Mark as solved** (a modal captures the answer), right-click the
+   helpful reply → **Apps → Mark as Answer**, or hit **Use this answer & close** to borrow a previous
+   answer. Only the **original poster, a moderator, or an admin** can resolve a thread.
+3. **Dejavue archives it**: swaps the `unsolved` → `solved` tag, stores the accepted answer plus the
+   full transcript, embeds it for semantic search, writes an **AI summary** (Pro/Max), and — if the
+   server opted in — publishes it to the public website.
+4. **Everyone finds it again** with `/dejavue search`, on the website, or through the MCP server.
 
 ---
 
-## How it works
+## ✨ Features
 
-1. **Someone posts** in a monitored forum → Dejavue debounces, reads the question, and checks for
-   duplicates (keyword on Free, semantic on Plus+). If it finds similar solved posts, it replies with
-   the matches — plus, on Plus and up, an **AI-drafted answer** (credit-metered).
-2. The asker (or a helper) resolves it: click **Mark as solved** (which opens a modal so an answer is
-   always captured), right-click the helpful reply → **Apps → Mark as Answer**, or hit
-   **Use top answer & close** on the duplicate suggestion to borrow a previous answer.
-3. On solve, Dejavue swaps the `unsolved` → `solved` tag, stores the **accepted answer + full
-   transcript**, embeds it for semantic search, (Pro/Max) writes a clean **AI summary**, and — if the
-   guild opted in — **publishes it to the public website**.
-4. Members find answers with `/dejavue search`; admins watch `/dejavue analytics`, `gaps`, and `faq`.
+### 🔍 Duplicate detection & search
 
-Only the **original poster, a moderator, or an admin** can resolve a thread.
-
----
-
-## Features
-
-**Duplicate detection & search**
 - Keyword (Free) or **semantic** (Plus+) duplicate detection on new posts, debounced with a
-  starter-message retry + `messageCreate` fallback so it never misses the question text.
-- `/dejavue search` over the solved-answer archive (keyword → semantic by tier).
-- "Use top answer & close" borrows a matched answer, posts it, and marks the post solved + duplicate.
+  starter-message retry so it never misses the question text
+- `/dejavue search` over the solved-answer archive, with `broad` / `balanced` / `exact` match presets
+  or a custom match threshold
+- **Use this answer & close** borrows a matched answer, posts it, and marks the post solved as a
+  duplicate — or **Not a duplicate** dismisses the suggestion
 
-**Solving & archive**
-- Button + modal + message context menu + slash command, all permission-gated to OP/mod/admin.
-- Per-forum `solved` / `unsolved` tag automation (created automatically on setup).
-- Full thread **transcript** captured on solve (privacy-aliased speakers on the public website).
+### ✅ Solving & archive
 
-**AI (credit-metered via OpenRouter → DeepSeek V4 Pro; drafts on Plus+, full suite on Pro/Max)**
-- **Answer drafting** from past solved threads when a duplicate is found.
-- **Thread summarization** into a clean, canonical answer for the public website.
-- **Knowledge-gap clustering** — groups recurring questions so you know what docs to write.
-- **Auto-FAQ** generation/maintenance (respects manual edits).
+- Button + modal + message context menu + slash command, all permission-gated to OP/mod/admin
+- Per-forum `solved` / `unsolved` tag automation (created automatically on setup)
+- Full thread **transcript** captured on solve (speakers privacy-aliased on the public website)
+- Two channel modes: **question** (Q&A — find duplicates, mark answers) and **knowledge**
+  (archive everything, no prompts)
 
-**Public website**
-- Per-guild **subdomain** (`{slug}.dejavue.app`) or your own **custom domain** (one-time purchase).
-- Each monitored **channel becomes its own category**; pages show the answer + full discussion.
-- `QAPage` / `FAQPage` JSON-LD, DB-driven sitemap, near-zero-JS pages for SEO.
-- Opt-in per guild (default off); usernames aliased ("Original poster" / "Helper N").
+### 🤖 AI (credit-metered via OpenRouter)
 
-**MCP server (Max)**
-- Each Max guild exposes its published answers as a **Streamable HTTP MCP server** at `{slug}.dejavue.app/mcp`
-  with a `search_knowledge_base` tool — add it to Claude or any MCP client to let your AI answer
-  from the community's solved questions.
+- **Answer drafting** from past solved threads when a duplicate is found
+- **Thread summarization** into a clean, canonical answer for the public website
+- **Knowledge-gap clustering** — groups recurring questions so you know what docs to write
+- **Auto-FAQ** generation and maintenance (respects manual edits)
 
-**Ops**
-- Analytics: resolution rate, time-to-resolution, top helpers (Plus+).
-- Stale-question **nudges** that ping a helper role on a timer (Plus+).
-- **Backfill**: import a forum's entire history into the archive — included, up to your tier's indexed-message limit.
+### 🌐 Public website
+
+- Per-server **subdomain** (`{slug}.dejavue.app`) or your own **custom domain**
+- Each monitored **channel becomes its own category**; pages show the answer plus the full discussion
+- `QAPage` / `FAQPage` JSON-LD, DB-driven sitemap, near-zero-JS pages for SEO
+- **Opt-in per server** (default off); usernames aliased as "Original poster" / "Helper N"
+
+### 🔌 MCP server (Max)
+
+- Publishes your answers as a **Streamable HTTP MCP server** at `{slug}.dejavue.app/mcp`
+- Add it to Claude, ChatGPT, Cursor, or any MCP client so your AI answers from your community's
+  solved questions instead of guessing
+
+### 📊 Ops
+
+- Analytics: resolution rate, time-to-resolution, top helpers
+- Stale-question **nudges** that ping a helper role on a timer
+- **Re-scan** to import a channel's entire history into the archive, and to drop deleted posts
 
 ---
 
-## Tiers
+## 🚀 Usage
 
-Billed per-server via Discord Premium Apps.
+### Invite the Bot
 
-AI usage is metered in **AI credits** (1 credit = 1,000 model tokens, input + output). Each drafted
-answer costs ≈ 0.8 credits and each thread summary ≈ 3, so the quotas below translate to roughly
-"drafts per month" at 1.25× the credit number. Everything indexed counts against one **indexed
-messages** ceiling (there is no separate archive/website-page cap); public website pages themselves are
-unlimited, gated only by the per-guild publish opt-in + optional passphrase.
+[![Invite Bot](https://img.shields.io/badge/Add-Dejavue%20Bot-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://dejavue.app/)
+
+### Quick Setup
+
+1. **Add the bot** to your server using the link above
+2. **Monitor a channel**: `/dejavue setup channel:#help` — this also creates the `solved` /
+   `unsolved` tags for forum channels
+3. **Import your history**: `/dejavue rescan channel:#help` indexes past threads so duplicate
+   detection works from day one
+4. Done. Dejavue now replies to duplicates and archives every solved thread.
+
+### Next steps
+
+- `/dejavue customize` — set up your public website: branding, theme, custom domain and privacy
+- `/dejavue settings` — turn nudges, channel-fit suggestions and the off-topic guard on or off
+- `/dejavue insights` — see stats, analytics, recurring-question clusters and the auto-FAQ
+
+> 💡 Run `/dejavue setup` with no channel to open the channel manager and review everything you've
+> indexed.
+
+---
+
+## 📝 Commands
+
+Everything lives under one `/dejavue` command, plus a **Mark as Answer** message context menu.
+
+| Command | Description | Who |
+|---------|-------------|-----|
+| `/dejavue setup [channel] [mode]` | Add a channel, or run it alone to view & manage indexed channels | admin |
+| `/dejavue rescan [channel]` | Re-scan a channel's full history and remove deleted posts | admin |
+| `/dejavue settings` | Toggle nudges, channel-fit suggestions & the off-topic guard | admin |
+| `/dejavue customize` | Customize your public website — branding, theme, domain & privacy | admin |
+| `/dejavue insights` | Stats, analytics, recurring-question clusters & the auto-FAQ | anyone |
+| `/dejavue search <query> [match] [threshold]` | Search your knowledge base | anyone |
+| `/dejavue help` | Learn how Dejavue works | anyone |
+| **Mark as Answer** (right-click a message → Apps) | Mark that reply as the accepted answer | OP/mod/admin |
+
+### Options
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `mode` | `question`, `knowledge` | Forums only. `question` runs the Q&A loop (duplicates + mark-answer); `knowledge` archives everything with no prompts. Default: `question` |
+| `match` | `broad`, `balanced`, `exact` | How closely search results must match. Default: `balanced` |
+| `threshold` | `0`–`100` | Custom minimum match percentage — overrides the `match` preset |
+
+### Important: Bot Permissions
+
+Dejavue needs **View Channels, Manage Channels, Send Messages, Embed Links, Read Message History,
+Manage Threads** and **Send Messages in Threads**. Manage Channels is what lets it create and swap
+the `solved` / `unsolved` forum tags — without it, tag automation fails.
+
+The **Message Content** privileged intent must be enabled, since Dejavue reads question text to
+detect duplicates.
+
+---
+
+## 💳 Tiers
+
+The hosted bot is billed per server through **Discord Premium Apps**. AI usage is metered in **AI
+credits** (1 credit = 1,000 model tokens, input + output): a drafted answer costs ≈ 0.8 credits and a
+thread summary ≈ 3.
 
 | | **Free** | **Plus** €4.99 | **Pro** €9.99 | **Max** €24.99 |
 |---|---|---|---|---|
@@ -81,7 +201,7 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 | Tracked (non-forum) channels | 1 | 5 | 15 | unlimited |
 | Indexed messages | 500 | 5,000 | 50,000 | unlimited |
 | Duplicate detection / search | keyword | semantic | semantic | semantic |
-| AI-drafted answers on duplicates | — | ✓ (taster) | ✓ | ✓ |
+| AI-drafted answers | — | ✓ (taster) | ✓ | ✓ |
 | AI summary / clustering / auto-FAQ | — | — | ✓ | ✓ |
 | **AI credits / mo** | — | **25** | **1,000** | **5,000** |
 | Stale-question nudges | — | ✓ | ✓ | ✓ |
@@ -90,42 +210,186 @@ unlimited, gated only by the per-guild publish opt-in + optional passphrase.
 | **MCP server** | — | — | — | **✓** (30 req/min) |
 | "Powered by Dejavue" branding | shown | removed | removed | removed |
 
-**One-time purchases** (any tier): **Custom domain — €29.99** (serve your public website on your own
-domain) · **Top-up — €1.99** (**+250 AI credits**, consumable, stacks, never expires). Importing
-existing forum history is included — setup reindexes past threads up to the tier's indexed-message limit.
+**One-time purchases** (any tier): **Custom domain — €29.99** · **AI top-up — €1.99** for +250
+credits (consumable, stacks, never expires). Importing your existing history is free, up to each
+tier's indexed-message limit.
+
+> 💡 **Self-hosting has no tiers.** Set `DEV_FORCE_TIER=max` and every feature is unlocked — you
+> just pay your own OpenRouter bill for the AI parts, or run embeddings on CPU for free.
 
 ---
 
-## Commands
+## 🛠 Built With
 
-`/dejavue` (slash) + a **Mark as Answer** message context menu.
-
-| Subcommand | What it does | Who |
-|---|---|---|
-| `setup <forum>` | Monitor a forum channel; ensures solved/unsolved tags | admin |
-| `status` | Full config: tier, channels, website/MCP URLs, quota, custom domain | admin |
-| `config` | Quick configuration summary | anyone |
-| `search <query>` | Search the solved-answer archive | anyone |
-| `stats` | Solved/unsolved counts (+ quota on Pro+) | anyone |
-| `analytics` | Resolution rate, top helpers, most-asked (Plus+) | anyone |
-| `gaps` | Recurring unanswered-question clusters (Pro+) | anyone |
-| `faq` | Auto-generated FAQ (Pro+) | anyone |
-| `nudges [enabled] [hours] [role]` | Configure stale-question pings (Plus+) | admin |
-| `solved` | Mark the current post solved (opens the answer modal) | OP/mod/admin |
-| `kb [slug] [publish]` | Configure the public website (subdomain + publishing) | admin |
-| `domain [host]` | Set a custom domain (one-time purchase) | admin |
-| `backfill <forum>` | Import a forum's history (included, up to your tier's limit) | admin |
-| `demo` | Create an example forum with sample Q&A to try it out | admin |
-| `help` | Overview | anyone |
+- **[TypeScript](https://www.typescriptlang.org/)** — everything, in a pnpm workspace
+- **[discord.js v14](https://discord.js.org/)** — gateway client, commands, interactions
+- **[Postgres](https://www.postgresql.org/) + [pgvector](https://github.com/pgvector/pgvector)** —
+  storage and vector search, via [Drizzle ORM](https://orm.drizzle.team/)
+- **[Transformers.js](https://huggingface.co/docs/transformers.js)** — embeddings on CPU, free and
+  local (`bge-small-en-v1.5`)
+- **[OpenRouter](https://openrouter.ai/)** — LLM access for drafts, summaries and FAQs
+- **[pg-boss](https://github.com/timgit/pg-boss)** — Postgres-backed job queue (no Redis)
+- **[Astro](https://astro.build/)** — SSR for the public website and the MCP endpoint
 
 ---
 
-## Architecture
+## 🐳 Self Hosting
 
-**Stack:** TypeScript · discord.js v14 · Postgres + pgvector (Drizzle) · pluggable embeddings
-(self-host CPU via Transformers.js `bge-small-en-v1.5`, or OpenRouter `text-embedding-3-large`;
-384-dim either way) · DeepSeek V4 Pro via OpenRouter · pg-boss (Postgres-backed jobs, no Redis) ·
-Astro SSR (public website + MCP).
+Dejavue is fully self-hostable — **no license key, no phone-home, no feature gating**. You have two
+options: **Docker** (recommended) or **Manual Installation**.
+
+**Requirements:** Docker, or Node.js 22+ with a Postgres 16 database that has the `pgvector`
+extension available.
+
+### Docker (Recommended)
+
+The whole stack — Postgres, migrations, bot, worker and web — comes up with one command.
+
+#### 1. Clone the repository
+
+```bash
+git clone https://github.com/lkaesberg/Dejavue.git
+cd Dejavue
+```
+
+#### 2. Create the config file
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Fill in at minimum:
+
+```env
+DISCORD_TOKEN=<Discord Bot Token>
+DISCORD_CLIENT_ID=<Discord Bot Client ID>
+OPENROUTER_API_KEY=<OpenRouter API Key>   # optional: only needed for AI features
+DEV_FORCE_TIER=max                        # unlock every feature when self-hosting
+```
+
+#### 3. Start the stack
+
+```bash
+docker compose up -d --build
+```
+
+`DATABASE_URL` is auto-pointed at the bundled `postgres` service, migrations run on start, and the
+CPU embedding model is cached in a named volume. The web app listens on port **4321**.
+
+#### 4. Register the slash commands
+
+```bash
+docker compose exec bot pnpm --filter @dejavue/bot register
+```
+
+---
+
+### Manual Installation
+
+**Requirements:** Node.js v22 or higher
+
+#### 1. Clone and install
+
+```bash
+git clone https://github.com/lkaesberg/Dejavue.git
+cd Dejavue
+corepack enable        # provides pnpm (version pinned in package.json)
+pnpm install
+```
+
+#### 2. Create the config file
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+#### 3. Start Postgres and migrate
+
+```bash
+pnpm db:up             # Postgres (pinned pgvector/pgvector:pg16) in Docker
+pnpm db:migrate        # extension + tables + HNSW index
+pnpm db:verify         # proves pgvector cosine search works
+```
+
+Point `DATABASE_URL` at your own Postgres instead if you already run one — it needs the `pgvector`
+extension.
+
+#### 4. Run it
+
+```bash
+pnpm dev               # Postgres + migrations + bot + worker + web, with live reload
+```
+
+Or run the services individually: `pnpm dev:bot` / `pnpm dev:worker` / `pnpm dev:web`.
+
+> 💡 `make setup` does steps 1–3 in one go, and `make help` lists every available task.
+
+**Dev container:** open the repo in VS Code / Cursor and "Reopen in Container" — the
+[.devcontainer](.devcontainer/devcontainer.json) starts Postgres alongside a Node 22 workspace,
+installs dependencies, and runs migrations automatically (ports 4321/5432/8090 forwarded).
+
+---
+
+### Discord Application Setup
+
+1. **Create an application** in the
+   [Discord Developer Portal](https://discord.com/developers/applications)
+2. **Bot → Privileged Gateway Intents:** enable **Message Content** only. Leave Presence and Server
+   Members off.
+3. **OAuth2 → URL Generator:** scopes `bot` + `applications.commands`; permissions: View Channels,
+   Manage Channels, Send Messages, Embed Links, Read Message History, Manage Threads, Send Messages
+   in Threads. Open the generated URL to add your bot.
+4. **Register commands:** `pnpm --filter @dejavue/bot register` — uses `DISCORD_DEV_GUILD_ID` for
+   instant guild-scoped commands, or registers globally if unset.
+5. **Website domains** (optional): point `*.yourdomain.tld` (wildcard DNS + TLS) at the web app and
+   set `KB_BASE_DOMAIN`. Custom domains CNAME to the same host.
+6. **Monetization** (only if you're selling access): enable it in the portal, create the SKUs, and
+   put their ids in `.env`. Self-hosters should just set `DEV_FORCE_TIER=max` instead.
+
+---
+
+### Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `DATABASE_URL` | Postgres connection string (needs the `pgvector` extension) |
+| `DISCORD_TOKEN` | Your Discord bot token |
+| `DISCORD_CLIENT_ID` | Your Discord application's client ID |
+| `DISCORD_DEV_GUILD_ID` | *(Optional)* Register commands to one guild for instant updates |
+| `OPENROUTER_API_KEY` | *(Optional)* Enables AI drafts, summaries, clustering and the auto-FAQ |
+| `OPENROUTER_MODEL` | Model for generative features (default `deepseek/deepseek-v4-pro`) |
+| `KB_BASE_DOMAIN` | Base domain for public knowledge bases (default `dejavue.app`) |
+| `KB_PUBLIC_URL` | Public URL of the marketing/website root |
+| `EMBEDDING_PROVIDER` | `local` (default, free CPU) or `openrouter` |
+| `EMBEDDING_MODEL` | Embedding model id — see the table below |
+| `QUOTA_CREDITS_PLUS` / `_PRO` / `_MAX` | Monthly AI credits per tier (25 / 1,000 / 5,000) |
+| `MCP_RATE_PER_MIN` | MCP endpoint rate limit (default 30) |
+| `SKU_*` | Discord SKU ids — only needed if you monetize your own instance |
+| `DEV_FORCE_TIER` | Force a tier (`free`/`plus`/`pro`/`max`). Set `max` when self-hosting |
+
+#### Embeddings
+
+Embeddings are pluggable via `EMBEDDING_PROVIDER`:
+
+| Provider | `EMBEDDING_MODEL` | Cost | Notes |
+|---|---|---|---|
+| `local` (default) | `bge-small-en-v1.5` / `multilingual-e5-small` | free, on-CPU | downloads a small ONNX model |
+| `openrouter` | `openai/text-embedding-3-large` | per-token API | reuses `OPENROUTER_API_KEY` |
+
+Both produce **384-dim** vectors (`EMBEDDING_DIM`) so they share one `vector(384)` column — switching
+is a config change. On startup the bot re-embeds threads with the new model, and search is scoped to
+the active model id so stale vectors are never mixed in. Point `EMBEDDING_BASE_URL` /
+`EMBEDDING_API_KEY` at `https://api.openai.com/v1` to call OpenAI directly instead of OpenRouter.
+
+> 💡 **Fully offline AI:** with `EMBEDDING_PROVIDER=local` and no `OPENROUTER_API_KEY`, Dejavue runs
+> duplicate detection, semantic search and the whole archive without sending anything to a third
+> party. Only the generative features (drafts, summaries, FAQ) need an LLM.
+
+---
+
+## 🏗 Architecture
 
 ```
 packages/core   shared types, env, tier/entitlement logic, clustering
@@ -137,100 +401,19 @@ apps/worker     pg-boss jobs (embed, summarize, cluster, FAQ, nudge, backfill, r
 apps/web        Astro SSR — public website (subdomain/custom-domain) + /mcp endpoint
 ```
 
-The **bot** does live query-embedding + interactions; the **worker** does heavy/scheduled work; they
-coordinate only through pg-boss + Postgres. Tier is derived purely from Discord entitlements (with an
-hourly LIST reconcile + per-process cache) and gates every feature.
+The **bot** handles live query-embedding and interactions; the **worker** does the heavy and
+scheduled work. They coordinate only through pg-boss and Postgres, so you can scale or restart either
+independently. Tier is derived purely from Discord entitlements (hourly LIST reconcile + per-process
+cache) and gates every feature in one place.
+
+See [docs/PLAN.md](./docs/PLAN.md) for the full design rationale and milestone history.
 
 ---
 
-## Quick start
+## 🔌 MCP Server
 
-```bash
-make setup                       # install + .env + Postgres + migrations
-```
-
-…or step by step (`make help` lists every task):
-
-```bash
-corepack enable                  # provides pnpm (pinned in package.json)
-pnpm install
-pnpm db:up                       # Postgres (pinned pgvector/pgvector:pg16)
-pnpm db:migrate                  # extension + tables + HNSW index
-pnpm db:verify                   # proves pgvector cosine search works
-```
-
-**Dev container:** open the repo in VS Code / Cursor and "Reopen in Container" — the
-[.devcontainer](.devcontainer/devcontainer.json) starts Postgres alongside a Node 22 workspace,
-installs dependencies, and runs migrations automatically (ports 4321/5432/8090 forwarded).
-
-Then fill in `.env` (copy from `.env.example`) and start everything with one command:
-
-```bash
-make dev                         # Postgres + migrations + bot + worker + web (live reload)
-```
-
-Or run services individually: `pnpm dev:bot` / `pnpm dev:worker` / `pnpm dev:web`.
-
-**Or the whole stack in one command:**
-
-```bash
-cp .env.example .env             # fill in DISCORD_TOKEN, DISCORD_CLIENT_ID, OPENROUTER_API_KEY
-docker compose up --build        # Postgres → migrate → bot + worker + web
-```
-
-`DATABASE_URL` is auto-pointed at the `postgres` service; the CPU embedding model is cached in a
-named volume. Set `DEV_FORCE_TIER=max` in `.env` to exercise every feature locally without real SKUs.
-
----
-
-## Discord setup (to go live)
-
-1. **Bot → Privileged Gateway Intents:** enable **Message Content** (only). Leave Presence + Server
-   Members off.
-2. **OAuth2 → URL Generator:** scopes **`bot`** + **`applications.commands`**; permissions: View
-   Channels, Send Messages, Create Public Threads, Send Messages in Threads, Manage Threads, Manage
-   Channels, Embed Links, Read Message History. Open the generated URL to add the bot.
-3. **Register commands:** `pnpm --filter @dejavue/bot register` (uses `DISCORD_DEV_GUILD_ID` for
-   instant guild commands, or registers globally if unset).
-4. **Enable Monetization** and create SKUs in the developer portal, then put their ids in `.env`:
-   - Guild subscriptions: `SKU_PLUS`, `SKU_PRO`, `SKU_MAX`
-   - Consumable AI-credit packs: `SKU_TOPUP_500` / `SKU_TOPUP_1000` / `SKU_TOPUP_2000` / `SKU_TOPUP_5000`
-     (pack sizes are fixed in code; suggested prices $4.99 / $8.99 / $15.99 / $34.99)
-   - Consumable one-time: `SKU_CUSTOM_DOMAIN` (per-server unlock)
-   - Backfill needs no SKU — history import is included
-5. **Website domains:** point `*.dejavue.app` (wildcard DNS + TLS) at the web app. `.app` is HSTS-preloaded,
-   so HTTPS is mandatory — the wildcard cert must cover `*.dejavue.app`. Custom domains CNAME to the
-   same host (provision per-domain TLS / on-demand certs).
-
-### Key env vars
-
-`DATABASE_URL` · `DISCORD_TOKEN` · `DISCORD_CLIENT_ID` · `DISCORD_DEV_GUILD_ID` ·
-`OPENROUTER_API_KEY` · `OPENROUTER_MODEL` (default `deepseek/deepseek-v4-pro`) ·
-`KB_BASE_DOMAIN` (default `dejavue.app`) · `QUOTA_CREDITS_PLUS` / `QUOTA_CREDITS_PRO` /
-`QUOTA_CREDITS_MAX` (monthly AI credits: 25 / 1,000 / 5,000) ·
-`MCP_RATE_PER_MIN` (default 30) · the `SKU_*` ids (incl. the `SKU_TOPUP_*` credit packs) ·
-`DEV_FORCE_TIER` (dev only).
-
-**Embeddings** are pluggable via `EMBEDDING_PROVIDER`:
-
-| Provider | `EMBEDDING_MODEL` | Cost | Notes |
-|---|---|---|---|
-| `local` (default) | `bge-small-en-v1.5` / `multilingual-e5-small` | free, on-CPU | downloads a small ONNX model |
-| `openrouter` | `openai/text-embedding-3-large` | per-token API | reuses `OPENROUTER_API_KEY` |
-
-Both produce **384-dim** vectors (`EMBEDDING_DIM`) to share one `vector(384)` column, so switching is
-a config change — set `EMBEDDING_PROVIDER=openrouter` and restart. On startup the bot re-embeds threads
-with the new model (search is scoped to the active model id, so stale vectors are never mixed in); run
-`/dejavue backfill` to re-embed a forum's full history. Point `EMBEDDING_BASE_URL`/`EMBEDDING_API_KEY` at
-`https://api.openai.com/v1` to call OpenAI directly instead of OpenRouter. Using a larger native
-dimension means migrating the `vec` column (and re-embedding).
-
----
-
-## Using the MCP server (Max)
-
-Once a Max guild has set a website slug and opted in, its published answers are queryable at
-`https://{slug}.dejavue.app/mcp`. Add it to an AI client as a **Streamable HTTP** MCP server; it
+Once a Max server has set a website slug and opted in, its published answers are queryable at
+`https://{slug}.dejavue.app/mcp`. Add it to any AI client as a **Streamable HTTP** MCP server. It
 exposes one tool:
 
 ```
@@ -239,4 +422,55 @@ search_knowledge_base(query: string, limit?: number)  → relevant solved Q&As w
 
 ---
 
-See [docs/PLAN.md](./docs/PLAN.md) for the full design rationale and milestone history.
+## 🔒 Privacy
+
+Dejavue is open source so you don't have to take our word for any of this — read the code, or host it
+yourself.
+
+- **Publishing is opt-in per server** and off by default. Nothing leaves Discord until an admin turns
+  it on.
+- **Public pages never show Discord identities.** Authors appear as neutral aliases ("Original
+  poster", "Helper 1"); no usernames, display names, or avatars. Only the numeric user ID is stored
+  internally.
+- **No analytics, no advertising, no tracking cookies**, and no visitor profiling. Fonts and assets
+  are self-hosted, so viewing a page sends no requests to third parties.
+- **No user accounts** on the website or the knowledge bases.
+- **Payments happen entirely inside Discord** — we never see payment details.
+- **AI is the only third-party processor**, used only when AI features are enabled, and can be turned
+  off entirely (see the offline note above).
+
+Full details: [Privacy Policy](https://dejavue.app/privacy) · [Terms](https://dejavue.app/terms)
+
+---
+
+## 👥 Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the workflow, and
+[SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
+
+Before pushing:
+
+```bash
+make check          # typecheck + tests
+```
+
+### Developer
+
+- **Lars Kaesberg** — [GitHub](https://github.com/lkaesberg)
+
+---
+
+## 📄 License
+
+Distributed under the **GNU Affero General Public License v3.0**. See [LICENSE](./LICENSE) for the
+full text.
+
+In short: you're free to use, modify and self-host Dejavue, including commercially. If you run a
+modified version as a network service, you must make your source available to its users under the
+same license.
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/lkaesberg">Lars Kaesberg</a>
+</p>
