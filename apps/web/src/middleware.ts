@@ -21,6 +21,19 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const rawHost = context.request.headers.get('host') ?? '';
   const host = (rawHost.split(':')[0] ?? '').toLowerCase();
 
+  // Container liveness probe. Answered before any tenant lookup so it depends on
+  // neither the Host header nor the database: the container runtime probes over
+  // 127.0.0.1, which extractSubdomain would read as the tenant slug "127" and
+  // render as a 404, and Traefik drops containers that report unhealthy from its
+  // routing table entirely — so a probe that can 404 or 500 takes the whole site
+  // offline rather than just flagging it.
+  if (new URL(context.request.url).pathname === '/health') {
+    return new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    });
+  }
+
   // Canonicalize the marketing domain's www alias to the bare apex
   // (www.dejavue.app → dejavue.app) with a permanent redirect, so search engines
   // consolidate ranking signals on one host instead of splitting them across two
