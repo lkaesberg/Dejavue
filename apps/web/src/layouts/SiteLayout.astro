@@ -26,7 +26,7 @@ const origin = new URL(Astro.request.url).origin;
 // thumbnail: the promise in display type plus the duplicate→solved story, so it
 // still reads at Discord/Slack unfurl sizes. Canonical, when set, is the page's
 // own URL and doubles as og:url.
-const socialImage = `${origin}/media/og-card.png`;
+const socialImage = `${origin}/media/share-v2.jpg`;
 const pageUrl = canonical ?? `${origin}/`;
 ---
 
@@ -57,17 +57,17 @@ const pageUrl = canonical ?? `${origin}/`;
     <meta property="og:url" content={pageUrl} />
     <meta property="og:locale" content="en_US" />
     <meta property="og:image" content={socialImage} />
-    <meta property="og:image:type" content="image/png" />
-    <meta property="og:image:width" content="2550" />
-    <meta property="og:image:height" content="900" />
-    <meta property="og:image:alt" content="Dejavue: never answer the same question twice" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Dejavue: Answer once. Get your time back. Your Discord answers, on repeat." />
 
     {/* Twitter / X large-image card. */}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     {description && <meta name="twitter:description" content={description} />}
     <meta name="twitter:image" content={socialImage} />
-    <meta name="twitter:image:alt" content="Dejavue: never answer the same question twice" />
+    <meta name="twitter:image:alt" content="Dejavue: Answer once. Get your time back. Your Discord answers, on repeat." />
 
     <slot name="head" />
     <style is:global>
