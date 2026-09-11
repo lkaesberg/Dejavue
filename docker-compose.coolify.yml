@@ -157,10 +157,15 @@ services:
       PORT: '4321'
     expose:
       - '4321'
-    # KB_BASE_DOMAIN_REGEX is KB_BASE_DOMAIN with the dots escaped for the HostRegexp
-    # below (Compose cannot escape them for us). Both must be set together when the
-    # domain changes, or tenant subdomains silently stop routing while the apex keeps
-    # working — the failure looks like "only some pages are down".
+    # The HostRegexp below is written out literally, NOT as ${KB_BASE_DOMAIN_REGEX}.
+    # Coolify deploys this app with "escape special characters in labels" on, which
+    # rewrites every `$` in a label to `$$`. Compose then reads `$$` as a literal `$`,
+    # so a variable reference here is never expanded: the rule ships as the literal
+    # text `${KB_BASE_DOMAIN_REGEX:-dejavue\.app}`, matches no host, and every tenant
+    # subdomain falls through to Coolify's catch-all (503 "no available server") while
+    # the apex keeps working. A written-out `$` anchor survives the same round trip
+    # ($ → $$ → $), which is why the rule is hardcoded. Self-hosting on another domain?
+    # Edit both rules below — and mind that the dots need escaping for the regex.
     #
     # Coolify routes the apex (dejavue.app) via the domain set on this service.
     # Tenant subdomains ({slug}.dejavue.app) are wildcards, which Coolify's domain
@@ -175,7 +180,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.dejavue-kb.entrypoints=http
-      - traefik.http.routers.dejavue-kb.rule=HostRegexp(`^.+\.${KB_BASE_DOMAIN_REGEX:-dejavue\.app}$`)
+      - traefik.http.routers.dejavue-kb.rule=HostRegexp(`^.+\.dejavue\.app$`)
       - traefik.http.routers.dejavue-kb.service=dejavue-kb
       # Same router on https. No certresolver on purpose: Let's Encrypt can't do
       # HTTP-01 here (port 80 only answers Cloudflare) and wouldn't issue a
@@ -183,7 +188,7 @@ services:
       # and Cloudflare terminates TLS for visitors. Keep Cloudflare's SSL mode on
       # Full — "Full (strict)" would reject that certificate.
       - traefik.http.routers.dejavue-kb-https.entrypoints=https
-      - traefik.http.routers.dejavue-kb-https.rule=HostRegexp(`^.+\.${KB_BASE_DOMAIN_REGEX:-dejavue\.app}$`)
+      - traefik.http.routers.dejavue-kb-https.rule=HostRegexp(`^.+\.dejavue\.app$`)
       - traefik.http.routers.dejavue-kb-https.service=dejavue-kb
       - traefik.http.routers.dejavue-kb-https.tls=true
       - traefik.http.services.dejavue-kb.loadbalancer.server.port=4321
