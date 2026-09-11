@@ -10,8 +10,6 @@ export function tierAtLeast(tier: Tier, min: Tier): boolean {
   return TIER_RANK[tier] >= TIER_RANK[min];
 }
 
-export type AnalyticsLevel = 'basic' | 'full';
-
 /**
  * AI usage is metered in tokens (prompt + completion, weighted equally) but
  * surfaced to users as "AI credits": 1 credit = 1,000 tokens. Quotas, top-up
@@ -63,6 +61,10 @@ export interface TierQuotas {
   proCredits?: number;
   maxCredits?: number;
   mcpRequestsPerMinute?: number;
+  freeEmbedTokens?: number;
+  plusEmbedTokens?: number;
+  proEmbedTokens?: number;
+  maxEmbedTokens?: number;
 }
 
 /**
@@ -75,12 +77,20 @@ export function quotasFromEnv(env: {
   QUOTA_CREDITS_PRO: number;
   QUOTA_CREDITS_MAX: number;
   MCP_RATE_PER_MIN: number;
+  QUOTA_EMBED_TOKENS_FREE: number;
+  QUOTA_EMBED_TOKENS_PLUS: number;
+  QUOTA_EMBED_TOKENS_PRO: number;
+  QUOTA_EMBED_TOKENS_MAX: number;
 }): Required<TierQuotas> {
   return {
     plusCredits: env.QUOTA_CREDITS_PLUS,
     proCredits: env.QUOTA_CREDITS_PRO,
     maxCredits: env.QUOTA_CREDITS_MAX,
     mcpRequestsPerMinute: env.MCP_RATE_PER_MIN,
+    freeEmbedTokens: env.QUOTA_EMBED_TOKENS_FREE,
+    plusEmbedTokens: env.QUOTA_EMBED_TOKENS_PLUS,
+    proEmbedTokens: env.QUOTA_EMBED_TOKENS_PRO,
+    maxEmbedTokens: env.QUOTA_EMBED_TOKENS_MAX,
   };
 }
 
@@ -104,7 +114,6 @@ export interface TierLimits {
   semanticSearch: boolean;
   /** Stale-question nudges. */
   nudges: boolean;
-  analytics: AnalyticsLevel;
   /**
    * AI-drafted answers on duplicate matches (the Plus "taster" and up). Separate
    * from {@link TierLimits.generative}, which gates the full generative suite.
@@ -120,19 +129,61 @@ export interface TierLimits {
   mcpRequestsPerMinute: number;
   /** Whether the "powered by Dejavue" branding is removed. */
   removeBranding: boolean;
+  /**
+   * Whether the public knowledge base carries ads. True on Free only — removing them
+   * is a paid perk, alongside removing the branding. Deliberately separate from
+   * {@link TierLimits.removeBranding} so the two can be priced apart later.
+   */
+  ads: boolean;
   /** Monthly AI-credit budget (1 credit = 1,000 tokens; 0 = no AI access). */
   monthlyCredits: number;
+  /**
+   * Minimum gap between manual reindexes of the same channel. A reindex re-reads a whole
+   * channel and re-checks every chunk, so an unthrottled button is the one place a user
+   * can repeatedly trigger real embedding spend on demand.
+   */
+  manualReindexCooldownMs: number;
+  /**
+   * Monthly ceiling on embedding tokens. This is a runaway guard, not the product
+   * limit — {@link TierLimits.indexCap} is what bounds how much a guild can index.
+   * This exists so pathological churn (repeatedly removing and re-adding channels,
+   * a reindex loop) cannot turn a free guild into an unbounded bill. Enforced
+   * fail-CLOSED on Free and fail-OPEN (log + alert) on paid tiers.
+   */
+  monthlyEmbedTokens: number;
 }
 
 const UNLIMITED = Number.POSITIVE_INFINITY;
 
 export const DEFAULT_QUOTAS = {
-  plusCredits: 25,
-  proCredits: 1_000,
-  maxCredits: 5_000,
+  // Sized so worst-case inference stays a small fraction of the subscription price at
+  // full utilisation — and typical utilisation is far below the cap. The previous Plus
+  // budget (25 credits ≈ 30 drafts/month) cost fractions of a cent and made the tier
+  // feel broken within days. Re-check these against the current OpenRouter price.
+  plusCredits: 250,
+  proCredits: 2_500,
+  maxCredits: 12_000,
   mcpRequestsPerMinute: 30,
+  // Sized at roughly 5x a full re-index of the tier's index cap, so normal use (including
+  // the occasional full reindex) never reaches them and only runaway churn does.
+  freeEmbedTokens: 500_000,
+  plusEmbedTokens: 5_000_000,
+  proEmbedTokens: 50_000_000,
+  maxEmbedTokens: 200_000_000,
 } as const satisfies Required<TierQuotas>;
 
+/**
+ * The gating matrix.
+ *
+ * Guiding rule: anything already bounded by a real meter must NOT also carry a boolean
+ * gate. Credits meter inference; `indexCap` meters embedding spend. Everything else —
+ * search, analytics, nudges, channel counts, theming — costs nothing per guild, so
+ * withholding it buys no margin and only makes the product look broken to the servers
+ * most likely to grow into paying ones.
+ *
+ * What Free deliberately does NOT get is the spend itself (`monthlyCredits: 0`) and the
+ * branding removal, which is the trade for everything it does get.
+ */
 export function tierLimits(tier: Tier, quotas: TierQuotas = {}): TierLimits {
   const q = { ...DEFAULT_QUOTAS, ...quotas };
   switch (tier) {
@@ -143,66 +194,86 @@ export function tierLimits(tier: Tier, quotas: TierQuotas = {}): TierLimits {
         indexCap: UNLIMITED,
         semanticSearch: true,
         nudges: true,
-        analytics: 'full',
         aiDrafts: true,
         generative: true,
         kbSummarizedAnswers: true,
         mcp: true,
         mcpRequestsPerMinute: q.mcpRequestsPerMinute,
         removeBranding: true,
+        ads: false,
         monthlyCredits: q.maxCredits,
+        manualReindexCooldownMs: 1 * 60 * 60 * 1000,
+        monthlyEmbedTokens: q.maxEmbedTokens,
       };
     case 'pro':
       return {
         // Generous but finite — only Max is unlimited.
-        maxForumChannels: 10,
-        maxTrackedChannels: 15,
-        indexCap: 50_000,
+        maxForumChannels: 50,
+        maxTrackedChannels: 50,
+        indexCap: 250_000,
         semanticSearch: true,
         nudges: true,
-        analytics: 'full',
         aiDrafts: true,
+        generative: true,
+        kbSummarizedAnswers: true,
+        // MCP is search-only (no inference) and already rate-limited, so holding it at
+        // Max forfeited the developer communities most likely to adopt it. Max keeps
+        // unlimited scale + the custom domain as its story.
+        mcp: true,
+        mcpRequestsPerMinute: q.mcpRequestsPerMinute,
+        removeBranding: true,
+        ads: false,
+        monthlyCredits: q.proCredits,
+        manualReindexCooldownMs: 1 * 60 * 60 * 1000,
+        monthlyEmbedTokens: q.proEmbedTokens,
+      };
+    case 'plus':
+      return {
+        maxForumChannels: 15,
+        maxTrackedChannels: 15,
+        indexCap: 25_000,
+        semanticSearch: true,
+        nudges: true,
+        aiDrafts: true,
+        // The generative suite is already metered by the credit budget; a second boolean
+        // gate on top just double-charged for the same cost — and left Plus KB pages
+        // rendering raw answers, which is worse SEO on pages carrying our branding.
         generative: true,
         kbSummarizedAnswers: true,
         mcp: false,
         mcpRequestsPerMinute: 0,
         removeBranding: true,
-        monthlyCredits: q.proCredits,
-      };
-    case 'plus':
-      return {
-        maxForumChannels: 5,
-        maxTrackedChannels: 5,
-        indexCap: 5_000,
-        semanticSearch: true,
-        nudges: true,
-        analytics: 'full',
-        // Taster: in-channel AI drafts only, on a small credit budget — the
-        // full generative suite (summaries/FAQ/gaps) stays Pro+.
-        aiDrafts: true,
-        generative: false,
-        kbSummarizedAnswers: false,
-        mcp: false,
-        mcpRequestsPerMinute: 0,
-        removeBranding: true,
+        ads: false,
         monthlyCredits: q.plusCredits,
+        manualReindexCooldownMs: 6 * 60 * 60 * 1000,
+        monthlyEmbedTokens: q.plusEmbedTokens,
       };
     case 'free':
     default:
       return {
-        maxForumChannels: 1,
-        maxTrackedChannels: 1,
-        indexCap: 500,
-        semanticSearch: false,
-        nudges: false,
-        analytics: 'basic',
+        // Channel counts cost nothing — indexCap already bounds total embedding volume,
+        // so capping both charged twice for one resource.
+        maxForumChannels: 3,
+        maxTrackedChannels: 3,
+        // The one Free limit that reflects real spend. Free guilds were always indexed
+        // (embedThread has no tier check) and then forbidden from querying the vectors
+        // we had already paid for; the cap, not the search switch, is the right lever.
+        indexCap: 2_500,
+        semanticSearch: true,
+        nudges: true,
+        // No inference on Free. This is where the money actually goes.
         aiDrafts: false,
         generative: false,
         kbSummarizedAnswers: false,
         mcp: false,
         mcpRequestsPerMinute: 0,
+        // The trade for everything above: Free KBs carry the branding.
         removeBranding: false,
+        // Free knowledge bases carry ads; removing them is what Plus buys.
+        ads: true,
         monthlyCredits: 0,
+        manualReindexCooldownMs: 24 * 60 * 60 * 1000,
+        monthlyEmbedTokens: q.freeEmbedTokens,
       };
   }
 }

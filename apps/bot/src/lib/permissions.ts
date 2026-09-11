@@ -1,4 +1,5 @@
 import { PermissionFlagsBits, type PermissionsBitField, type ThreadChannel } from 'discord.js';
+import { getDb, getThreadByDiscordId } from '@dejavue/db';
 
 // "Moderator group or admin" — any of these permissions counts. (Administrator
 // implies the rest, so admins always pass.)
@@ -33,6 +34,22 @@ export async function isThreadOp(thread: ThreadChannel, userId: string): Promise
   try {
     const fresh = await thread.fetch();
     return fresh.ownerId === userId;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is this user the person who asked? Discord makes *the bot* the owner of a post it
+ * created, which is how a moved question arrives in its new forum, so fall back to the
+ * asker recorded on the archive row — otherwise moving a question would strip the
+ * person who asked it of the right to resolve it.
+ */
+export async function isThreadAsker(thread: ThreadChannel, userId: string): Promise<boolean> {
+  if (await isThreadOp(thread, userId)) return true;
+  try {
+    const row = await getThreadByDiscordId(getDb(), thread.guildId, thread.id);
+    return row?.opUserId === userId;
   } catch {
     return false;
   }

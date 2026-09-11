@@ -32,6 +32,10 @@ export async function getStaleUnansweredThreads(
       and(
         eq(thread.guildId, guildId),
         or(eq(thread.status, 'open'), eq(thread.status, 'unsolved')),
+        // A folded duplicate (accepted, hand-tagged, or moved to another forum) isn't
+        // a question waiting for help — nudging it would ping helpers at a dead thread.
+        isNull(thread.duplicateOfThreadId),
+        eq(thread.markedDuplicate, false),
         isNull(thread.lastNudgedAt),
         sql`${thread.createdAt} < now() - (${olderThanHours} * interval '1 hour')`,
       ),

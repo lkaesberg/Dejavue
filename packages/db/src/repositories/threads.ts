@@ -229,24 +229,23 @@ export async function setDuplicateOf(
     .set({ duplicateOfThreadId: originalThreadId, publishedToKb: false, updatedAt: new Date() })
     .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));
 }
-
-/** Record the thread message count at the last (re-)embed (knowledge backoff schedule). */
-export async function setLastEmbedMsgCount(
+/**
+ * Flag/unflag a thread hand-folded via the managed `duplicate` forum tag. Unlike
+ * setDuplicateOf there is no canonical thread to point at, so this only records that
+ * the post was judged a duplicate; callers handle unpublishing.
+ */
+export async function setMarkedDuplicate(
   db: Database,
-  threadRowId: string,
-  count: number,
+  guildId: string,
+  discordThreadId: string,
+  marked: boolean,
 ): Promise<void> {
   await db
     .update(thread)
-    .set({ lastEmbedMsgCount: count, updatedAt: new Date() })
-    .where(eq(thread.id, threadRowId));
+    .set({ markedDuplicate: marked, updatedAt: new Date() })
+    .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));
 }
 
-/**
- * Solved threads that lack an embedding produced by `activeModelId` — i.e. they
- * have no embedding at all, or only one from a different model (so a model/
- * provider switch surfaces them all for re-embedding). Used to catch up on startup.
- */
 export async function getSolvedThreadsMissingEmbedding(
   db: Database,
   guildId: string,

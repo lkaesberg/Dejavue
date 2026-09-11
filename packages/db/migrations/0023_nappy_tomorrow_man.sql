@@ -1,0 +1,1 @@
+ALTER TABLE "thread" DROP COLUMN "last_embed_msg_count";

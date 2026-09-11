@@ -1,4 +1,4 @@
-import { and, cosineDistance, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, cosineDistance, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { embedding, thread } from '../schema';
 
@@ -28,6 +28,16 @@ export interface SemanticSearchOptions {
   excludeThreadId?: string;
   solvedOnly?: boolean;
   /**
+   * Skip threads marked as a duplicate — folded onto a canonical thread by the accept
+   * button/backfill, or hand-folded with the `duplicate` forum tag (on by default).
+   * A folded duplicate only holds a borrowed copy of its canonical thread's answer
+   * and has no KB page of its own, so offering it as the answer to a new question
+   * sends the asker to a pointer instead of the real discussion — and lets duplicate
+   * chains form (B folded into A, then C suggested B). Machine folding cares for the
+   * same reason: always fold onto the canonical thread, never onto another duplicate.
+   */
+  canonicalOnly?: boolean;
+  /**
    * Only compare against embeddings produced by this model id. Set to the active
    * model so a provider/model switch never compares the query vector against
    * stale vectors from a different model (different geometry → garbage scores).
@@ -37,7 +47,14 @@ export interface SemanticSearchOptions {
   efSearch?: number;
 }
 
-const DEFAULT_EF_SEARCH = 100;
+// Raised alongside chunking: a thread now owns several vectors, so the index has to
+// return more candidates before per-thread de-duplication to fill the same result set.
+const DEFAULT_EF_SEARCH = 200;
+/**
+ * How many raw chunk hits to pull per requested result. A thread contributes one vector
+ * per chunk, so without over-fetching a single verbose thread could occupy every slot.
+ */
+export const CHUNK_OVERFETCH = 8;
 
 export async function semanticSearch(
   db: Database,
@@ -50,6 +67,7 @@ export async function semanticSearch(
     minSimilarity = 0,
     excludeThreadId,
     solvedOnly = true,
+    canonicalOnly = true,
     modelId,
     efSearch = DEFAULT_EF_SEARCH,
   } = opts;
@@ -66,6 +84,9 @@ export async function semanticSearch(
     const conditions = [eq(embedding.guildId, guildId)];
     if (modelId) conditions.push(eq(embedding.modelId, modelId));
     if (solvedOnly) conditions.push(eq(thread.status, 'solved'));
+    if (canonicalOnly) {
+      conditions.push(isNull(thread.duplicateOfThreadId), eq(thread.markedDuplicate, false));
+    }
     if (excludeThreadId) conditions.push(ne(thread.threadId, excludeThreadId));
 
     const rows = await tx
@@ -81,11 +102,18 @@ export async function semanticSearch(
       .innerJoin(thread, eq(embedding.threadId, thread.id))
       .where(and(...conditions))
       .orderBy(distance)
-      .limit(limit);
+      .limit(limit * CHUNK_OVERFETCH);
 
-    return rows
-      .filter((r) => r.score >= minSimilarity)
-      .map((r) => ({ ...r, kind: 'semantic' as const }));
+    // Rows arrive best-first, so the first hit for a thread is its best-matching chunk.
+    // Filtering before the slice (rather than after, as this used to) also stops a
+    // below-floor hit from consuming a result slot.
+    const best = new Map<string, SearchMatch>();
+    for (const r of rows) {
+      if (r.score < minSimilarity || best.has(r.rowId)) continue;
+      best.set(r.rowId, { ...r, kind: 'semantic' as const });
+      if (best.size >= limit) break;
+    }
+    return [...best.values()];
   });
 }
 
@@ -95,6 +123,8 @@ export interface KeywordSearchOptions {
   limit?: number;
   excludeThreadId?: string;
   solvedOnly?: boolean;
+  /** Skip threads folded as a duplicate (on by default) — see SemanticSearchOptions. */
+  canonicalOnly?: boolean;
 }
 
 /**
@@ -105,7 +135,7 @@ export async function keywordSearch(
   db: Database,
   opts: KeywordSearchOptions,
 ): Promise<SearchMatch[]> {
-  const { guildId, query, limit = 5, excludeThreadId, solvedOnly = true } = opts;
+  const { guildId, query, limit = 5, excludeThreadId, solvedOnly = true, canonicalOnly = true } = opts;
 
   const document = sql`to_tsvector('english', ${thread.title} || ' ' || ${thread.questionBody} || ' ' || coalesce(${thread.acceptedAnswerText}, ''))`;
   const tsquery = sql`websearch_to_tsquery('english', ${query})`;
@@ -113,6 +143,9 @@ export async function keywordSearch(
 
   const conditions = [eq(thread.guildId, guildId), sql`${document} @@ ${tsquery}`];
   if (solvedOnly) conditions.push(eq(thread.status, 'solved'));
+  if (canonicalOnly) {
+    conditions.push(isNull(thread.duplicateOfThreadId), eq(thread.markedDuplicate, false));
+  }
   if (excludeThreadId) conditions.push(ne(thread.threadId, excludeThreadId));
 
   const rows = await db
@@ -226,6 +259,7 @@ export async function hybridSearch(
       limit: candidates,
       excludeThreadId: semanticOpts.excludeThreadId,
       solvedOnly: semanticOpts.solvedOnly ?? true,
+      canonicalOnly: semanticOpts.canonicalOnly ?? true,
     }),
   ]);
   return fuseMatches(semantic, keyword, { limit, minSimilarity, keywordBoost, includeKeywordOnly });

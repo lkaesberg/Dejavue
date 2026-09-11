@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import type { Entitlement } from 'discord.js';
 import { childLogger, getEnv, topUpCreditsForSku, topUpTiers } from '@dejavue/core';
 import { addTopUpGrant, getDb, recordPurchaseIntent } from '@dejavue/db';
@@ -25,6 +26,7 @@ export async function grantTopUp(
   } catch (err) {
     log.warn({ err, id: ent.id }, 'failed to consume top-up entitlement (credits granted)');
   }
+  capture('topup_granted', guildId, { credits, sku_id: ent.skuId });
   log.info({ id: ent.id, guildId, credits }, 'top-up credits granted');
 }
 

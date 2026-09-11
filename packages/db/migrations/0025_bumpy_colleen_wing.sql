@@ -1,0 +1,1 @@
+ALTER TABLE "thread" ADD COLUMN "marked_duplicate" boolean DEFAULT false NOT NULL;

@@ -1,3 +1,9 @@
+// Load the monorepo-root .env before anything reads process.env. `astro dev` does NOT
+// do this on its own (Vite only populates import.meta.env), which used to be invisible
+// because DATABASE_URL happens to default to the local Docker DB — every other var
+// silently fell back to its default in local dev. The bot and worker already preload
+// the same file; production passes env through the container instead.
+import '@dejavue/core/env-preload';
 import node from '@astrojs/node';
 import { defineConfig } from 'astro/config';
 

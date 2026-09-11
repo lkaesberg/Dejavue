@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import type { Entitlement } from 'discord.js';
 import { childLogger, getEnv, isTopUpSku, notifyAsync, topUpCreditsForSku } from '@dejavue/core';
 import { getDb, markEntitlementDeleted, resolvePurchaseIntent, upsertEntitlement } from '@dejavue/db';
@@ -95,6 +96,12 @@ export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
     invalidateTier(row.guildId);
     await checkTierUpgrade(row.guildId);
   }
+  if (row.guildId) {
+    capture('entitlement_created', row.guildId, {
+      sku_id: row.skuId,
+      product_label: productLabel(ent.skuId),
+    });
+  }
   log.info({ id: ent.id, skuId: ent.skuId, guildId: row.guildId }, 'entitlement created');
   notifyAsync({
     level: 'success',
@@ -110,6 +117,14 @@ export async function onEntitlementUpdate(ent: Entitlement): Promise<void> {
   if (ent.guildId) {
     invalidateTier(ent.guildId);
     await checkTierUpgrade(ent.guildId);
+  }
+  if (ent.guildId) {
+    capture('entitlement_updated', ent.guildId, {
+      sku_id: ent.skuId,
+      product_label: productLabel(ent.skuId),
+      // Discord signals a cancellation as an UPDATE that sets an end date, not a delete.
+      reason: ent.endsTimestamp ? 'ending' : 'renewed',
+    });
   }
   log.info({ id: ent.id, endsAt: ent.endsTimestamp }, 'entitlement updated');
   // Active subs & renewals keep endsTimestamp null (see tier.ts semantics), so a
@@ -130,6 +145,10 @@ export async function onEntitlementDelete(ent: Entitlement): Promise<void> {
   // DELETE only fires on refund / manual removal / test-entitlement deletion.
   await markEntitlementDeleted(getDb(), ent.id);
   if (ent.guildId) {
+    capture('entitlement_deleted', ent.guildId, {
+      sku_id: ent.skuId,
+      product_label: productLabel(ent.skuId),
+    });
     invalidateTier(ent.guildId);
     await checkTierUpgrade(ent.guildId); // records the downgrade; never backfills down
   }

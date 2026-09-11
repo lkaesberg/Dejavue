@@ -1,6 +1,6 @@
 import { ApplicationCommandType, ContextMenuCommandBuilder, MessageFlags } from 'discord.js';
 import { forumParent } from '../lib/forum';
-import { canResolveThread, isThreadOp, NO_PERMISSION_MESSAGE } from '../lib/permissions';
+import { canResolveThread, isThreadAsker, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph } from '../lib/reply';
 import { closeThread, solveThread } from '../lib/solve';
 import type { MessageContextCommand } from './types';
@@ -21,14 +21,14 @@ export const markAnswerCommand: MessageContextCommand = {
       await interaction.reply(eph('Use this on a reply inside a forum post.'));
       return;
     }
-    const isOp = await isThreadOp(channel, interaction.user.id);
+    const isOp = await isThreadAsker(channel, interaction.user.id);
     if (!canResolveThread(interaction.memberPermissions, isOp)) {
       await interaction.reply(eph(NO_PERMISSION_MESSAGE));
       return;
     }
     const answer = interaction.targetMessage;
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    await solveThread(channel, { answer, solverId: interaction.user.id });
+    await solveThread(channel, { answer, solverId: interaction.user.id, via: 'context_menu' });
     await closeThread(channel);
     await interaction.editReply(
       `✅ Recorded ${answer.author}'s reply as the answer, marked this solved, and closed the thread.`,

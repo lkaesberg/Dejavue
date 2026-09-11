@@ -1,97 +1,117 @@
 import { describe, expect, it } from 'vitest';
-import { buildEmbeddingText, embedContentHash } from './embeddings';
+import { buildEmbeddingChunks, embedContentHash } from './embeddings';
 
-describe('buildEmbeddingText', () => {
-  it('falls back to title + question + answer when there is no transcript', () => {
-    const text = buildEmbeddingText({
+/** A transcript long enough to span several chunks (~100 chars per message). */
+const longTranscript = (n: number, edit?: { at: number; to: string }) =>
+  Array.from({ length: n }, (_, i) => ({
+    content: edit && edit.at === i ? edit.to : `message number ${i} ${'x'.repeat(80)}`,
+  }));
+
+describe('buildEmbeddingChunks', () => {
+  it('puts the canonical title + question + answer in chunk 0', () => {
+    const [chunk0] = buildEmbeddingChunks({
       title: 'How do I reset my password?',
       questionBody: 'I forgot it and the email never arrives.',
       acceptedAnswerText: 'Use the /reset command in #support.',
     });
-    expect(text).toBe(
+    expect(chunk0?.index).toBe(0);
+    expect(chunk0?.text).toBe(
       'How do I reset my password?\n\nI forgot it and the email never arrives.\n\nUse the /reset command in #support.',
     );
   });
 
-  it('includes the question window and the accepted-answer window around the answer', () => {
-    const transcript = [
-      { content: 'Q: My build fails on CI but works locally.' }, // 0 (question window)
-      { content: 'Which Node version?' }, // 1 (question window)
-      { content: 'Node 22.' }, // 2 (question window)
-      { content: 'Have you tried clearing the cache?' }, // 3 (answer-1 neighbour)
-      { content: 'Pin the lockfile and delete node_modules.' }, // 4 (accepted answer)
-      { content: 'That fixed it, thanks!' }, // 5 (answer+1 neighbour)
-    ];
-    const text = buildEmbeddingText({
-      title: 'CI build fails',
-      acceptedAnswerText: 'Pin the lockfile and delete node_modules.',
-      transcript,
+  it('covers EVERY non-empty transcript message across the chunk set', () => {
+    const transcript = longTranscript(60);
+    const joined = buildEmbeddingChunks({ title: 'T', transcript })
+      .map((c) => c.text)
+      .join('\n\n');
+    // The property the old sampled-passage design could not satisfy: nothing is dropped.
+    for (const m of transcript) expect(joined).toContain(m.content);
+  });
+
+  it('splits an oversized single message across chunks instead of truncating it', () => {
+    const huge = 'A'.repeat(5000) + 'NEEDLE_AT_THE_END';
+    const joined = buildEmbeddingChunks({ title: 'T', transcript: [{ content: huge }] })
+      .map((c) => c.text)
+      .join('');
+    expect(joined).toContain('NEEDLE_AT_THE_END');
+  });
+
+  it('produces multiple chunks for a long thread and one for a short one', () => {
+    expect(buildEmbeddingChunks({ title: 'T', transcript: longTranscript(60) }).length).toBeGreaterThan(2);
+    expect(buildEmbeddingChunks({ title: 'T', transcript: longTranscript(2) })).toHaveLength(2);
+  });
+
+  it('gives every chunk a unique, increasing index and a hash of its own text', () => {
+    const chunks = buildEmbeddingChunks({ title: 'T', transcript: longTranscript(60) });
+    const indices = chunks.map((c) => c.index);
+    // Sparse by design (a reserved band per message-group), but unique and ordered.
+    expect(new Set(indices).size).toBe(indices.length);
+    expect([...indices].sort((a, b) => a - b)).toEqual(indices);
+    expect(indices[0]).toBe(0);
+    expect(new Set(chunks.map((c) => c.hash)).size).toBe(chunks.length);
+  });
+
+  it('keeps chunk indices stable when an earlier message is edited', () => {
+    const before = buildEmbeddingChunks({ title: 'T', transcript: longTranscript(60) });
+    const after = buildEmbeddingChunks({
+      title: 'T',
+      transcript: longTranscript(60, { at: 10, to: 'a much shorter body' }),
     });
-    const parts = text.split('\n\n');
-    expect(parts[0]).toBe('CI build fails');
-    // question window (first 3 messages)
-    expect(parts).toContain('Q: My build fails on CI but works locally.');
-    expect(parts).toContain('Node 22.');
-    // answer ± 1 neighbours
-    expect(parts).toContain('Have you tried clearing the cache?');
-    expect(parts).toContain('Pin the lockfile and delete node_modules.');
-    expect(parts).toContain('That fixed it, thanks!');
+    // The whole point of position-pinned boundaries: a length change upstream must not
+    // renumber (and therefore re-embed) every chunk downstream.
+    expect(after.map((c) => c.index)).toEqual(before.map((c) => c.index));
   });
 
-  it('includes the tail when there is no accepted answer (knowledge channel)', () => {
-    const transcript = [
-      { content: 'Today we shipped the new caching layer.' },
-      { content: 'It reduced p99 latency by 40%.' },
-      { content: 'Config lives in cache.yaml.' },
-      { content: 'Remember to set TTLs per route.' },
-      { content: 'Follow-up: monitor eviction rates next week.' },
-    ];
-    const text = buildEmbeddingText({ title: 'Caching layer notes', transcript });
-    const parts = text.split('\n\n');
-    expect(parts[0]).toBe('Caching layer notes');
-    // opening window
-    expect(parts).toContain('Today we shipped the new caching layer.');
-    // tail (last messages) are appended for context around the "answer"
-    expect(parts).toContain('Follow-up: monitor eviction rates next week.');
+  it('returns nothing when there is nothing to embed', () => {
+    expect(buildEmbeddingChunks({ title: '', transcript: [] })).toEqual([]);
   });
 
-  it('de-duplicates overlapping windows and preserves order', () => {
-    const transcript = [
-      { content: 'one' },
-      { content: 'two' },
-      { content: 'three' }, // both the 3rd question-window message AND the accepted answer
-    ];
-    const text = buildEmbeddingText({
-      title: 'short thread',
-      acceptedAnswerText: 'three',
-      transcript,
+  describe('incremental re-embed cost', () => {
+    const hashesOf = (transcript: { content: string }[]) =>
+      buildEmbeddingChunks({ title: 'T', transcript }).map((c) => c.hash);
+
+    it('changes at most two chunks when a mid-thread message is edited', () => {
+      const before = hashesOf(longTranscript(60));
+      const after = hashesOf(longTranscript(60, { at: 30, to: 'totally different content here' }));
+      const changed = after.filter((h, i) => h !== before[i]).length;
+      expect(changed).toBeGreaterThan(0); // the edit propagates at all
+      expect(changed).toBeLessThanOrEqual(2); // ...but only locally (chunk + overlap)
     });
-    const parts = text.split('\n\n');
-    // "three" appears once despite being in both windows
-    expect(parts.filter((p) => p === 'three')).toHaveLength(1);
-    expect(parts).toEqual(['short thread', 'one', 'two', 'three']);
+
+    it('leaves chunk 0 untouched when only the transcript changes', () => {
+      const src = { title: 'T', questionBody: 'Q', acceptedAnswerText: 'A' };
+      const before = buildEmbeddingChunks({ ...src, transcript: longTranscript(60) });
+      const after = buildEmbeddingChunks({
+        ...src,
+        transcript: longTranscript(60, { at: 30, to: 'edited' }),
+      });
+      expect(after[0]?.hash).toBe(before[0]?.hash);
+    });
+
+    it('changes at most two chunks when a message is appended', () => {
+      const before = hashesOf(longTranscript(60));
+      const after = hashesOf([...longTranscript(60), { content: 'a brand new reply' }]);
+      const changed = after.filter((h, i) => h !== before[i]).length;
+      expect(changed).toBeLessThanOrEqual(2); // trailing chunk + at most one new chunk
+    });
   });
 
-  it('returns an empty string when there is nothing to embed', () => {
-    expect(buildEmbeddingText({ title: '', transcript: [] })).toBe('');
-  });
+  describe('EMBED_MAX_CHUNKS_PER_THREAD', () => {
+    it('is unlimited at 0 (the default)', () => {
+      const chunks = buildEmbeddingChunks({ title: 'T', transcript: longTranscript(80) }, 0);
+      expect(chunks.length).toBeGreaterThan(4);
+    });
 
-  it('selects start, end, and high-value (most-reacted) messages', () => {
-    const transcript = Array.from({ length: 12 }, (_, i) => ({
-      content: `m${i}`,
-      reactions: i === 6 ? 9 : 0,
-    }));
-    const parts = buildEmbeddingText({ title: 'T', transcript }).split('\n\n');
-    // start window
-    expect(parts).toContain('m0');
-    expect(parts).toContain('m2');
-    // end window
-    expect(parts).toContain('m9');
-    expect(parts).toContain('m11');
-    // high-value middle message (9 reactions) is pulled in despite being mid-thread
-    expect(parts).toContain('m6');
-    // a low-value middle message in no window is left out
-    expect(parts).not.toContain('m4');
+    it('caps the chunk count while keeping chunk 0 and the accepted answer', () => {
+      const transcript = longTranscript(80);
+      const answer = transcript[40]!.content;
+      const chunks = buildEmbeddingChunks({ title: 'T', acceptedAnswerText: answer, transcript }, 4);
+      expect(chunks).toHaveLength(4);
+      expect(chunks[0]?.text).toContain('T');
+      // the resolution survives the cap
+      expect(chunks.map((c) => c.text).join('\n\n')).toContain(answer);
+    });
   });
 });
 
@@ -101,17 +121,16 @@ describe('embedContentHash (stale-vector detection)', () => {
     expect(embedContentHash(src)).toBe(embedContentHash({ ...src }));
   });
 
-  it('changes when content within the embed window changes (edit/delete propagates)', () => {
+  it('changes when a message is edited', () => {
     const base = embedContentHash({ title: 'T', transcript: [{ content: 'a' }, { content: 'b' }] });
     const edited = embedContentHash({ title: 'T', transcript: [{ content: 'a' }, { content: 'B!' }] });
     expect(edited).not.toBe(base);
   });
 
-  it('ignores edits to middle messages outside the start/end/high-value windows', () => {
-    const mk = (c5: string) =>
-      Array.from({ length: 12 }, (_, i) => ({ content: i === 5 ? c5 : `m${i}`, reactions: 0 }));
-    expect(embedContentHash({ title: 'T', transcript: mk('m5') })).toBe(
-      embedContentHash({ title: 'T', transcript: mk('m5-edited') }),
+  it('NOW detects edits to middle messages (the old passage hash could not)', () => {
+    const mk = (c30: string) => longTranscript(60, { at: 30, to: c30 });
+    expect(embedContentHash({ title: 'T', transcript: mk('m30') })).not.toBe(
+      embedContentHash({ title: 'T', transcript: mk('m30-edited') }),
     );
   });
 });

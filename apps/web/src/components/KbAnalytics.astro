@@ -1,0 +1,106 @@
+---
+/**
+ * Knowledge-base traffic analytics, in PostHog's cookieless mode.
+ *
+ * Three properties make this safe to run without a consent gate:
+ *  - `cookieless_mode: 'always'` — no cookies, no localStorage, no persistent visitor
+ *    id. PostHog counts visitors with a privacy-preserving hash computed on its own
+ *    servers, which rotates daily.
+ *  - `person_profiles: 'never'` — identify() becomes a no-op, so no person profile can
+ *    be built even by accident.
+ *  - posthog-js is bundled from npm rather than pulled from PostHog's CDN, and
+ *    `disable_external_dependency_loading` stops it lazy-loading its extension bundles
+ *    (session replay, exception autocapture, surveys) at runtime. Without that flag it
+ *    fetches those from PostHog's asset host on first load — verified, not assumed.
+ *    Events still go to PostHog's EU ingestion endpoint; that part is inherent to using
+ *    a hosted analytics service and is disclosed in the privacy policy.
+ *
+ * NOTE: cookieless events are DROPPED unless `cookieless_server_hash_mode` is enabled
+ * on the PostHog project itself — the client flag alone is not enough.
+ *
+ * Config is handed over on a data-attribute rather than via `define:vars`, because
+ * define:vars forces the script inline, and an inline script cannot resolve the bare
+ * `posthog-js` specifier — it has to stay bundled.
+ *
+ * Every event is tagged with the tenant's guild group, so each community's traffic is
+ * separable while nothing identifies an individual reader.
+ */
+import { getEnv } from '@dejavue/core';
+
+const env = getEnv();
+const { tenant, tier, showAds } = Astro.locals;
+// Tenant KBs only. The apex marketing site is not instrumented.
+const active = !!tenant && !!env.POSTHOG_API_KEY;
+---
+
+{
+  active && (
+    <div
+      id="kb-analytics-cfg"
+      hidden
+      data-key={env.POSTHOG_API_KEY}
+      data-host={env.POSTHOG_HOST}
+      data-guild={tenant.guildId}
+      data-slug={tenant.slug}
+      data-tier={tier}
+      data-ads={showAds ? '1' : '0'}
+    />
+  )
+}
+
+{
+  active && (
+    <script>
+      import posthog from 'posthog-js';
+
+      const cfg = document.getElementById('kb-analytics-cfg');
+      if (cfg?.dataset.key) {
+        posthog.init(cfg.dataset.key, {
+          api_host: cfg.dataset.host,
+          // No cookies, no local storage, no persistent id — see the component header.
+          cookieless_mode: 'always',
+          person_profiles: 'never',
+          // Autocapture would record clicked element text, which on a knowledge base is
+          // the community's own content. Pageviews only.
+          autocapture: false,
+          // Captured manually below instead of by the SDK. Relying on the automatic
+          // pageview left $pageleave arriving while $pageview never did — the primary
+          // knowledge-base metric would have been silently empty. Sending it ourselves
+          // is deterministic and lets us attach the tenant before it goes out.
+          capture_pageview: false,
+          capture_pageleave: true,
+          // Belt and braces: session replay and heatmaps are toggles on the PostHog
+          // project, and a project-level default must not be able to start recording a
+          // visitor's screen on someone else's help centre. Refused here too, so the
+          // guarantee holds regardless of what the project settings say.
+          disable_session_recording: true,
+          capture_heatmaps: false,
+          capture_dead_clicks: false,
+          disable_surveys: true,
+          // The project has exception autocapture on; without this the SDK keeps trying
+          // (and failing) to fetch its bundle on every page. Error tracking belongs on
+          // the bot and worker, not on a page rendering a community's content.
+          capture_exceptions: false,
+          // Stops the SDK fetching recorder.js / exception-autocapture.js / surveys.js
+          // from PostHog's CDN. Exception autocapture in particular would ship JS error
+          // messages and stack traces off a page rendering someone else's content.
+          disable_external_dependency_loading: true,
+        });
+        // Super properties, NOT posthog.group(): group identification goes through person
+        // processing, which `person_profiles: 'never'` disables — the group() call is
+        // silently ignored and every event would arrive with no tenant attached. Super
+        // properties ride along on each event and need no person profile.
+        posthog.register({
+          kb_guild_id: cfg.dataset.guild,
+          kb_slug: cfg.dataset.slug,
+          // Tenant metadata, not reader data: lets traffic be split by plan and shows how
+          // much of it is ad-eligible.
+          kb_tier: cfg.dataset.tier,
+          kb_ads: cfg.dataset.ads === '1',
+        });
+        // Registered first so the tenant properties ride along on the pageview itself.
+        posthog.capture('$pageview');
+      }
+    </script>
+  )
+}

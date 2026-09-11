@@ -5,6 +5,8 @@
 // custom properties are emitted from the tenant's `/dejavue customize` settings
 // (see lib/theme.ts), so the whole site re-skins per guild.
 import { ACCENTS, brandInitial, brandOf, themeVars } from '../lib/theme';
+import KbAds from '../components/KbAds.astro';
+import KbAnalytics from '../components/KbAnalytics.astro';
 // Fonts are self-hosted (bundled from @fontsource) — no requests to Google Fonts,
 // which would transmit visitor IPs to Google (GDPR risk, LG München 3 O 17493/20).
 import '@fontsource/space-grotesk/400.css';
@@ -148,5 +150,8 @@ const css = `
   <body class="kb-theme">
     <a href="#kb-main" class="kb-skip">Skip to content</a>
     <slot />
+    {/* Free-tier only, and consent-gated — renders nothing for a paying tenant. */}
+    <KbAds />
+    <KbAnalytics />
   </body>
 </html>

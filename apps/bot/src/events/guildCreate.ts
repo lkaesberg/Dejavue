@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import {
   ChannelType,
   EmbedBuilder,
@@ -17,6 +18,7 @@ const log = childLogger({ mod: 'event:guildCreate' });
  * (the admin can still run /dejavue setup) rather than fail loudly.
  */
 export async function onGuildCreate(guild: Guild): Promise<void> {
+  capture('guild_joined', guild.id, { member_count: guild.memberCount });
   try {
     const channel = welcomeChannel(guild);
     if (!channel) return;

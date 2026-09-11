@@ -34,8 +34,11 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
   <h2>2. The short version</h2>
   <ul>
     <li>There are <strong>no user accounts</strong> on this website or on the knowledge bases.</li>
-    <li>We use <strong>no analytics, no advertising, and no tracking cookies</strong>, and we do not profile visitors.</li>
-    <li>Fonts and all other assets are <strong>self-hosted</strong> — viewing a page sends no requests to Google or other third parties.</li>
+    <li>We set <strong>no cookies for analytics or advertising</strong> — none at all — and we do not profile visitors or track you across sites.</li>
+    <li>Knowledge bases measure <strong>page traffic without cookies</strong>. Visitor counts are produced by a privacy-preserving hash calculated on our analytics provider's servers, which changes daily and cannot be used to recognise you later or elsewhere. No profile is ever created.</li>
+    <li>To operate and bill the service we also record <strong>aggregate operational metrics per Discord server</strong> — for example how many threads a server has indexed, or how much AI budget it has used. These are never tied to a person and never include message content.</li>
+    <li>Knowledge bases on the <strong>free plan show one ad</strong> from a privacy-first network that sets no cookies and does not profile readers. Because loading it discloses your IP address to that provider, <strong>we ask first</strong> and load nothing unless you agree. Declining is one click and is remembered on your device.</li>
+    <li>Fonts, scripts and all other assets are <strong>self-hosted</strong>. Apart from our analytics provider, and the ad network if you have allowed it, viewing a page sends no requests to third parties — and never to Google.</li>
     <li>Knowledge-base content comes from Discord servers whose administrators chose to publish it. Authors are shown only under <strong>neutral aliases</strong> such as “Original poster” or “Helper 1” — never with Discord names, avatars, or IDs.</li>
     <li>Payments are handled entirely <strong>inside Discord</strong>; we never see payment details.</li>
     <li>
@@ -67,7 +70,9 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
     HttpOnly, valid for 30 days) so you do not have to re-enter it on every page. This cookie contains no personal
     data and no identifier of you — it only proves that the passphrase was entered. It is strictly necessary for
     the service you requested (§ 25(2) no. 2 German TDDDG), which is why no consent banner is required. We set no
-    third-party cookies of any kind.
+    third-party cookies of any kind. Knowledge-base analytics run in a cookieless mode, and the ad network used
+    on free plans is cookieless too — so no cookie is set for either, whatever you choose. Your ad choice itself is
+    stored in your browser's local storage (not a cookie) and never leaves your device.
   </p>
 
   <h2>5. Knowledge bases: content from Discord, and who is responsible</h2>

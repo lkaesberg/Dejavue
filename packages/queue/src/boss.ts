@@ -47,6 +47,9 @@ export const QUEUE_POLICIES: Record<QueueName, QueuePolicy> = {
   [QUEUES.REVALIDATE_KB]: DEFAULT_POLICY,
   [QUEUES.INGEST_ATTACHMENT]: DEFAULT_POLICY,
   [QUEUES.REINDEX_CHANNEL]: { ...DEFAULT_POLICY, expireInSeconds: LONG_RUNNING_EXPIRE },
+  // The rollup emits a single event at the very end, so a retry after a failed run is
+  // a clean re-run rather than a duplicate data point.
+  [QUEUES.STATS_SNAPSHOT]: DEFAULT_POLICY,
 };
 
 async function ensureQueues(boss: PgBoss): Promise<void> {

@@ -115,7 +115,7 @@ It's useful for any server where the same questions keep coming back:
 - `QAPage` / `FAQPage` JSON-LD, DB-driven sitemap, near-zero-JS pages for SEO
 - **Opt-in per server** (default off); usernames aliased as "Original poster" / "Helper N"
 
-### 🔌 MCP server (Max)
+### 🔌 MCP server (Pro & Max)
 
 - Publishes your answers as a **Streamable HTTP MCP server** at `{slug}.dejavue.app/mcp`
 - Add it to Claude, ChatGPT, Cursor, or any MCP client so your AI answers from your community's
@@ -189,30 +189,62 @@ detect duplicates.
 
 ---
 
+## 📊 Telemetry
+
+The hosted bot records **aggregate, per-server operational metrics** (threads indexed, AI
+credits used, embedding tokens spent, subscription events) so the service can be run and
+billed. The allowlist in `packages/analytics` makes it structurally impossible to emit
+message content, thread titles, search queries, or Discord user ids. `distinct_id` is the
+**guild** id.
+
+Published knowledge bases additionally count **page traffic** in the visitor's browser
+(`components/KbAnalytics.astro`), in PostHog's cookieless mode: no cookie, no local
+storage, no persistent visitor id, no person profile, autocapture and session replay both
+off. Visitors are counted by a hash PostHog computes server-side that rotates daily. The
+apex marketing site is not instrumented at all. Because this runs client-side,
+`POSTHOG_API_KEY` is rendered into the page — correct for a PostHog *project* key
+(`phc_…`), which is public by design; never put a personal key (`phx_…`) there.
+
+Free-plan knowledge bases also show **one ad** (`ADS_PROVIDER=ethicalads`). It is
+cookieless and non-behavioural, and because loading it discloses the reader's IP to a
+third party it is gated behind an explicit opt-in — nothing is requested until the visitor
+agrees, and declining falls back to an in-house promo.
+
+Both are disclosed in the privacy policy. Self-hosting sends nothing: leave
+`POSTHOG_API_KEY` unset and no client is created, and leave `ADS_PROVIDER` at `none`.
+
+---
+
 ## 💳 Tiers
 
 The hosted bot is billed per server through **Discord Premium Apps**. AI usage is metered in **AI
 credits** (1 credit = 1,000 model tokens, input + output): a drafted answer costs ≈ 0.8 credits and a
 thread summary ≈ 3.
 
+Only two things actually cost us money per server: **indexing** (embedding your messages) and
+**AI generation**. So those are the only two things the tiers meter. Semantic search, analytics,
+nudges and theming cost nothing to serve, so every server gets them.
+
 | | **Free** | **Plus** €4.99 | **Pro** €9.99 | **Max** €24.99 |
 |---|---|---|---|---|
-| Forum channels | 1 | 5 | 10 | unlimited |
-| Tracked (non-forum) channels | 1 | 5 | 15 | unlimited |
-| Indexed messages | 500 | 5,000 | 50,000 | unlimited |
-| Duplicate detection / search | keyword | semantic | semantic | semantic |
-| AI-drafted answers | — | ✓ (taster) | ✓ | ✓ |
-| AI summary / clustering / auto-FAQ | — | — | ✓ | ✓ |
-| **AI credits / mo** | — | **25** | **1,000** | **5,000** |
-| Stale-question nudges | — | ✓ | ✓ | ✓ |
-| Analytics | basic counts | full | full | full |
-| Website page rendering | raw | raw | AI-summarized | AI-summarized |
-| **MCP server** | — | — | — | **✓** (30 req/min) |
+| Forum channels | 3 | 15 | 50 | unlimited |
+| Tracked (non-forum) channels | 3 | 15 | 50 | unlimited |
+| **Indexed messages** | **2,500** | **25,000** | **250,000** | **unlimited** |
+| Duplicate detection / search | semantic | semantic | semantic | semantic |
+| Stale-question nudges | ✓ | ✓ | ✓ | ✓ |
+| Analytics | full | full | full | full |
+| Knowledge-base theming | ✓ | ✓ | ✓ | ✓ |
+| AI-drafted answers | — | ✓ | ✓ | ✓ |
+| AI summary / clustering / auto-FAQ | — | ✓ | ✓ | ✓ |
+| **AI credits / mo** | — | **250** | **2,500** | **12,000** |
+| Website page rendering | raw | AI-summarized | AI-summarized | AI-summarized |
+| **MCP server** | — | — | **✓** (30 req/min) | **✓** (30 req/min) |
+| Ads on the public site | shown | **none** | **none** | **none** |
 | "Powered by Dejavue" branding | shown | removed | removed | removed |
 
-**One-time purchases** (any tier): **Custom domain — €29.99** · **AI top-up — €1.99** for +250
-credits (consumable, stacks, never expires). Importing your existing history is free, up to each
-tier's indexed-message limit.
+**One-time purchases** (any tier): **Custom domain — €29.99** · **AI top-up** packs of 500 / 1,000 /
+2,000 / 5,000 credits (consumable, stacks, never expires). Importing your existing history is free,
+up to each tier's indexed-message limit.
 
 > 💡 **Self-hosting has no tiers.** Set `DEV_FORCE_TIER=max` and every feature is unlocked — you
 > just pay your own OpenRouter bill for the AI parts, or run embeddings on CPU for free.
@@ -362,10 +394,20 @@ installs dependencies, and runs migrations automatically (ports 4321/5432/8090 f
 | `OPENROUTER_MODEL` | Model for generative features (default `deepseek/deepseek-v4-pro`) |
 | `KB_BASE_DOMAIN` | Base domain for public knowledge bases (default `dejavue.app`) |
 | `KB_PUBLIC_URL` | Public URL of the marketing/website root |
+| `KB_REVALIDATE_SECRET` | Signs the private-KB gate cookie. **Required in production** — the app refuses to boot without it rather than fall back to a constant published in this repo. `openssl rand -hex 32` |
+| `TRUSTED_PROXY_HOPS` | How many reverse proxies sit in front, each appending to `X-Forwarded-For`. Decides which entry is trustworthy for rate-limit keys. `0` (default) ignores the header and uses the socket peer — correct for a directly exposed app. Traefik alone = `1`; Cloudflare + Traefik = `2`. Setting it **too high** is the dangerous direction |
 | `EMBEDDING_PROVIDER` | `local` (default, free CPU) or `openrouter` |
 | `EMBEDDING_MODEL` | Embedding model id — see the table below |
-| `QUOTA_CREDITS_PLUS` / `_PRO` / `_MAX` | Monthly AI credits per tier (25 / 1,000 / 5,000) |
+| `QUOTA_CREDITS_PLUS` / `_PRO` / `_MAX` | Monthly AI credits per tier (250 / 2,500 / 12,000) |
+| `QUOTA_EMBED_TOKENS_FREE` / `_PLUS` / `_PRO` / `_MAX` | Monthly embedding-token ceiling per tier. A runaway guard, not the product limit (indexed messages is) — fail-closed on Free, alert-only on paid |
+| `EMBED_MAX_CHUNKS_PER_THREAD` | Max chunks a single thread is split into. `0` (default) = unlimited, i.e. every message is embedded |
+| `EMBED_BATCH_SIZE` | Chunks sent per embedding request (default 64) |
 | `MCP_RATE_PER_MIN` | MCP endpoint rate limit (default 30) |
+| `POSTHOG_API_KEY` | *(Optional)* Product analytics. Unset = nothing is sent at all — the expected setup when self-hosting |
+| `POSTHOG_HOST` | PostHog host (default `https://eu.posthog.com`) |
+| `ADS_PROVIDER` | `none` (default, and the right setting when self-hosting) or `ethicalads`. Free-tier knowledge bases only, behind a visitor opt-in |
+| `ADS_PUBLISHER_ID` | Publisher id from the ad network. Without it `ethicalads` stays off — a provider with no id would render a permanently empty slot |
+| `CHANNEL_JOB_CONCURRENCY` | Parallel channel history jobs (default 2). Keep at `1` on a memory-constrained host |
 | `SKU_*` | Discord SKU ids — only needed if you monetize your own instance |
 | `DEV_FORCE_TIER` | Force a tier (`free`/`plus`/`pro`/`max`). Set `max` when self-hosting |
 
@@ -432,8 +474,12 @@ yourself.
 - **Public pages never show Discord identities.** Authors appear as neutral aliases ("Original
   poster", "Helper 1"); no usernames, display names, or avatars. Only the numeric user ID is stored
   internally.
-- **No analytics, no advertising, no tracking cookies**, and no visitor profiling. Fonts and assets
-  are self-hosted, so viewing a page sends no requests to third parties.
+- **No tracking cookies and no visitor profiling.** Knowledge-base traffic is measured in a
+  cookieless mode (a daily-rotating, server-side hash — no cookie, no local storage, no persistent
+  id). Fonts and scripts are self-hosted; the analytics SDK is bundled, not loaded from a CDN.
+- **Free-tier knowledge bases show one ad** from a cookieless, non-behavioural network. Because the
+  request discloses the reader's IP to that provider, it is **opt-in**: nothing loads until the
+  reader agrees, and declining shows an in-house promo instead. Paid plans have no ads at all.
 - **No user accounts** on the website or the knowledge bases.
 - **Payments happen entirely inside Discord** — we never see payment details.
 - **AI is the only third-party processor**, used only when AI features are enabled, and can be turned

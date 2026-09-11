@@ -14,6 +14,8 @@ import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
 import { resolveMentions } from '../lib/discordText';
+import { takeAll } from '../lib/rateLimit';
+import { clientIp } from '../lib/clientIp';
 import { threadPath } from '../lib/slug';
 import { brandOf } from '../lib/theme';
 
@@ -28,7 +30,29 @@ const channelFilter = url.searchParams.get('channel') ?? undefined;
 const wantSemantic = url.searchParams.get('semantic') === '1';
 
 const semanticAllowed = tierLimits(tier).semanticSearch;
-const semanticActive = semanticAllowed && wantSemantic;
+/**
+ * Burst limit on the *semantic* path only. A semantic search embeds the query (a paid
+ * call on the API backend), so an open endpoint is a spend surface. Over the limit we
+ * silently serve keyword results — the page still works, it just stops costing money.
+ * Keyword search is pure Postgres and stays unlimited.
+ *
+ * Two limits, and the tenant one is the one that actually bounds spend. The per-visitor
+ * key contains a client IP, and no header-derived IP is trustworthy if a request can
+ * reach the origin without passing our proxy (see lib/clientIp.ts) — this used to read
+ * `x-forwarded-for[0]`, which is simply whatever the client sent, so rotating one header
+ * bought unlimited paid embedding calls. The per-tenant key is derived from the Host the
+ * middleware already resolved against the database, so it cannot be forged and caps the
+ * bill no matter how many identities a caller invents.
+ */
+const SEARCH_PER_IP_PER_MIN = 20;
+const SEARCH_PER_TENANT_PER_MIN = 120;
+const ip = clientIp(Astro.request, Astro.clientAddress);
+const tenantKey = tenant?.guildId ?? slug ?? 'unknown';
+const withinSearchBudget = takeAll([
+  { key: `kbsearch:${tenantKey}:${ip}`, perMinute: SEARCH_PER_IP_PER_MIN },
+  { key: `kbsearch:${tenantKey}`, perMinute: SEARCH_PER_TENANT_PER_MIN },
+]);
+const semanticActive = semanticAllowed && wantSemantic && withinSearchBudget;
 
 let results: KbSearchResult[] = [];
 let all: Thread[] = [];
@@ -48,8 +72,9 @@ if (tenant) {
     // if the embedding backend is down, degrade to keyword results instead of none.
     try {
       if (semanticActive) {
-        const { embedOne, embeddingModelId } = await import('@dejavue/ai');
-        const vec = await embedOne(query, { mode: 'query', model: tenant.embeddingModel });
+        const { embedQueryCached, embeddingModelId } = await import('@dejavue/ai');
+        // Cached: public KB search is crawler- and refresh-reachable.
+        const vec = await embedQueryCached(query, { model: tenant.embeddingModel });
         results = await searchPublishedHybrid(
           getDb(),
           tenant.guildId,

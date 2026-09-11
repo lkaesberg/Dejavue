@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import { computeSpill, creditsToTokens, tokensToCredits } from '@dejavue/core';
 import type { Database } from '../client';
 import { generationEvent, type GenerationEvent, topUpGrant } from '../schema';
@@ -17,21 +17,69 @@ export function currentWindowStart(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-/** Tokens consumed by successful generations in the current window. */
+const tokenSum = sql<number>`coalesce(sum(${generationEvent.promptTokens} + ${generationEvent.completionTokens}), 0)::int`;
+
+/**
+ * Tokens consumed by successful *generations* in the current window — the AI-credit
+ * meter. Embedding rows live in the same ledger but are excluded here on purpose: they
+ * are metered by their own ceiling (see embeddingTokensUsed), and letting indexing spend
+ * silently drain a guild's inference credits would be a bug, not a policy.
+ */
 export async function tokensUsed(db: Executor, guildId: string, since: Date): Promise<number> {
   const [row] = await db
-    .select({
-      t: sql<number>`coalesce(sum(${generationEvent.promptTokens} + ${generationEvent.completionTokens}), 0)::int`,
-    })
+    .select({ t: tokenSum })
     .from(generationEvent)
     .where(
       and(
         eq(generationEvent.guildId, guildId),
         eq(generationEvent.success, true),
         gte(generationEvent.createdAt, since),
+        ne(generationEvent.feature, 'embedding'),
       ),
     );
   return row?.t ?? 0;
+}
+
+/**
+ * Embedding tokens consumed in the current window. Separate from the credit meter so a
+ * per-tier embedding ceiling can be enforced (and, more importantly, so per-guild
+ * indexing spend is *visible at all* — previously nothing recorded it).
+ */
+export async function embeddingTokensUsed(
+  db: Executor,
+  guildId: string,
+  since: Date,
+): Promise<number> {
+  const [row] = await db
+    .select({ t: tokenSum })
+    .from(generationEvent)
+    .where(
+      and(
+        eq(generationEvent.guildId, guildId),
+        eq(generationEvent.success, true),
+        gte(generationEvent.createdAt, since),
+        eq(generationEvent.feature, 'embedding'),
+      ),
+    );
+  return row?.t ?? 0;
+}
+
+/** Record embedding spend. Never consumes AI credits — visibility + ceiling only. */
+export async function recordEmbeddingUsage(
+  db: Executor,
+  input: { guildId: string; model: string; tokens: number; threadId?: string | null },
+): Promise<void> {
+  if (input.tokens <= 0) return;
+  await db.insert(generationEvent).values({
+    guildId: input.guildId,
+    feature: 'embedding',
+    model: input.model,
+    promptTokens: input.tokens,
+    completionTokens: 0,
+    success: true,
+    threadId: input.threadId ?? null,
+    topUpCreditsConsumed: 0,
+  });
 }
 
 export async function topUpCreditsRemaining(db: Executor, guildId: string): Promise<number> {

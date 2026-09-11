@@ -68,9 +68,10 @@ const channelName = thread?.channelName ?? '';
 const hasContent = !!(acceptedAnswer || thread?.questionBody);
 const brand = brandOf(cfg, tenant?.slug ?? undefined);
 
-// Lazy AI summary: generated + streamed token-by-token on first view via SSE (see the
-// bottom script + /api/summary/[id].stream). The card shows for Pro/Max whenever there's
-// content to summarize; with no stored summary yet it streams in live, then persists.
+// Lazy AI summary: fetched over SSE on view (see the bottom script +
+// /api/summary/[id].stream). The card shows for Pro/Max whenever there's content to
+// summarize. A stored summary arrives in one frame; if none exists yet the route queues
+// the worker to write one and this falls back to the raw answer until a later view.
 const summaryPending = !!(thread && tenant && !summary && hasContent && limits.generative);
 const showSummaryCard = limits.generative && (!!summary || summaryPending);
 const isSolved = thread?.status === 'solved';
@@ -371,6 +372,7 @@ const jsonLd = thread
             if (!el || el.getAttribute('data-pending') !== 'true') return;
             var id = el.getAttribute('data-thread');
             var started = false;
+            var queued = false;
             var es = new EventSource('/api/summary/' + encodeURIComponent(id) + '.stream');
             es.onmessage = function (e) {
               try {
@@ -381,10 +383,16 @@ const jsonLd = thread
                 }
               } catch (_) {}
             };
+            // No stored summary yet: the server queued one for the worker to write.
+            es.addEventListener('pending', function () { queued = true; });
             es.addEventListener('done', function () {
               es.close();
               el.removeAttribute('data-pending');
-              if (!started && !el.textContent.trim()) el.textContent = 'No summary available.';
+              if (!started && !el.textContent.trim()) {
+                el.textContent = queued
+                  ? 'A summary is being written for this answer — check back shortly.'
+                  : 'No summary available.';
+              }
             });
             es.onerror = function () { es.close(); };
           })();

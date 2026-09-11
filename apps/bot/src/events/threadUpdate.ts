@@ -1,8 +1,16 @@
 import type { ThreadChannel } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { getDb, getGuildConfig, getThreadByDiscordId, setThreadLabels } from '@dejavue/db';
+import {
+  getDb,
+  getGuildConfig,
+  getThreadByDiscordId,
+  setMarkedDuplicate,
+  setPublished,
+  setThreadLabels,
+} from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
-import { forumParent, threadLabels } from '../lib/forum';
+import { findTagByName, forumParent, threadLabels } from '../lib/forum';
+import { closeThread } from '../lib/solve';
 import { monitoredForum } from '../lib/tier';
 
 const log = childLogger({ mod: 'event:threadUpdate' });
@@ -10,6 +18,14 @@ const log = childLogger({ mod: 'event:threadUpdate' });
 const sortedTags = (t: ThreadChannel): string => [...(t.appliedTags ?? [])].sort().join(',');
 const sameLabels = (a: string[], b: string[]): boolean =>
   a.length === b.length && [...a].sort().join(' ') === [...b].sort().join(' ');
+
+/** Is the forum's managed `duplicate` tag currently applied to this post? */
+function hasDuplicateTag(thread: ThreadChannel): boolean {
+  const forum = forumParent(thread);
+  if (!forum) return false;
+  const tagId = findTagByName(forum, 'duplicate');
+  return tagId != null && thread.appliedTags.includes(tagId);
+}
 
 /**
  * Keep the KB in sync when a moderator changes a thread's forum tags (custom labels)
@@ -37,6 +53,31 @@ export async function onThreadUpdate(
     // Only update threads we've already indexed.
     const existing = await getThreadByDiscordId(db, guildId, newThread.id);
     if (!existing) return;
+
+    // Hand-folding: a moderator applying the managed `duplicate` tag is saying "this
+    // isn't the canonical answer", so honour it exactly like an accepted duplicate —
+    // out of duplicate suggestions and search, and no KB page of its own. Removing the
+    // tag puts a solved post back (unless it's also folded onto a canonical thread).
+    const marked = hasDuplicateTag(newThread);
+    if (marked !== existing.markedDuplicate) {
+      await setMarkedDuplicate(db, guildId, newThread.id, marked);
+      const publish = !marked && existing.status === 'solved' && !existing.doNotPublish && !existing.duplicateOfThreadId;
+      if (marked ? existing.publishedToKb : publish) {
+        const action = marked ? 'unpublish' : 'publish';
+        await setPublished(db, guildId, newThread.id, !marked);
+        await enqueueRevalidateKb({ guildId, threadId: newThread.id, action }).catch(() => undefined);
+      }
+      // Close it like the accept button does — the answer is on the canonical post, so
+      // there's nothing to add here. Removing the tag reopens an unsolved post (a
+      // solved one stays closed, which is where solving left it).
+      if (marked) {
+        await closeThread(newThread);
+      } else if (existing.status !== 'solved') {
+        if (newThread.archived) await newThread.setArchived(false).catch(() => undefined);
+        if (newThread.locked) await newThread.setLocked(false).catch(() => undefined);
+      }
+      log.debug({ threadId: newThread.id, marked }, 'synced hand-applied duplicate tag');
+    }
 
     const after = threadLabels(newThread);
     if (sameLabels(existing.labels, after)) return; // custom labels unchanged

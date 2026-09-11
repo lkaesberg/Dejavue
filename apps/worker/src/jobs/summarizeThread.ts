@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import { buildSummaryContext, summarizeThread } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
@@ -59,6 +60,13 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
     threadId: job.threadRowId,
     usedTokensBefore: quota.usedTokens,
     baseCredits,
+  });
+  capture('generation', job.guildId, {
+    feature: 'summary',
+    model_id: result.model,
+    prompt_tokens: result.promptTokens,
+    completion_tokens: result.completionTokens,
+    success: true,
   });
   log.info({ threadRowId: job.threadRowId }, 'summarized thread');
 }

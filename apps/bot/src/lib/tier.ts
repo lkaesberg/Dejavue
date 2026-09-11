@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import {
   getEnv,
   isMonitoredForum,
@@ -69,5 +70,23 @@ export async function monitoredForum(
 export async function atIndexCap(guildId: string): Promise<boolean> {
   const limits = limitsFor(await getGuildTier(guildId));
   if (!Number.isFinite(limits.indexCap)) return false;
-  return (await countIndexedMessages(getDb(), guildId)) >= limits.indexCap;
+  const capped = (await countIndexedMessages(getDb(), guildId)) >= limits.indexCap;
+  if (capped) reportCapped(guildId, limits.indexCap);
+  return capped;
+}
+
+/**
+ * "This server is turning content away" is the demand signal that says the index cap is
+ * doing the converting. But atIndexCap runs on every capture, so a capped guild would
+ * emit on every message — record it at most hourly per guild instead.
+ */
+const CAP_REPORT_INTERVAL_MS = 60 * 60 * 1000;
+const capReportedAt = new Map<string, number>();
+
+function reportCapped(guildId: string, cap: number): void {
+  const now = Date.now();
+  const last = capReportedAt.get(guildId) ?? 0;
+  if (now - last < CAP_REPORT_INTERVAL_MS) return;
+  capReportedAt.set(guildId, now);
+  capture('index_cap_reached', guildId, { cap });
 }

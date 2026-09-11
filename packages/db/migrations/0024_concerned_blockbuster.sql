@@ -1,0 +1,1 @@
+ALTER TYPE "public"."generation_feature" ADD VALUE 'embedding' BEFORE 'cluster_label';

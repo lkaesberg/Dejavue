@@ -79,17 +79,19 @@ describe('deriveTier', () => {
 });
 
 describe('tierLimits', () => {
-  it('caps the total index at 500 / 5k / 50k / unlimited messages', () => {
-    expect(tierLimits('free').indexCap).toBe(500);
-    expect(tierLimits('plus').indexCap).toBe(5_000);
-    expect(tierLimits('pro').indexCap).toBe(50_000);
+  it('caps the total index at 2.5k / 25k / 250k / unlimited messages', () => {
+    // The index cap is the one Free limit that tracks real embedding spend, so it is
+    // also the only scale number Free is held tightly to.
+    expect(tierLimits('free').indexCap).toBe(2_500);
+    expect(tierLimits('plus').indexCap).toBe(25_000);
+    expect(tierLimits('pro').indexCap).toBe(250_000);
     expect(tierLimits('max').indexCap).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('caps forum channels at 1 / 5 / 10 / unlimited', () => {
-    expect(tierLimits('free').maxForumChannels).toBe(1);
-    expect(tierLimits('plus').maxForumChannels).toBe(5);
-    expect(tierLimits('pro').maxForumChannels).toBe(10);
+  it('caps forum channels at 3 / 15 / 50 / unlimited', () => {
+    expect(tierLimits('free').maxForumChannels).toBe(3);
+    expect(tierLimits('plus').maxForumChannels).toBe(15);
+    expect(tierLimits('pro').maxForumChannels).toBe(50);
     expect(tierLimits('max').maxForumChannels).toBe(Number.POSITIVE_INFINITY);
   });
 
@@ -104,18 +106,41 @@ describe('tierLimits', () => {
     expect(max.indexCap).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('reserves MCP for the max tier only, with a rate limit', () => {
-    expect(tierLimits('pro').mcp).toBe(false);
-    expect(tierLimits('pro').mcpRequestsPerMinute).toBe(0);
+  it('reserves MCP for Pro and up, with a rate limit', () => {
+    expect(tierLimits('free').mcp).toBe(false);
+    expect(tierLimits('plus').mcp).toBe(false);
+    expect(tierLimits('plus').mcpRequestsPerMinute).toBe(0);
+    expect(tierLimits('pro').mcp).toBe(true);
+    expect(tierLimits('pro').mcpRequestsPerMinute).toBe(30);
     expect(tierLimits('max').mcp).toBe(true);
     expect(tierLimits('max').mcpRequestsPerMinute).toBe(30);
   });
 
-  it('budgets AI credits at 0 / 25 / 1000 / 5000 by default', () => {
+  it('budgets AI credits at 0 / 250 / 2500 / 12000 by default', () => {
     expect(tierLimits('free').monthlyCredits).toBe(0);
-    expect(tierLimits('plus').monthlyCredits).toBe(25);
-    expect(tierLimits('pro').monthlyCredits).toBe(1_000);
-    expect(tierLimits('max').monthlyCredits).toBe(5_000);
+    expect(tierLimits('plus').monthlyCredits).toBe(250);
+    expect(tierLimits('pro').monthlyCredits).toBe(2_500);
+    expect(tierLimits('max').monthlyCredits).toBe(12_000);
+  });
+
+  it('gives Free every capability that costs nothing per guild', () => {
+    // The point of the matrix: withholding these bought no margin, it only made the
+    // product look broken to the servers most likely to grow into paying ones.
+    const free = tierLimits('free');
+    expect(free.semanticSearch).toBe(true);
+    expect(free.nudges).toBe(true);
+    // ...but never the spend itself, nor the branding removal.
+    expect(free.monthlyCredits).toBe(0);
+    expect(free.aiDrafts).toBe(false);
+    expect(free.generative).toBe(false);
+    expect(free.removeBranding).toBe(false);
+  });
+
+  it('gives every tier a finite embedding-token ceiling as a runaway guard', () => {
+    for (const t of ['free', 'plus', 'pro', 'max'] as const) {
+      expect(Number.isFinite(tierLimits(t).monthlyEmbedTokens)).toBe(true);
+      expect(tierLimits(t).monthlyEmbedTokens).toBeGreaterThan(0);
+    }
   });
 
   it('passes configured credit budgets through', () => {
@@ -125,18 +150,29 @@ describe('tierLimits', () => {
     expect(tierLimits('max', quotas).monthlyCredits).toBe(9_000);
   });
 
-  it('gives plus the drafts taster but not the full generative suite', () => {
+  it('gates AI by the credit budget rather than by a second boolean', () => {
+    // Free has no inference at all; every paid tier gets the whole suite, bounded by
+    // its credit budget. A boolean gate on top would double-charge for one cost.
     expect(tierLimits('free').aiDrafts).toBe(false);
-    expect(tierLimits('plus').aiDrafts).toBe(true);
-    expect(tierLimits('plus').generative).toBe(false);
-    expect(tierLimits('pro').aiDrafts).toBe(true);
-    expect(tierLimits('pro').generative).toBe(true);
-    expect(tierLimits('pro').kbSummarizedAnswers).toBe(true);
+    expect(tierLimits('free').generative).toBe(false);
+    for (const t of ['plus', 'pro', 'max'] as const) {
+      expect(tierLimits(t).aiDrafts).toBe(true);
+      expect(tierLimits(t).generative).toBe(true);
+      expect(tierLimits(t).kbSummarizedAnswers).toBe(true);
+      expect(tierLimits(t).monthlyCredits).toBeGreaterThan(0);
+    }
   });
 
   it('only free shows branding', () => {
     expect(tierLimits('free').removeBranding).toBe(false);
     expect(tierLimits('plus').removeBranding).toBe(true);
+  });
+
+  it('only free shows ads on the public knowledge base', () => {
+    expect(tierLimits('free').ads).toBe(true);
+    for (const t of ['plus', 'pro', 'max'] as const) {
+      expect(tierLimits(t).ads).toBe(false);
+    }
   });
 });
 

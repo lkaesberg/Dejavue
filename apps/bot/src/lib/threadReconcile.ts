@@ -149,7 +149,7 @@ async function reconcileGuild(guild: Guild): Promise<void> {
         break;
       }
       checked++;
-      let ch;
+      let ch: Awaited<ReturnType<typeof guild.client.channels.fetch>>;
       try {
         ch = await guild.client.channels.fetch(threadId);
       } catch (err) {

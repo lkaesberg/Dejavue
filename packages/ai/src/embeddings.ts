@@ -5,7 +5,6 @@ import {
 } from '@huggingface/transformers';
 import OpenAI from 'openai';
 import { childLogger, getEnv, requireEnv } from '@dejavue/core';
-import { findAnswerIndex } from './text';
 
 const log = childLogger({ mod: 'ai:embeddings' });
 
@@ -142,13 +141,26 @@ function l2normalize(v: number[]): number[] {
   return v.map((x) => x / norm);
 }
 
-async function embedViaApi(texts: string[], model: string, dim: number): Promise<number[][]> {
+async function embedViaApi(
+  texts: string[],
+  model: string,
+  dim: number,
+): Promise<{ vectors: number[][]; tokens: number }> {
   // Empty strings are rejected by the API; substitute a single space.
   const input = texts.map((t) => (t ?? '').slice(0, MAX_CHARS) || ' ');
   const resp = await apiClient().embeddings.create({ model, input, dimensions: dim });
-  return [...resp.data]
+  const vectors = [...resp.data]
     .sort((a, b) => a.index - b.index)
     .map((d) => l2normalize(d.embedding as number[]));
+  // Prefer the provider's own count; fall back to an estimate so spend is never
+  // silently recorded as zero when a backend omits `usage`.
+  const tokens = resp.usage?.total_tokens ?? estimateTokens(input);
+  return { vectors, tokens };
+}
+
+/** ~4 chars per token. Only used when the backend reports no usage (e.g. local CPU). */
+function estimateTokens(texts: string[]): number {
+  return Math.ceil(texts.reduce((n, t) => n + (t?.length ?? 0), 0) / 4);
 }
 
 export interface EmbedSource {
@@ -158,108 +170,191 @@ export interface EmbedSource {
   transcript?: { content: string; reactions?: number }[] | null;
 }
 
-const QUESTION_WINDOW = 3; // start: the OP + the next couple of replies
-const ANSWER_WINDOW = 1; // the accepted answer ± its neighbours
-const TAIL_WINDOW = 3; // end: the closing messages
-const HIGH_VALUE_COUNT = 3; // the most-reacted messages (high-signal middle content)
-// Truncate any single message so one giant post can't crowd out the start/end/high-value
-// balance, and cap the whole passage below embed()'s hard MAX_CHARS so the truncation
-// there (which would blindly cut the tail) effectively never fires.
-const PER_MESSAGE_CHARS = 1000;
-const MAX_PASSAGE_CHARS = 7000;
-
-function clampMsg(s: string): string {
-  return s.length > PER_MESSAGE_CHARS ? `${s.slice(0, PER_MESSAGE_CHARS - 1)}…` : s;
-}
-
-/** De-dup (preserving order), truncate long messages, and cap the total passage size. */
-function assemble(parts: string[]): string {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  let used = 0;
-  for (const raw of parts) {
-    const p = clampMsg((raw ?? '').trim());
-    if (!p || seen.has(p)) continue;
-    if (used + p.length + 2 > MAX_PASSAGE_CHARS) break;
-    seen.add(p);
-    out.push(p);
-    used += p.length + 2;
-  }
-  return out.join('\n\n');
-}
-
 /**
- * Build the passage text to embed for a thread. Rather than the first 8000 chars (which
- * would lose the middle and end), we select a balanced, high-signal subset:
- *   - the **start** (opening messages — what the thread is about),
- *   - the **end** (how it concluded),
- *   - the most **high-value** messages (by reaction count — the community's signal of
- *     what mattered, anywhere in the thread), and
- *   - for solved Q&A, the **accepted answer** plus its neighbours.
- * Each message is truncated and the whole passage is capped, so the three sources stay
- * balanced. Falls back to title + question + answer when no transcript was captured.
+ * Target size of one chunk, in characters (~300 tokens). Small enough that a single
+ * topic dominates its vector, large enough that a chunk carries real context.
  */
-export function buildEmbeddingText(src: EmbedSource): string {
-  const title = (src.title ?? '').trim();
-  const msgs = (src.transcript ?? []).map((m) => ({
-    content: (m.content ?? '').trim(),
-    reactions: m.reactions ?? 0,
-  }));
-  const hasContent = msgs.some((m) => m.content);
+const CHUNK_CHARS = 1200;
+/**
+ * Messages per chunk. Chunk boundaries are pinned to message POSITIONS, not to a
+ * running character count, and that is load-bearing: with length-based packing, editing
+ * one message changes its length and re-flows every chunk after it, so a one-word edit
+ * would re-embed the whole thread. Position-based boundaries keep an edit local.
+ */
+const MESSAGES_PER_CHUNK = 6;
+/**
+ * Index slots reserved per message-group. A group whose messages are unusually long
+ * splits into several sub-chunks; reserving a band per group keeps every chunk index
+ * stable when a *different* group later splits or merges. Indices are therefore sparse,
+ * which is fine — they only need to be unique and stable per thread.
+ */
+const SUB_SLOTS = 16;
+/** The thread title is prefixed to every chunk as a context anchor; keep it short. */
+const TITLE_PREFIX_CHARS = 200;
+/** Floor on the per-chunk message budget, so a pathological title can't starve it. */
+const MIN_BUDGET_CHARS = 400;
 
-  // No transcript: fall back to title + question + answer.
-  if (!hasContent) {
-    return assemble([title, (src.questionBody ?? '').trim(), (src.acceptedAnswerText ?? '').trim()]);
-  }
-
-  const contents = msgs.map((m) => m.content);
-  const chosen = new Set<number>();
-  const add = (i: number): void => {
-    if (i >= 0 && i < msgs.length && contents[i]) chosen.add(i);
-  };
-
-  // Start window.
-  for (let i = 0; i < QUESTION_WINDOW; i++) add(i);
-  // End window.
-  for (let i = msgs.length - TAIL_WINDOW; i < msgs.length; i++) add(i);
-
-  // Accepted answer ± neighbours (or the raw answer if it isn't a transcript message).
-  const answer = (src.acceptedAnswerText ?? '').trim();
-  let extraAnswer = '';
-  if (answer) {
-    const idx = findAnswerIndex(contents, answer);
-    if (idx >= 0) for (let j = idx - ANSWER_WINDOW; j <= idx + ANSWER_WINDOW; j++) add(j);
-    else extraAnswer = answer;
-  }
-
-  // High-value: the most-reacted messages, wherever they are in the thread.
-  const topReacted = msgs
-    .map((m, i) => ({ i, reactions: m.reactions }))
-    .filter((m) => m.reactions > 0 && contents[m.i])
-    .sort((a, b) => b.reactions - a.reactions)
-    .slice(0, HIGH_VALUE_COUNT);
-  for (const m of topReacted) add(m.i);
-
-  // Assemble in chronological order (title + answer-not-in-transcript first).
-  const ordered = [...chosen].sort((a, b) => a - b).map((i) => contents[i] ?? '');
-  return assemble([title, extraAnswer, ...ordered]);
+export interface EmbedChunk {
+  /**
+   * Stable position key within the thread. 0 is always the canonical title + question +
+   * answer chunk; transcript chunks are numbered `1 + group * SUB_SLOTS + sub`, so the
+   * numbering is sparse but does not shift when neighbouring content changes.
+   */
+  index: number;
+  text: string;
+  /** FNV-1a of `text` — the unit of change detection (see buildEmbeddingChunks). */
+  hash: string;
 }
 
-/**
- * A stable, fast (non-crypto) hash of the embed-source text — FNV-1a, hex. Stored on
- * the thread at embed time; when it changes (an edit/delete/answer change alters the
- * passage), the vector is stale and a re-embed is forced. Comparing the *embed input*
- * (not the raw transcript) means cosmetic churn outside the question/answer windows
- * doesn't trigger needless re-embeds.
- */
-export function embedContentHash(src: EmbedSource): string {
-  const text = buildEmbeddingText(src);
+/** A stable, fast (non-crypto) string hash — FNV-1a, hex. */
+export function fnv1a(s: string): string {
   let h = 0x811c9dc5; // FNV offset basis
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193); // FNV prime
   }
   return (h >>> 0).toString(16);
+}
+
+function clampTitle(title: string): string {
+  return title.length > TITLE_PREFIX_CHARS ? `${title.slice(0, TITLE_PREFIX_CHARS - 1)}…` : title;
+}
+
+/**
+ * Split messages into parts guaranteed to fit a chunk. A message longer than the budget
+ * is sliced across consecutive parts rather than truncated, so no content is ever lost.
+ */
+function toParts(contents: string[], budget: number): string[] {
+  const parts: string[] = [];
+  for (const raw of contents) {
+    const c = (raw ?? '').trim();
+    if (!c) continue;
+    if (c.length <= budget) parts.push(c);
+    else for (let i = 0; i < c.length; i += budget) parts.push(c.slice(i, i + budget));
+  }
+  return parts;
+}
+
+/** Greedily pack parts into groups of at most `budget` characters. */
+function packParts(parts: string[], budget: number): string[][] {
+  const groups: string[][] = [];
+  let cur: string[] = [];
+  let len = 0;
+  for (const p of parts) {
+    if (cur.length > 0 && len + p.length + 2 > budget) {
+      groups.push(cur);
+      cur = [];
+      len = 0;
+    }
+    cur.push(p);
+    len += p.length + 2;
+  }
+  if (cur.length > 0) groups.push(cur);
+  return groups;
+}
+
+/**
+ * Slice the transcript into fixed-stride message groups, each carrying the previous
+ * group's last message as a one-message overlap so an exchange that straddles a boundary
+ * is still retrievable from a single chunk.
+ */
+function messageGroups(contents: string[]): string[][] {
+  const groups: string[][] = [];
+  for (let i = 0; i < contents.length; i += MESSAGES_PER_CHUNK) {
+    const group = contents.slice(i, i + MESSAGES_PER_CHUNK);
+    if (i > 0) group.unshift(contents[i - 1]!);
+    groups.push(group);
+  }
+  return groups;
+}
+
+/**
+ * Apply EMBED_MAX_CHUNKS_PER_THREAD to the transcript groups. 0 means unlimited, which is
+ * the default and the whole point of chunking — every message stays searchable.
+ *
+ * When a cap IS set we keep the group holding the accepted answer plus an even split of
+ * head and tail groups, and DROP the middle. That reintroduces exactly the coverage gap
+ * this design removes, so it is opt-in only.
+ */
+function applyChunkCap<T>(groups: T[], answerGroup: number, max: number): [T, number][] {
+  const indexed = groups.map((g, i) => [g, i] as [T, number]);
+  if (max <= 0 || indexed.length <= max) return indexed;
+  const keep = new Set<number>();
+  if (answerGroup >= 0 && answerGroup < groups.length) keep.add(answerGroup);
+  for (let i = 0; keep.size < max && i < groups.length; i++) {
+    keep.add(i);
+    if (keep.size < max) keep.add(groups.length - 1 - i);
+  }
+  return [...keep].sort((a, b) => a - b).map((i) => indexed[i]!);
+}
+
+/**
+ * Build the passages to embed for a thread.
+ *
+ * Chunk 0 is the canonical `title + question + accepted answer` — the summary view that
+ * answers "what is this thread about", and the floor on retrieval quality. The remaining
+ * chunks cover the FULL transcript in order, so every message a human wrote is searchable
+ * instead of only the start, end, and accepted answer.
+ *
+ * Each chunk is hashed independently, and chunk indices are pinned to message positions.
+ * That combination is what keeps this affordable: editing one message, or appending a
+ * reply, dirties one or two chunks, so the re-embed cost is a chunk rather than a thread.
+ */
+export function buildEmbeddingChunks(src: EmbedSource, maxChunks?: number): EmbedChunk[] {
+  const title = (src.title ?? '').trim();
+  const prefix = clampTitle(title);
+  const budget = Math.max(MIN_BUDGET_CHARS, CHUNK_CHARS - prefix.length - 2);
+
+  const contents = (src.transcript ?? []).map((m) => (m.content ?? '').trim()).filter(Boolean);
+  const answer = (src.acceptedAnswerText ?? '').trim();
+  const question = (src.questionBody ?? '').trim();
+
+  const out: EmbedChunk[] = [];
+  const push = (index: number, text: string): void => {
+    if (text) out.push({ index, text, hash: fnv1a(text) });
+  };
+
+  // Chunk 0 — the canonical Q&A.
+  push(0, [title, question, answer].filter(Boolean).join('\n\n'));
+
+  if (contents.length === 0) return out;
+
+  const groups = messageGroups(contents);
+  const answerGroup = answer
+    ? groups.findIndex((g) => g.some((m) => m === answer || m.includes(answer)))
+    : -1;
+  // The cap counts the whole thread, and chunk 0 has already claimed a slot.
+  const cap = maxChunks ?? getEnv().EMBED_MAX_CHUNKS_PER_THREAD;
+  const kept = applyChunkCap(groups, answerGroup, cap > 0 ? Math.max(1, cap - out.length) : 0);
+
+  for (const [group, gi] of kept) {
+    const subs = packParts(toParts(group, budget), budget);
+    // Collapse any overflow beyond the reserved band into the last slot rather than
+    // colliding with the next group's indices.
+    const bounded =
+      subs.length <= SUB_SLOTS
+        ? subs
+        : [...subs.slice(0, SUB_SLOTS - 1), subs.slice(SUB_SLOTS - 1).flat()];
+    bounded.forEach((sub, si) => {
+      const body = sub.join('\n\n');
+      push(1 + gi * SUB_SLOTS + si, prefix ? `${prefix}\n\n${body}` : body);
+    });
+  }
+  return out;
+}
+
+/**
+ * A hash over the thread's ENTIRE chunk set — the cheap "did anything change at all?"
+ * short-circuit stored on `thread.embed_content_hash`. Unlike the old passage hash, this
+ * covers every message, so a mid-thread edit is no longer invisible; the per-chunk hashes
+ * on the embedding rows then localize *which* chunk actually has to be re-embedded.
+ */
+export function embedContentHash(src: EmbedSource): string {
+  return fnv1a(
+    buildEmbeddingChunks(src)
+      .map((c) => `${c.index}:${c.hash}`)
+      .join('|'),
+  );
 }
 
 export type EmbedMode = 'query' | 'passage';
@@ -272,20 +367,37 @@ export interface EmbedOptions {
 
 const MAX_CHARS = 8000;
 
-/** Embed a batch of texts into normalized vectors using the active provider. */
-export async function embed(texts: string[], opts: EmbedOptions): Promise<number[][]> {
-  if (texts.length === 0) return [];
+export interface EmbedResult {
+  vectors: number[][];
+  /** Tokens billed for this call — provider-reported where available, else estimated. */
+  tokens: number;
+  /** The model that actually produced the vectors. */
+  modelId: string;
+}
+
+/**
+ * Embed a batch of texts, reporting token usage alongside the vectors.
+ *
+ * Callers that index content should prefer this over {@link embed} and record `tokens`,
+ * so per-guild embedding spend is visible. On a paid embeddings backend this is the only
+ * signal there is — nothing else in the system knows what indexing costs.
+ */
+export async function embedBatch(texts: string[], opts: EmbedOptions): Promise<EmbedResult> {
   const info = resolveModel(opts.model);
+  if (texts.length === 0) return { vectors: [], tokens: 0, modelId: info.id };
 
   let vectors: number[][];
+  let tokens: number;
   if (info.provider === 'openrouter') {
-    vectors = await embedViaApi(texts, info.apiModel as string, info.dim);
+    ({ vectors, tokens } = await embedViaApi(texts, info.apiModel as string, info.dim));
   } else {
     const prefix = opts.mode === 'query' ? info.queryPrefix : info.passagePrefix;
     const inputs = texts.map((t) => prefix + (t ?? '').slice(0, MAX_CHARS));
     const extractor = await getPipeline(info.repo as string);
     const output = await extractor(inputs, { pooling: 'mean', normalize: true });
     vectors = output.tolist() as number[][];
+    // Local inference costs CPU, not money, but keep the number for comparability.
+    tokens = estimateTokens(inputs);
   }
 
   for (const v of vectors) {
@@ -296,13 +408,61 @@ export async function embed(texts: string[], opts: EmbedOptions): Promise<number
       );
     }
   }
-  return vectors;
+  return { vectors, tokens, modelId: info.id };
+}
+
+/** Embed a batch of texts into normalized vectors using the active provider. */
+export async function embed(texts: string[], opts: EmbedOptions): Promise<number[][]> {
+  return (await embedBatch(texts, opts)).vectors;
 }
 
 /** Embed a single text. */
 export async function embedOne(text: string, opts: EmbedOptions): Promise<number[]> {
   const [vector] = await embed([text], opts);
   if (!vector) throw new Error('embedOne produced no vector');
+  return vector;
+}
+
+/**
+ * Small LRU for *query* embeddings.
+ *
+ * The public KB search page and the MCP endpoint are reachable by anyone, and each hit
+ * previously embedded the query afresh — one paid API call per request, with popular and
+ * repeated queries paying every time. Passage embeddings are deliberately NOT cached:
+ * they are written once and keyed by content hash already.
+ *
+ * Per-process and bounded, so it is a cost/latency optimisation, never a source of truth.
+ */
+const QUERY_CACHE_MAX = 2_000;
+const QUERY_CACHE_TTL_MS = 60 * 60 * 1000;
+const queryCache = new Map<string, { vector: number[]; at: number }>();
+
+/** Collapse cosmetic differences so "How  Do I RESET" and "how do i reset" share an entry. */
+function queryKey(text: string, modelId: string): string {
+  return `${modelId}\u0000${text.trim().toLowerCase().replace(/\s+/g, ' ')}`;
+}
+
+export async function embedQueryCached(text: string, opts?: { model?: string }): Promise<number[]> {
+  const info = resolveModel(opts?.model);
+  const key = queryKey(text, info.id);
+  const now = Date.now();
+
+  const hit = queryCache.get(key);
+  if (hit && now - hit.at < QUERY_CACHE_TTL_MS) {
+    // Refresh recency (Map preserves insertion order, so re-insert moves it to the end).
+    queryCache.delete(key);
+    queryCache.set(key, hit);
+    return hit.vector;
+  }
+
+  const vector = await embedOne(text, { mode: 'query', model: opts?.model });
+  queryCache.set(key, { vector, at: now });
+  // Evict oldest entries past the cap (and drop the stale hit we just replaced).
+  while (queryCache.size > QUERY_CACHE_MAX) {
+    const oldest = queryCache.keys().next().value;
+    if (oldest === undefined) break;
+    queryCache.delete(oldest);
+  }
   return vector;
 }
 

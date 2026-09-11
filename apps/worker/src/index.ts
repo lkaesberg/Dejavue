@@ -1,3 +1,4 @@
+import { shutdownAnalytics } from '@dejavue/analytics';
 import '@dejavue/core/env-preload';
 import { createServer, type Server } from 'node:http';
 import { getEnv, installCrashHandlers, logger, notify, notifyAsync } from '@dejavue/core';
@@ -23,6 +24,7 @@ import { handleClusterGaps } from './jobs/clusterGaps';
 import { handleEmbedThread } from './jobs/embedThread';
 import { handleIngestAttachment } from './jobs/ingestAttachment';
 import { handleNudgeStale } from './jobs/nudgeStale';
+import { handleStatsSnapshot } from './jobs/statsSnapshot';
 import { handleRegenFaq } from './jobs/regenFaq';
 import { handleReindexChannel } from './jobs/reindexChannel';
 import { handleRevalidateKb } from './jobs/revalidateKb';
@@ -84,8 +86,12 @@ async function main(): Promise<void> {
     localConcurrency: CHANNEL_JOB_CONCURRENCY,
   });
 
+  await work(QUEUES.STATS_SNAPSHOT, handleStatsSnapshot);
+
   // Hourly stale-question sweep (Plus+). Other generative jobs are on-demand.
   await schedule(QUEUES.NUDGE_STALE, '0 * * * *');
+  // Daily instance rollup for product analytics (03:00 UTC — off the hourly sweep).
+  await schedule(QUEUES.STATS_SNAPSHOT, '0 3 * * *');
 
   health = startHealthServer();
   log.info('Dejavue worker started');
@@ -106,6 +112,8 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     log.info({ sig }, 'shutting down worker');
     health?.close();
-    void stopBoss().finally(() => process.exit(0));
+    // Analytics batches in memory, so a deploy would drop the tail of the buffer
+    // without an explicit flush.
+    void Promise.allSettled([stopBoss(), shutdownAnalytics()]).finally(() => process.exit(0));
   });
 }

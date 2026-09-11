@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import { clusterLabel, embeddingModelId } from '@dejavue/ai';
 import { childLogger, genProgressEmbed, getEnv, greedyCluster } from '@dejavue/core';
 import {
@@ -94,6 +95,13 @@ async function clusterGaps(
             completionTokens: res.completionTokens,
             usedTokensBefore: quota.usedTokens,
             baseCredits,
+          });
+          capture('generation', job.guildId, {
+            feature: 'cluster_label',
+            model_id: res.model,
+            prompt_tokens: res.promptTokens,
+            completion_tokens: res.completionTokens,
+            success: true,
           });
         } catch (err) {
           log.warn({ err }, 'cluster label failed');

@@ -100,6 +100,11 @@ export const generationFeature = pgEnum('generation_feature', [
   'draft',
   'summary',
   'faq',
+  // Embeddings share this ledger for one place to look at per-guild AI spend, but they
+  // are metered SEPARATELY from AI credits: tokensUsed() excludes them and
+  // embeddingTokensUsed() sums only them. Credits meter inference; the index cap and the
+  // embedding-token ceiling meter embeddings. Never let one budget silently eat the other.
+  'embedding',
   'cluster_label',
 ]);
 export const backfillStatus = pgEnum('backfill_status', [
@@ -266,6 +271,11 @@ export const thread = pgTable(
     // If set, this thread is a duplicate of another (canonical) thread — folded
     // under it in the KB rather than listed on its own.
     duplicateOfThreadId: text('duplicate_of_thread_id'),
+    // Set when a moderator folds a post by hand — applying the managed `duplicate`
+    // forum tag — without picking which post it duplicates. There's no canonical id to
+    // record, but the intent is the same: never offer this thread as the answer to a
+    // new question, and don't give it a KB page of its own.
+    markedDuplicate: boolean('marked_duplicate').notNull().default(false),
     title: text('title').notNull(),
     questionBody: text('question_body').notNull().default(''),
     opUserId: text('op_user_id'),
@@ -277,13 +287,10 @@ export const thread = pgTable(
     canonicalSummary: text('canonical_summary'),
     // Full human conversation, captured on solve, for the public KB page.
     transcript: jsonb('transcript').$type<TranscriptMessage[]>(),
-    // Thread message count at the last (re-)embed of a knowledge thread. Knowledge
-    // channels have no solve point, so they re-embed on a doubling schedule keyed
-    // off this — frequent early, then exponentially rarer as the topic settles.
-    lastEmbedMsgCount: integer('last_embed_msg_count'),
-    // Hash of the embed-source text (buildEmbeddingText output) at the last successful
+    // Hash of the thread's ENTIRE chunk set (embedContentHash) at the last successful
     // embed. When the recomputed hash differs (edit/delete/answer change), the vector is
-    // stale and a re-embed is forced regardless of the count backoff. NULL = never embedded
+    // stale and a re-embed is queued; the job then diffs per-chunk hashes to decide which
+    // chunks actually need re-embedding. NULL = never embedded
     // (treated as dirty).
     embedContentHash: text('embed_content_hash'),
     publishedToKb: boolean('published_to_kb').notNull().default(false),
@@ -316,12 +323,32 @@ export const embedding = pgTable(
     source: embeddingSource('source').notNull().default('question'),
     modelId: text('model_id').notNull(),
     embeddingVersion: integer('embedding_version').notNull().default(1),
+    /**
+     * Position of this chunk within the thread (see buildEmbeddingChunks). 0 is the
+     * canonical title+question+answer passage; transcript chunks are numbered from a
+     * reserved band per message-group, so indices are sparse but stable across edits.
+     */
+    chunkIndex: integer('chunk_index').notNull().default(0),
+    /**
+     * FNV-1a of the chunk's text at the time it was embedded. The unit of change
+     * detection: on re-index we rebuild the chunks and only re-embed the ones whose
+     * hash moved, so an edit costs one chunk instead of a whole thread. NULL means
+     * "written before chunking existed" and therefore always stale.
+     */
+    chunkHash: text('chunk_hash'),
     vec: vector('vec', { dimensions: EMBEDDING_DIM }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('embedding_thread_source_ver_idx').on(t.threadId, t.source, t.embeddingVersion),
+    uniqueIndex('embedding_thread_source_ver_chunk_idx').on(
+      t.threadId,
+      t.source,
+      t.embeddingVersion,
+      t.chunkIndex,
+    ),
     index('embedding_guild_idx').on(t.guildId),
+    // Chunk diffing loads every chunk for one thread + model on each re-index.
+    index('embedding_thread_model_idx').on(t.threadId, t.modelId),
   ],
 );
 

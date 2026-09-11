@@ -25,7 +25,7 @@ const log = childLogger({ mod: 'kb-reconcile' });
  */
 export async function kbStartupReconcile(_client: Client): Promise<void> {
   const db = getDb();
-  let guilds;
+  let guilds: Awaited<ReturnType<typeof listGuildsWithKb>>;
   try {
     guilds = await listGuildsWithKb(db);
   } catch (err) {

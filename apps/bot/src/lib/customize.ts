@@ -38,7 +38,7 @@ import { checkDomainDns, dnsInstructions } from './domainDns';
 import { COLOR } from './embeds';
 import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
-import { getGuildTier } from './tier';
+import { getGuildTier, limitsFor } from './tier';
 import { upsellPayload } from './upsell';
 
 const log = childLogger({ mod: 'cmd:customize' });
@@ -124,7 +124,9 @@ function appearanceRow(
 
 /** Build the whole hub message (embed + components) for a guild's current config. */
 function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMessageOptions {
+  // Appearance is available on every tier; `paid` now only drives branding-related copy.
   const paid = tierAtLeast(tier, 'plus');
+  const limits = limitsFor(tier);
   const url = cfg.kbSlug ? `https://${cfg.kbSlug}.${kbBaseDomain}` : '—';
   const brand = cfg.brandName?.trim() || cfg.kbSlug || '(uses slug)';
   const imprintOk = imprintComplete(cfg.kbImprint);
@@ -137,8 +139,16 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
       (paid
         ? 'Pick a theme, accent, corners and heading font below — they apply to your live site instantly. ' +
           'Use **Edit details** for the name, slug, domain and passphrase.'
-        : 'Set your **name, slug, passphrase** and **publishing** below. Theme, accent, corners & fonts are a ' +
-          '**Plus** feature — upgrade to fully brand your site.') +
+        : 'Pick a theme, accent, corners and heading font below — they apply to your live site instantly. ' +
+          'Upgrade to **Plus** to remove the Dejavue branding from your site.') +
+        // Ads run on Free knowledge bases, and the pages carry a community's own
+        // content — its admins should learn that here rather than by discovering it
+        // on their live site.
+        (limits.ads
+          ? '\n\n📢 **Your public site shows one ad** on the Free plan, from a privacy-first network ' +
+            '(no cookies, no visitor profiling — readers are asked before it loads). ' +
+            'Upgrade to **Plus** to remove ads and the Dejavue branding.'
+          : '') +
         (needsImprint
           ? '\n\n⚠️ **Your site is public but its imprint is incomplete.** Public sites must name an operator ' +
             'and a contact (Terms of Service § 4) — add them via **Imprint…** below.'
@@ -309,18 +319,8 @@ async function rerender(
 /** Appearance selects (theme/accent/corners/font) — apply live, Plus+ only. */
 export async function handleCustomizeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const guildId = interaction.guildId!;
-  const tier = await getGuildTier(guildId);
-  if (!tierAtLeast(tier, 'plus')) {
-    await interaction.reply({
-      ...upsellPayload({
-        title: 'Appearance is a Plus feature',
-        description: 'Theme, accent, corners and fonts are available on **Plus** and up.',
-        skuId: getEnv().SKU_PLUS,
-      }),
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
+  // Theming is CSS variables on a page we already render — it costs nothing per guild,
+  // so it is available on every tier. What Plus buys is removing the branding.
   const value = interaction.values[0];
   const db = getDb();
   const patch: Parameters<typeof updateGuildConfig>[2] = {};
@@ -474,7 +474,7 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
     if (['none', 'remove', 'public', 'off'].includes(passphrase.toLowerCase())) {
       patch.kbPassphraseHash = null;
     } else if (passphrase) {
-      patch.kbPassphraseHash = hashPassphrase(passphrase);
+      patch.kbPassphraseHash = await hashPassphrase(passphrase);
     }
 
     if (errors.length) {

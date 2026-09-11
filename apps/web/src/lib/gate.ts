@@ -10,8 +10,26 @@ import { brandOf, brandInitial, themeVars } from './theme';
 // critically — every existing cookie is invalidated the moment the admin changes the
 // passphrase (the expected token changes, so old cookies no longer match).
 
+/**
+ * The gate cookie's HMAC key.
+ *
+ * The dev fallback below is a constant published in this repository, so treating it as a
+ * signing key outside development means anyone can mint a cookie for any tenant whose
+ * passphrase hash they learn. The hosted deploy always sets the variable
+ * (docker-compose.coolify.yml uses `:?`), but `.env.example` ships it BLANK — so a
+ * self-hoster who followed the example file used to silently run on the public constant.
+ * Fail the boot instead: an unlockable private KB is not a degraded mode worth having.
+ */
 function secret(): string {
-  return getEnv().KB_REVALIDATE_SECRET || 'dejavue-insecure-dev-secret';
+  const env = getEnv();
+  if (env.KB_REVALIDATE_SECRET) return env.KB_REVALIDATE_SECRET;
+  if (env.NODE_ENV === 'production') {
+    throw new Error(
+      'KB_REVALIDATE_SECRET must be set in production: it signs the private knowledge-base ' +
+        'gate cookie, and the development fallback is a constant published in this repository.',
+    );
+  }
+  return 'dejavue-insecure-dev-secret';
 }
 
 export function gateCookieName(guildId: string): string {

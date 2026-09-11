@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import {
   ChannelType,
   type ChatInputCommandInteraction,
@@ -167,6 +168,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
   if (channel.type === ChannelType.GuildForum) {
     const forum = channel as ForumChannel;
     if (!cfg.forumChannelIds.includes(forum.id) && cfg.forumChannelIds.length >= limits.maxForumChannels) {
+      capture('upsell_shown', guildId, { gate: 'forum_channel_cap', cap: limits.maxForumChannels });
       await interaction.editReply(
         upsellPayload({
           title: 'Upgrade for more forum channels',
@@ -196,6 +198,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
     }
 
     await updateGuildConfig(db, guildId, { forumChannelIds: [...channels], channelModes, ...tagPatch });
+    capture('setup_completed', guildId, { channel_kind: 'forum', mode });
     await setChannelGuidelines(db, guildId, forum.id, forum.topic ?? null);
     await ensureChannelSync(db, guildId, forum.id, 'forum');
     if (cfg.channelFitCheck) {
@@ -224,6 +227,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
   if (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement) {
     const already = cfg.trackedChannelIds.includes(channel.id);
     if (!already && cfg.trackedChannelIds.length >= limits.maxTrackedChannels) {
+      capture('upsell_shown', guildId, { gate: 'tracked_channel_cap', cap: limits.maxTrackedChannels });
       await interaction.editReply(
         upsellPayload({
           title: 'Upgrade to track more channels',
@@ -235,6 +239,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
     }
     const trackedChannelIds = already ? cfg.trackedChannelIds : [...cfg.trackedChannelIds, channel.id];
     await updateGuildConfig(db, guildId, { trackedChannelIds });
+    capture('setup_completed', guildId, { channel_kind: 'tracked' });
     await setChannelGuidelines(db, guildId, channel.id, (channel as TextChannel).topic ?? null);
     await ensureChannelSync(db, guildId, channel.id, 'channel');
     scheduleTrackedCapture(channel as TextChannel | NewsChannel);
@@ -277,7 +282,7 @@ async function handleReindex(interaction: ChatInputCommandInteraction): Promise<
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const { started, skipped } = await startReindex(interaction, targets);
+  const { started, skipped, throttled } = await startReindex(interaction, targets);
   const lines: string[] = [];
   if (started.length) {
     lines.push(
@@ -285,6 +290,11 @@ async function handleReindex(interaction: ChatInputCommandInteraction): Promise<
     );
   }
   if (skipped.length) lines.push(`⏭️ Already running: ${skipped.join(', ')}.`);
+  if (throttled.length) {
+    lines.push(
+      `⏳ Recently reindexed: ${throttled.join(', ')} — a reindex re-reads the whole channel, so it's rate-limited. Try again later.`,
+    );
+  }
   await interaction.editReply(lines.join('\n') || 'Nothing to reindex.');
 }
 
@@ -324,6 +334,11 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
     results = await keywordSearch(db, { guildId, query, limit: 5 });
   }
 
+  capture('search_performed', guildId, {
+    mode: limits.semanticSearch ? 'hybrid' : 'keyword',
+    result_count: results.length,
+  });
+
   // On an empty result, tell a fresh server "nothing indexed yet" instead of
   // implying their keywords were wrong.
   const nothingIndexed = results.length === 0 && (await countIndexedMessages(db, guildId)) === 0;
@@ -361,7 +376,9 @@ export const dejavueCommand: SlashCommand = {
       await interaction.reply(eph('Dejavue only works inside a server.'));
       return;
     }
-    switch (interaction.options.getSubcommand()) {
+    const subcommand = interaction.options.getSubcommand();
+    capture('command_used', interaction.guildId!, { subcommand });
+    switch (subcommand) {
       case 'setup':
         return handleSetup(interaction);
       case 'rescan':

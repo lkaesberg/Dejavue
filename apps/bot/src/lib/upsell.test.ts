@@ -6,13 +6,13 @@ import { channelCapUpsellLine } from './upsell';
 describe('channelCapUpsellLine', () => {
   it('derives forum caps from tierLimits', () => {
     expect(channelCapUpsellLine('forum')).toBe(
-      'Upgrade to **Plus** (5), **Pro** (10), or **Max** (unlimited).',
+      'Upgrade to **Plus** (15), **Pro** (50), or **Max** (unlimited).',
     );
   });
 
   it('derives tracked-channel caps from tierLimits', () => {
     expect(channelCapUpsellLine('tracked')).toBe(
-      'Upgrade to **Plus** (5), **Pro** (15), or **Max** (unlimited).',
+      'Upgrade to **Plus** (15), **Pro** (50), or **Max** (unlimited).',
     );
   });
 });

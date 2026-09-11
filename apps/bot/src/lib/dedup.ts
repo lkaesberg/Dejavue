@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import type { BaseMessageOptions, ThreadChannel } from 'discord.js';
 import { activeForumChannels, childLogger, dedupMinSimilarity, getEnv } from '@dejavue/core';
 import {
@@ -93,9 +94,10 @@ export async function editPlaceholderTransient(
 }
 
 /**
- * The live "Searching solved answers…" message, posted at schedule time so it shows
- * during the debounce + search. Skipped on guilds with nothing indexed yet (a fresh
- * install would answer "new question" to every post — stay quiet instead).
+ * The live "Searching solved answers…" message, posted the moment a post lands so the
+ * asker sees the bot working during the debounce + search instead of silence. Skipped
+ * on guilds with nothing indexed yet (a fresh install would answer "new question" to
+ * every post — stay quiet instead).
  */
 function postSearchingPlaceholder(thread: ThreadChannel): Placeholder {
   return (async () => {
@@ -123,10 +125,11 @@ function postSearchingPlaceholder(thread: ThreadChannel): Placeholder {
 export function scheduleDedup(thread: ThreadChannel): void {
   if (scheduled.has(thread.id)) return;
   scheduled.add(thread.id);
+  // Post the "Searching…" placeholder up front, not when the debounce fires: several
+  // seconds of silence on a fresh post is long enough for the asker to close Discord.
+  // The cost is that a bot restart inside the debounce window can strand one placeholder.
+  const placeholder = postSearchingPlaceholder(thread);
   const timer = setTimeout(() => {
-    // Post the "Searching…" placeholder only when the debounce actually fires — a
-    // restart during the quiet debounce window then leaves nothing stuck on-screen.
-    const placeholder = postSearchingPlaceholder(thread);
     void runDedup(thread, placeholder)
       .catch(async (err) => {
         log.warn({ err, threadId: thread.id }, 'dedup run failed');
@@ -168,6 +171,13 @@ async function maybeDraft(
       completionTokens: result.completionTokens,
       usedTokensBefore: quota.usedTokens,
       baseCredits,
+    });
+    capture('generation', guildId, {
+      feature: 'draft',
+      model_id: result.model,
+      prompt_tokens: result.promptTokens,
+      completion_tokens: result.completionTokens,
+      success: true,
     });
     return result.text.trim() || undefined;
   } catch (err) {
@@ -326,5 +336,11 @@ async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promis
   const draft = limits.aiDrafts
     ? await maybeDraft(guildId, query, matches, limits.monthlyCredits)
     : undefined;
+  capture('dedup_shown', guildId, {
+    match_count: matches.length,
+    // Rounded: a similarity bucket is a quality signal, not a fingerprint.
+    top_similarity: Math.round((matches[0]?.score ?? 0) * 100) / 100,
+    mode: limits.semanticSearch ? 'hybrid' : 'keyword',
+  });
   await finish(duplicatesMessage(guildId, matches, showBranding, { draft, elapsedMs }));
 }

@@ -91,7 +91,7 @@ export async function findOrCreateForumTags(
 }
 
 /** Tag names Dejavue manages itself — never surfaced as user "labels" on the KB. */
-const MANAGED_TAG_NAMES = new Set(['solved', 'unsolved', 'duplicate', 'wrong-channel']);
+const MANAGED_TAG_NAMES = new Set(['solved', 'unsolved', 'duplicate', 'wrong-channel', 'moved']);
 
 /**
  * The custom labels (forum tags) a thread carries — the applied tags minus our
@@ -169,12 +169,16 @@ export async function ensureForumTags(
 }
 
 /**
- * Ensure a moderated "wrong-channel" tag exists on the forum, creating it on demand.
- * Used by the off-topic guard's auto-close (kept off MANAGED_TAGS so guilds that never
- * enable the guard don't grow an extra tag). Needs the Manage Channels permission.
+ * Ensure one moderated tag exists on the forum, creating it on demand. These are the
+ * managed tags kept *off* MANAGED_TAGS, so a guild that never triggers the feature
+ * doesn't grow an extra tag at setup. Needs the Manage Channels permission.
  */
-export async function ensureWrongChannelTag(forum: ForumChannel): Promise<string> {
-  const existing = findTagByName(forum, 'wrong-channel');
+async function ensureOnDemandTag(
+  forum: ForumChannel,
+  name: string,
+  emoji: string,
+): Promise<string> {
+  const existing = findTagByName(forum, name);
   if (existing) return existing;
   const desired: GuildForumTagData[] = forum.availableTags.map((t) => ({
     id: t.id,
@@ -182,11 +186,21 @@ export async function ensureWrongChannelTag(forum: ForumChannel): Promise<string
     moderated: t.moderated,
     emoji: t.emoji ? { id: t.emoji.id, name: t.emoji.name } : null,
   }));
-  desired.push({ name: 'wrong-channel', moderated: true, emoji: { id: null, name: '🚫' } });
+  desired.push({ name, moderated: true, emoji: { id: null, name: emoji } });
   const updated = await forum.setAvailableTags(desired);
-  const id = findTagByName(updated, 'wrong-channel');
-  if (!id) throw new Error('failed to ensure wrong-channel tag');
+  const id = findTagByName(updated, name);
+  if (!id) throw new Error(`failed to ensure ${name} tag`);
   return id;
+}
+
+/** The off-topic guard's auto-close tag. */
+export async function ensureWrongChannelTag(forum: ForumChannel): Promise<string> {
+  return ensureOnDemandTag(forum, 'wrong-channel', '🚫');
+}
+
+/** Marks a post whose question was reposted in another forum (the move button). */
+export async function ensureMovedTag(forum: ForumChannel): Promise<string> {
+  return ensureOnDemandTag(forum, 'moved', '📦');
 }
 
 /** Apply a tag to a thread (idempotent), respecting the 5-tag forum limit. */

@@ -10,6 +10,12 @@ import { threadPath } from '../lib/slug';
 
 const SERVER = { name: 'dejavue-kb', version: '0.1.0' };
 const DEFAULT_PROTOCOL = '2025-06-18';
+/**
+ * Bearer-token checks per minute, per tenant, on a private KB. Generous enough that a
+ * legitimately configured AI client reconnecting never notices, tight enough that
+ * guessing a shared passphrase over this endpoint is hopeless.
+ */
+const AUTH_ATTEMPTS_PER_MIN = 20;
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type, authorization, mcp-protocol-version, mcp-session-id',
@@ -55,8 +61,10 @@ async function search(
   if (!query) return 'No query provided.';
 
   const db = getDb();
-  const { embedOne, embeddingModelId } = await import('@dejavue/ai');
-  const vector = await embedOne(query, { mode: 'query', model });
+  const { embedQueryCached, embeddingModelId } = await import('@dejavue/ai');
+  // Cached: this endpoint is open to the internet and agents loop fast, so repeated
+  // queries must not each cost an embedding call.
+  const vector = await embedQueryCached(query, { model });
   // Hybrid: exact-term overlap boosts semantic matches — AI clients often
   // search for literal error messages or command names.
   const matches = await hybridSearch(db, {
@@ -98,8 +106,22 @@ export const POST: APIRoute = async ({ locals, request }) => {
   // use the browser cookie gate, so MCP carries the passphrase in an Authorization header.
   const passphraseHash = locals.cfg?.kbPassphraseHash;
   if (passphraseHash) {
+    // Throttle the AUTH attempt, not just the search below: the bearer check is a
+    // deliberately expensive scrypt hash, so an unauthenticated caller could previously
+    // both brute-force the passphrase and burn the single web process's CPU without ever
+    // reaching the rate limit on `tools/call`. Keyed per tenant (from the resolved Host,
+    // which the caller cannot choose) so a rotating source IP cannot lift the ceiling.
+    if (!takeToken(`mcpauth:${tenant.guildId}`, AUTH_ATTEMPTS_PER_MIN)) {
+      return new Response(
+        JSON.stringify({ error: 'Too many authentication attempts. Retry in a minute.' }),
+        {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '60', ...CORS },
+        },
+      );
+    }
     const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
-    if (!verifyPassphrase(token, passphraseHash)) {
+    if (!(await verifyPassphrase(token, passphraseHash))) {
       return new Response(
         JSON.stringify({
           error: 'This knowledge base is private. Send your passphrase as `Authorization: Bearer <passphrase>`.',
@@ -119,7 +141,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     }));
   const limits = tierLimits(tier, quotasFromEnv(env));
   if (!limits.mcp) {
-    return new Response(JSON.stringify({ error: 'The MCP server is a Max-tier feature.' }), {
+    return new Response(JSON.stringify({ error: 'The MCP server is available on Pro and Max.' }), {
       status: 402,
       headers: { 'content-type': 'application/json', ...CORS },
     });

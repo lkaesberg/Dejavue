@@ -38,6 +38,26 @@ x-env: &env
   # Embeddings. To point them at another OpenAI-compatible API, add
   # EMBEDDING_BASE_URL / EMBEDDING_API_KEY here as well — they must be absent
   # rather than empty, so they are not listed with a "" fallback.
+  # Product analytics (optional). Unset → nothing is sent anywhere. Feeds BOTH the
+  # server-side bot/worker events and the cookieless page-traffic counter on tenant
+  # knowledge bases, which runs in the visitor's browser — so this value ends up in the
+  # page HTML. Use a PostHog *project* key (phc_...), never a personal key (phx_...).
+  POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
+  POSTHOG_HOST: ${POSTHOG_HOST:-https://eu.posthog.com}
+
+  # Free-tier knowledge-base ads. 'none' (default) = off entirely, with an in-house promo
+  # in the slot. 'ethicalads' needs a publisher id too; without one the slot stays off.
+  ADS_PROVIDER: ${ADS_PROVIDER:-none}
+  ADS_PUBLISHER_ID: ${ADS_PUBLISHER_ID:-}
+
+  # Cloudflare → Traefik → app is TWO proxies appending to X-Forwarded-For, which is how
+  # the app knows which entry of that header it may trust for rate-limit keys (see
+  # apps/web/src/lib/clientIp.ts). Change this if the proxy chain in front changes —
+  # setting it too high lets a client choose its own rate-limit identity.
+  TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-2}
+  # Embedding chunking. 0 chunks/thread = unlimited (every message embedded).
+  EMBED_MAX_CHUNKS_PER_THREAD: ${EMBED_MAX_CHUNKS_PER_THREAD:-0}
+  EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-64}
   EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-small-en-v1.5}
   EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
@@ -49,6 +69,8 @@ x-env: &env
 
   KB_BASE_DOMAIN: ${KB_BASE_DOMAIN:-dejavue.app}
   KB_PUBLIC_URL: ${KB_PUBLIC_URL:-https://dejavue.app}
+  # Signs the private-KB gate cookie. Required (`:?`): the app refuses to boot in
+  # production without it rather than fall back to a constant published in the repo.
   KB_REVALIDATE_SECRET: ${KB_REVALIDATE_SECRET:?}
 
   QUOTA_CREDITS_PLUS: ${QUOTA_CREDITS_PLUS:-25}
@@ -135,6 +157,11 @@ services:
       PORT: '4321'
     expose:
       - '4321'
+    # KB_BASE_DOMAIN_REGEX is KB_BASE_DOMAIN with the dots escaped for the HostRegexp
+    # below (Compose cannot escape them for us). Both must be set together when the
+    # domain changes, or tenant subdomains silently stop routing while the apex keeps
+    # working — the failure looks like "only some pages are down".
+    #
     # Coolify routes the apex (dejavue.app) via the domain set on this service.
     # Tenant subdomains ({slug}.dejavue.app) are wildcards, which Coolify's domain
     # field can't express, so they get their own Traefik router here. TLS for them
@@ -148,7 +175,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.dejavue-kb.entrypoints=http
-      - traefik.http.routers.dejavue-kb.rule=HostRegexp(`^.+\.dejavue\.app$`)
+      - traefik.http.routers.dejavue-kb.rule=HostRegexp(`^.+\.${KB_BASE_DOMAIN_REGEX:-dejavue\.app}$`)
       - traefik.http.routers.dejavue-kb.service=dejavue-kb
       # Same router on https. No certresolver on purpose: Let's Encrypt can't do
       # HTTP-01 here (port 80 only answers Cloudflare) and wouldn't issue a
@@ -156,7 +183,7 @@ services:
       # and Cloudflare terminates TLS for visitors. Keep Cloudflare's SSL mode on
       # Full — "Full (strict)" would reject that certificate.
       - traefik.http.routers.dejavue-kb-https.entrypoints=https
-      - traefik.http.routers.dejavue-kb-https.rule=HostRegexp(`^.+\.dejavue\.app$`)
+      - traefik.http.routers.dejavue-kb-https.rule=HostRegexp(`^.+\.${KB_BASE_DOMAIN_REGEX:-dejavue\.app}$`)
       - traefik.http.routers.dejavue-kb-https.service=dejavue-kb
       - traefik.http.routers.dejavue-kb-https.tls=true
       - traefik.http.services.dejavue-kb.loadbalancer.server.port=4321

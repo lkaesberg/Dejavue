@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import type { Message, ThreadChannel } from 'discord.js';
 import { embedContentHash } from '@dejavue/ai';
 import { childLogger } from '@dejavue/core';
@@ -137,6 +138,8 @@ export interface SolveOptions {
   solverId: string;
   /** The "mark as solved" control message id, when the caller already knows it (modal path). */
   controlMessageId?: string;
+  /** Which entry point solved this — the funnel's last step. Analytics only. */
+  via?: 'modal' | 'context_menu' | 'dedup';
 }
 
 /** Find the bot's control/prompt message in a thread by its solve button. */
@@ -249,8 +252,9 @@ export async function solveThread(
     log.warn({ err, threadId: thread.id }, 'failed to enqueue embed-thread');
   }
 
-  // AI summaries are generated lazily — only when a KB page is actually opened
-  // (see apps/web) — so we never pay to summarize threads nobody reads.
+  // AI summaries stay lazy — the KB page queues one the first time a thread is actually
+  // opened (apps/web → summarize-thread worker), so we never pay to summarize threads
+  // nobody reads. Deliberately not enqueued here.
 
   // Everything indexed is auto-published (online). The public site itself is gated by
   // kbPublishOptIn + the passphrase. Duplicates are never published on their own —
@@ -263,6 +267,8 @@ export async function solveThread(
       log.warn({ err, threadId: thread.id }, 'failed to publish to KB');
     }
   }
+
+  capture('thread_solved', guildId, { via: opts.via ?? 'modal' });
 
   // Declutter: remove the "select the answer" control prompt (or, if disabled, mark it).
   await resolveControlPrompt(thread, cfg.removeSolvedPrompt, opts, answerAuthorId).catch(() => undefined);

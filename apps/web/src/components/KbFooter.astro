@@ -6,7 +6,7 @@ interface Props {
   note?: string;
 }
 const { note = '' } = Astro.props;
-const { cfg, tenant, branded } = Astro.locals;
+const { cfg, tenant, branded, showAds } = Astro.locals;
 const brand = brandOf(cfg, tenant?.slug ?? undefined);
 ---
 
@@ -27,6 +27,14 @@ const brand = brandOf(cfg, tenant?.slug ?? undefined);
       <a href="/imprint" class="kb-link" style="font-size:13px; color:var(--textmid);">Imprint</a>
       <a href="/privacy" class="kb-link" style="font-size:13px; color:var(--textmid);">Privacy Policy</a>
       {
+        /* A consent choice must be as easy to withdraw as it was to give. */
+        showAds && (
+          <button type="button" id="kb-consent-reopen" class="kb-link" style="font:inherit; font-size:13px; color:var(--textmid); background:none; border:0; padding:0; cursor:pointer;">
+            Ad choices
+          </button>
+        )
+      }
+      {
         note && (
           <>
             <span style="width:3px; height:3px; border-radius:50%; background:var(--border2);"></span>
@@ -37,3 +45,14 @@ const brand = brandOf(cfg, tenant?.slug ?? undefined);
     </div>
   </div>
 </footer>
+
+{
+  showAds && (
+    <script is:inline>
+      document.getElementById('kb-consent-reopen')?.addEventListener('click', function () {
+        window.dispatchEvent(new Event('dv:consent-reopen'));
+        document.getElementById('kb-consent')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    </script>
+  )
+}

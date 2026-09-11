@@ -5,15 +5,16 @@ import {
 } from 'discord.js';
 import { backfillProgressEmbed, type ProgressEmbed, reindexProgressEmbed } from '@dejavue/core';
 import {
+  claimReindex,
   createBackfillJob,
   createReindexJob,
   ensureChannelSync,
   getActiveBackfillJob,
   getActiveReindexJob,
   getDb,
-  setReindexing,
 } from '@dejavue/db';
 import { enqueueBackfill, enqueueReindexChannel } from '@dejavue/queue';
+import { getGuildTier, limitsFor } from './tier';
 
 export type ReindexTarget = { id: string; kind: 'forum' | 'tracked' };
 
@@ -71,12 +72,16 @@ export async function startForumImport(
 export async function startReindex(
   interaction: ChatInputCommandInteraction | ButtonInteraction,
   targets: ReindexTarget[],
-): Promise<{ started: string[]; skipped: string[] }> {
+): Promise<{ started: string[]; skipped: string[]; throttled: string[] }> {
   const db = getDb();
   const guildId = interaction.guildId!;
   const channel = interaction.channel;
   const started: string[] = [];
   const skipped: string[] = [];
+  const throttled: string[] = [];
+  // A reindex re-reads a whole channel; without a cooldown this button is an on-demand
+  // embedding bill. Auto-reindex has always been throttled — manual runs now are too.
+  const cooldownMs = limitsFor(await getGuildTier(guildId)).manualReindexCooldownMs;
 
   for (const t of targets) {
     if (await getActiveReindexJob(db, guildId, t.id)) {
@@ -85,7 +90,11 @@ export async function startReindex(
     }
     const syncKind = t.kind === 'forum' ? ('forum' as const) : ('channel' as const);
     await ensureChannelSync(db, guildId, t.id, syncKind);
-    await setReindexing(db, guildId, t.id, syncKind);
+    // claimReindex both flips the state and enforces the cooldown, atomically.
+    if (!(await claimReindex(db, guildId, t.id, cooldownMs))) {
+      throttled.push(`<#${t.id}>`);
+      continue;
+    }
 
     const { statusChannelId, statusMessageId } = await postProgressMessage(
       channel,
@@ -101,7 +110,7 @@ export async function startReindex(
     await enqueueReindexChannel({ reindexJobId: job.id });
     started.push(`<#${t.id}>`);
   }
-  return { started, skipped };
+  return { started, skipped, throttled };
 }
 
 /** All monitored channels as reindex targets (forums + tracked text channels). */

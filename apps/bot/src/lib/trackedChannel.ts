@@ -24,7 +24,6 @@ import {
   getThreadByDiscordId,
   markChannelStale,
   markChannelSynced,
-  setLastEmbedMsgCount,
   setPublished,
   setTranscript,
   type TranscriptMessage,
@@ -39,7 +38,6 @@ import {
 import { mapAttachments, queueImageRehost } from './attachments';
 import { keyedTrailingDebounce } from './debounce';
 import { fetchTranscript } from './forum';
-import { isReembedDue } from './knowledge';
 import { atIndexCap } from './tier';
 
 const log = childLogger({ mod: 'tracked' });
@@ -258,27 +256,20 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
     const transcript = toTranscript(seg);
     await setTranscript(db, row.id, transcript).catch(() => undefined);
 
-    // Re-embed when the embed-source text changed since the last embed (edit/delete),
-    // or on the growth backoff while the segment is still forming.
+    // Re-embed whenever the segment's content changed. The embed job diffs chunk hashes,
+    // so a still-forming segment costs one chunk per pass rather than a full re-embed.
     const dirty =
       row.embedContentHash !==
       embedContentHash({ title: row.title, questionBody: row.questionBody, transcript });
-    if (!isReembedDue(seg.length, row.lastEmbedMsgCount, dirty)) continue;
-    let queued = false;
-    try {
-      await enqueueEmbedThread({
-        threadRowId: row.id,
-        guildId,
-        modelId: cfg.embeddingModel,
-        title: row.title,
-        question: row.questionBody,
-        answer: null,
-      });
-      queued = true;
-    } catch (err) {
-      log.warn({ err, threadId }, 'tracked embed enqueue failed');
-    }
-    if (queued) await setLastEmbedMsgCount(db, row.id, Math.max(seg.length, 1));
+    if (!dirty) continue;
+    await enqueueEmbedThread({
+      threadRowId: row.id,
+      guildId,
+      modelId: cfg.embeddingModel,
+      title: row.title,
+      question: row.questionBody,
+      answer: null,
+    }).catch((err) => log.warn({ err, threadId }, 'tracked embed enqueue failed'));
   }
 
   // Update freshness. A transient fetch failure must not move the watermark or claim
@@ -357,24 +348,16 @@ async function captureTrackedThread(thread: ThreadChannel): Promise<void> {
 
   if (transcript.length > 0) await setTranscript(db, row.id, transcript).catch(() => undefined);
 
-  const msgCount = transcript.length;
   const dirty =
     row.embedContentHash !==
     embedContentHash({ title: row.title, questionBody: row.questionBody, transcript });
-  if (!isReembedDue(msgCount, row.lastEmbedMsgCount, dirty)) return;
-  let queued = false;
-  try {
-    await enqueueEmbedThread({
-      threadRowId: row.id,
-      guildId,
-      modelId: cfg.embeddingModel,
-      title: row.title,
-      question: row.questionBody,
-      answer: null,
-    });
-    queued = true;
-  } catch (err) {
-    log.warn({ err, threadId }, 'tracked thread embed enqueue failed');
-  }
-  if (queued) await setLastEmbedMsgCount(db, row.id, Math.max(msgCount, 1));
+  if (!dirty) return;
+  await enqueueEmbedThread({
+    threadRowId: row.id,
+    guildId,
+    modelId: cfg.embeddingModel,
+    title: row.title,
+    question: row.questionBody,
+    answer: null,
+  }).catch((err) => log.warn({ err, threadId }, 'tracked thread embed enqueue failed'));
 }

@@ -54,7 +54,7 @@ import { allTargets, startReindex } from './reindexTrigger';
 import { channelSyncDisplay, joinChannelLines, type LiveJobDisplay } from './syncDisplay';
 import { getGuildTier, limitsFor } from './tier';
 import { prepareTopUpSkus } from './topUp';
-import { premiumButtonRows, upsellPayload } from './upsell';
+import { premiumButtonRows } from './upsell';
 
 const PREFIX = 'dv:';
 export const isHubInteraction = (id: string): boolean => id.startsWith(PREFIX);
@@ -99,7 +99,7 @@ export async function renderSettingsHub(guildId: string): Promise<BaseMessageOpt
   const embed = new EmbedBuilder()
     .setColor(COLOR)
     .setTitle('Dejavue settings')
-    .setDescription('Automated helpers for your channels. These are **Plus** features.')
+    .setDescription('Automated helpers for your channels.')
     .addFields(
       {
         name: 'Stale-question nudges',
@@ -180,18 +180,6 @@ export async function handleSettings(interaction: ChatInputCommandInteraction): 
     return;
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const limits = limitsFor(await getGuildTier(interaction.guildId!));
-  if (!limits.semanticSearch) {
-    await interaction.editReply(
-      upsellPayload({
-        title: 'Settings are Plus features',
-        description:
-          'Stale-question nudges, channel-fit suggestions and the off-topic guard are part of **Plus**.',
-        skuId: getEnv().SKU_PLUS,
-      }),
-    );
-    return;
-  }
   await interaction.editReply(await renderSettingsHub(interaction.guildId!));
 }
 
@@ -206,7 +194,6 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
   const cfg = await getGuildConfig(db, guildId);
   const tier = await getGuildTier(guildId);
   const limits = limitsFor(tier);
-  const counts = await countByStatus(db, guildId);
   const indexed = await countIndexedMessages(db, guildId);
   const indexCap = limits.indexCap;
   const atCap = Number.isFinite(indexCap) && indexed >= indexCap;
@@ -338,16 +325,14 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
     );
   }
 
-  if (limits.analytics === 'full') {
-    const [stats, helpers] = await Promise.all([resolutionStats(db, guildId), topHelpers(db, guildId, 5)]);
-    embed.addFields(
-      { name: 'Resolution rate', value: `${Math.round(stats.rate * 100)}% (${stats.solved}/${stats.total})`, inline: true },
-      { name: 'Avg time to resolve', value: formatDuration(stats.avgTtrSeconds), inline: true },
-      { name: 'Top helpers', value: helpers.length ? helpers.map((h) => `<@${h.userId}> — ${h.solved}`).join('\n') : '—' },
-    );
-  } else {
-    embed.addFields({ name: 'Analytics', value: 'Resolution rate, top helpers & most-asked topics are a **Plus** feature.' });
-  }
+  // Analytics are aggregates over rows we already store — no per-guild cost, so every
+  // tier gets them.
+  const [stats, helpers] = await Promise.all([resolutionStats(db, guildId), topHelpers(db, guildId, 5)]);
+  embed.addFields(
+    { name: 'Resolution rate', value: `${Math.round(stats.rate * 100)}% (${stats.solved}/${stats.total})`, inline: true },
+    { name: 'Avg time to resolve', value: formatDuration(stats.avgTtrSeconds), inline: true },
+    { name: 'Top helpers', value: helpers.length ? helpers.map((h) => `<@${h.userId}> — ${h.solved}`).join('\n') : '—' },
+  );
   let quota: QuotaStatus | undefined;
   if (limits.aiDrafts || limits.generative) {
     quota = await checkQuota(db, guildId, limits.monthlyCredits);
@@ -457,10 +442,15 @@ export async function handleHubButton(interaction: ButtonInteraction): Promise<v
       await interaction.editReply('Nothing to reindex yet.');
       return;
     }
-    const { started, skipped } = await startReindex(interaction, targets);
+    const { started, skipped, throttled } = await startReindex(interaction, targets);
     const lines = [];
     if (started.length) lines.push(`🔄 Reindexing ${started.join(', ')} — watch the live messages here.`);
     if (skipped.length) lines.push(`⏭️ Already running: ${skipped.join(', ')}.`);
+    if (throttled.length) {
+      lines.push(
+        `⏳ Recently reindexed: ${throttled.join(', ')} — a reindex re-reads the whole channel, so it's rate-limited. Try again later.`,
+      );
+    }
     await interaction.editReply(lines.join('\n') || 'Nothing to reindex.');
     return;
   }

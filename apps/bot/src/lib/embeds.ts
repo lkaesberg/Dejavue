@@ -18,6 +18,7 @@ export const COLOR_DUPLICATE = 0xfee75c;
 export const SOLVE_BUTTON_ID = 'dejavue:solve';
 export const DISMISS_BUTTON_ID = 'dejavue:dismiss';
 export const ACCEPT_BUTTON_PREFIX = 'dejavue:accept:'; // + original thread id
+export const MOVE_BUTTON_PREFIX = 'dejavue:move:'; // + target forum channel id
 export const SOLVE_MODAL_PREFIX = 'dejavue:solve-modal'; // optional :controlMessageId
 
 export function threadUrl(guildId: string, threadId: string): string {
@@ -205,15 +206,15 @@ export function duplicatesMessage(
   } else {
     // One accept button per listed match, so the asker can pick the one that actually
     // fits — not just the top hit. Dedup lists at most 3, so 3 + dismiss ≤ Discord's 5.
-    matches.forEach((m, i) =>
+    matches.forEach((m, i) => {
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(`${ACCEPT_BUTTON_PREFIX}${m.threadId}`)
           .setLabel(`Use #${i + 1}`)
           .setEmoji('✅')
           .setStyle(ButtonStyle.Success),
-      ),
-    );
+      );
+    });
   }
   row.addComponents(
     new ButtonBuilder()
@@ -222,6 +223,20 @@ export function duplicatesMessage(
       .setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row] };
+}
+
+/**
+ * The "Move it there" button. Discord can't re-parent a forum post, so pressing it
+ * makes Dejavue repost the question in the target forum and close this one.
+ */
+function moveButtonRow(targetChannelId: string): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${MOVE_BUTTON_PREFIX}${targetChannelId}`)
+      .setLabel('Move it there')
+      .setEmoji('📦')
+      .setStyle(ButtonStyle.Primary),
+  );
 }
 
 /** Advisory: this question looks like a better fit for another channel (Plus, opt-in). */
@@ -235,11 +250,63 @@ export function channelFitMessage(
       .setTitle('🧭 Might fit better elsewhere')
       .setDescription(
         `This looks like it may be a better fit for <#${betterChannelId}>. ` +
-          'You can move it there to reach the right people faster — or ignore this if it belongs here.',
+          'Hit **Move it there** and I\'ll repost it for you — or ignore this if it belongs here.',
       ),
     showBranding,
   );
-  return { embeds: [embed] };
+  return { embeds: [embed], components: [moveButtonRow(betterChannelId)] };
+}
+
+/**
+ * Replaces the fit/guard prompt the moment the button is pressed. The move takes a few
+ * API calls, and the button is the only thing standing between an impatient second
+ * press and a second copy of the question — so it goes dead immediately.
+ */
+export function movingNotice(targetChannelId: string, showBranding: boolean): BaseMessageOptions {
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('📦 Moving…')
+      .setDescription(`Reposting this question in <#${targetChannelId}>…`),
+    showBranding,
+  );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${MOVE_BUTTON_PREFIX}pending`)
+      .setLabel('Moving…')
+      .setEmoji('📦')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(true),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+/**
+ * The final state of the fit/guard prompt once the question has been reposted: where it
+ * went, a jump link, and no way to press the move button a second time (a link button
+ * carries no custom id, so it opens the new post instead of triggering another move).
+ */
+export function movedNotice(
+  guildId: string,
+  newThreadId: string,
+  targetChannelId: string,
+  showBranding: boolean,
+): BaseMessageOptions {
+  const url = threadUrl(guildId, newThreadId);
+  const embed = withBranding(
+    new EmbedBuilder()
+      .setColor(COLOR_SOLVED)
+      .setTitle('📦 Moved')
+      .setDescription(
+        `This question now lives in <#${targetChannelId}> → [open it here](${url}).\n` +
+          'This post is closed so answers stay in one place.',
+      ),
+    showBranding,
+  );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setLabel('Open the new post').setEmoji('↗️').setStyle(ButtonStyle.Link).setURL(url),
+  );
+  return { embeds: [embed], components: [row] };
 }
 
 /** Off-topic guard: posted when a question is confidently in the wrong channel and closed. */
@@ -255,11 +322,17 @@ export function channelGuardMessage(
         (betterChannelId
           ? `This question looks off-topic here — it's a much better fit for <#${betterChannelId}>. `
           : 'This question looks off-topic for this channel. ') +
-          "I've tagged and closed this thread to keep the channel on-topic. Please repost it in the right place.",
+          "I've tagged and closed this thread to keep the channel on-topic. " +
+          (betterChannelId
+            ? "Hit **Move it there** and I'll repost it for you."
+            : 'Please repost it in the right place.'),
       ),
     showBranding,
   );
-  return { embeds: [embed] };
+  return {
+    embeds: [embed],
+    components: betterChannelId ? [moveButtonRow(betterChannelId)] : [],
+  };
 }
 
 /** Modal that forces the solver to provide an answer (no empty solves). */

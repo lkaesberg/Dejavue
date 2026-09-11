@@ -1,0 +1,213 @@
+---
+/**
+ * Ad slot for Free-tier knowledge bases, plus the consent gate in front of it.
+ *
+ * Two deliberate constraints shape this:
+ *
+ *  1. The network is cookieless and non-behavioural (EthicalAds). A knowledge base is
+ *     someone else's community content and the privacy policy promises no visitor
+ *     profiling, so a retargeting network is not an option here regardless of revenue.
+ *  2. Even a cookieless ad is a *third-party request*, which discloses the visitor's IP
+ *     to another host. That is the one thing on these pages that leaves our own origin
+ *     (fonts and scripts are all self-hosted), so it is gated behind an explicit opt-in
+ *     rather than loaded on arrival.
+ *
+ * Declining is not a dead end: the slot falls back to an in-house upgrade promo, which
+ * makes the paid perk legible and involves no third party at all. Nothing here renders
+ * for a paying tenant — `showAds` is false the moment a guild is on Plus or above.
+ */
+import { getEnv } from '@dejavue/core';
+
+const { showAds, cfg } = Astro.locals;
+const env = getEnv();
+const publisher = env.ADS_PUBLISHER_ID ?? '';
+// A configured provider with no publisher id would render an empty, permanently
+// unfilled box — treat it as switched off instead.
+const active = showAds && env.ADS_PROVIDER === 'ethicalads' && publisher !== '';
+const upgradeUrl = 'https://dejavue.app/#pricing';
+const brandName = cfg?.brandName?.trim() || 'This knowledge base';
+---
+
+{
+  active && (
+    <aside class="kb-ads kb-bound" aria-label="Sponsored">
+      {/* Filled by the network once (and only once) consent is granted. */}
+      <div
+        id="kb-ad-slot"
+        data-ea-publisher={publisher}
+        data-ea-type="image"
+        data-ea-manual="true"
+        hidden
+      />
+
+      {/* Shown before a choice is made, and to anyone who declines. No third party. */}
+      <div id="kb-ad-house" class="kb-ad-house">
+        <div>
+          <strong>{brandName} runs on Dejavue.</strong>
+          <span> Turn your Discord threads into a searchable help centre.</span>
+        </div>
+        <a class="kb-ad-cta" href={upgradeUrl} rel="noopener">
+          Remove ads
+        </a>
+      </div>
+
+      <div id="kb-consent" class="kb-consent" hidden role="dialog" aria-live="polite" aria-label="Ad consent">
+        <p class="kb-consent-text">
+          We'd like to show one ad from <strong>EthicalAds</strong>, a privacy-first network. It
+          sets <strong>no cookies</strong> and does not profile you, but loading it does send your
+          IP address to that provider. Your choice is stored on this device only.
+        </p>
+        <div class="kb-consent-actions">
+          <button type="button" id="kb-consent-no" class="kb-consent-btn">Decline</button>
+          <button type="button" id="kb-consent-yes" class="kb-consent-btn kb-consent-btn-primary">
+            Allow
+          </button>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+{active && (
+  <script is:inline define:vars={{ src: 'https://media.ethicalads.io/media/client/ethicalads.min.js' }}>
+    (function () {
+      var KEY = 'dv_ads_consent';
+      var slot = document.getElementById('kb-ad-slot');
+      var house = document.getElementById('kb-ad-house');
+      var banner = document.getElementById('kb-consent');
+      if (!slot || !house || !banner) return;
+
+      // localStorage, not a cookie: storing the choice must not itself create the
+      // tracking artefact the visitor may be declining. Wrapped because Safari in
+      // private mode and "block site data" both make this throw rather than return null.
+      function read() {
+        try {
+          return localStorage.getItem(KEY);
+        } catch (_) {
+          return null;
+        }
+      }
+      function write(v) {
+        try {
+          localStorage.setItem(KEY, v);
+        } catch (_) {
+          /* choice simply won't persist */
+        }
+      }
+
+      var loaded = false;
+      function loadAd() {
+        if (loaded) return;
+        loaded = true;
+        house.hidden = true;
+        slot.hidden = false;
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = src;
+        // If the network is blocked or fails, restore the house promo rather than
+        // leaving a hole in the page.
+        s.onerror = function () {
+          slot.hidden = true;
+          house.hidden = false;
+        };
+        document.head.appendChild(s);
+      }
+
+      function apply(choice) {
+        banner.hidden = true;
+        if (choice === 'granted') loadAd();
+        else {
+          slot.hidden = true;
+          house.hidden = false;
+        }
+      }
+
+      document.getElementById('kb-consent-yes').addEventListener('click', function () {
+        write('granted');
+        apply('granted');
+      });
+      document.getElementById('kb-consent-no').addEventListener('click', function () {
+        write('denied');
+        apply('denied');
+      });
+
+      // Re-opened from the footer link, so a choice is always reversible.
+      window.addEventListener('dv:consent-reopen', function () {
+        banner.hidden = false;
+      });
+
+      var choice = read();
+      if (choice === 'granted' || choice === 'denied') apply(choice);
+      else banner.hidden = false; // no third-party request until asked
+    })();
+  </script>
+)}
+
+<style>
+  .kb-ads {
+    margin: 28px auto 8px;
+  }
+  .kb-ad-house,
+  .kb-consent {
+    border: 1px solid var(--border2);
+    border-radius: var(--radius, 10px);
+    background: var(--surface, rgba(127, 127, 127, 0.04));
+    padding: 14px 16px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--textmid);
+  }
+  .kb-ad-house {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .kb-ad-cta {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accentline, currentColor);
+    text-decoration: none;
+    border: 1px solid var(--border2);
+    border-radius: 999px;
+    padding: 6px 14px;
+  }
+  .kb-ad-cta:hover {
+    text-decoration: underline;
+  }
+  .kb-consent {
+    margin-top: 10px;
+  }
+  .kb-consent-text {
+    margin: 0 0 12px;
+  }
+  .kb-consent-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  /* Decline is styled identically to Allow: consent has to be as easy to refuse as
+     it is to give, so the two buttons carry equal visual weight. */
+  .kb-consent-btn {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 7px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border2);
+    background: transparent;
+    color: var(--textmid);
+  }
+  .kb-consent-btn:hover {
+    border-color: var(--accentline, var(--border2));
+  }
+  .kb-consent-btn-primary {
+    color: var(--text);
+  }
+  [hidden] {
+    display: none !important;
+  }
+</style>

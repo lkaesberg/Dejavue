@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import { generateFaq } from '@dejavue/ai';
 import { childLogger, genProgressEmbed, getEnv } from '@dejavue/core';
 import {
@@ -77,6 +78,13 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
         completionTokens: res.completionTokens,
         usedTokensBefore: quota.usedTokens,
         baseCredits,
+      });
+      capture('generation', job.guildId, {
+        feature: 'faq',
+        model_id: res.model,
+        prompt_tokens: res.promptTokens,
+        completion_tokens: res.completionTokens,
+        success: true,
       });
     }
     await markGenerationFinished(db, job.guildId, 'faq');

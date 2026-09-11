@@ -1,4 +1,5 @@
-import { buildEmbeddingText, embed, embeddingModelId } from '@dejavue/ai';
+import { capture } from '@dejavue/analytics';
+import { buildEmbeddingChunks, embedBatch, embedContentHash, embeddingModelId } from '@dejavue/ai';
 import { backfillProgressEmbed, childLogger, getEnv } from '@dejavue/core';
 import {
   channelMode,
@@ -13,8 +14,10 @@ import {
   listEmbeddedThreadIdsInChannel,
   markChannelStale,
   markEntitlementConsumed,
+  recordEmbeddingUsage,
   semanticSearch,
   setDuplicateOf,
+  setEmbedContentHash,
   setPublished,
   updateBackfillJob,
   upsertEmbedding,
@@ -29,7 +32,7 @@ import {
   type RawThread,
 } from '../lib/discordRest';
 import { LiveProgress } from '../lib/progress';
-import { guildLimits } from '../lib/quota';
+import { embedBudgetGate, guildLimits } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:backfill-forum' });
 const CHECKPOINT_EVERY = 25;
@@ -115,94 +118,154 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   let failed = bf.failed;
   let cappedOut = false;
 
-  for (const t of all) {
-    if (processed.has(t.id) || alreadyDone.has(t.id)) continue;
-    if (indexedMessages >= limits.indexCap) {
-      cappedOut = true;
-      break;
-    }
-    try {
-      const starter = await fetchStarterMessage(t.id);
-      const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
-      const row = await upsertThread(db, {
-        guildId: bf.guildId,
-        channelId: bf.channelId,
-        threadId: t.id,
-        title: t.name,
-        questionBody: starter?.content ?? '',
-        opUserId: starter?.author?.id ?? null,
-        status: isSolved ? 'solved' : 'open',
-      });
-      indexedMessages++;
+  const checkpoint = async (): Promise<void> => {
+    await updateBackfillJob(db, bf.id, {
+      processed: processedCount,
+      failed,
+      processedThreadIds: [...processed],
+    });
+    live?.update(
+      backfillProgressEmbed({
+        channelLabel: label,
+        phase: 'importing',
+        done: processedCount,
+        total: all.length,
+      }),
+    );
+  };
 
-      let vector: number[] | undefined;
-      // Backfill only has the starter message (no full transcript), so the
-      // embedding text is title + question — the helper keeps it consistent with
-      // the live embed job's fallback path.
-      const text = buildEmbeddingText({ title: t.name, questionBody: starter?.content ?? '' });
-      if (text) {
-        [vector] = await embed([text], { mode: 'passage', model });
-        if (vector) {
-          await upsertEmbedding(db, { threadRowId: row.id, guildId: bf.guildId, modelId: storedModelId, vector });
-        }
+  const todo = all.filter((t) => !processed.has(t.id) && !alreadyDone.has(t.id));
+  const batchSize = getEnv().EMBED_BATCH_SIZE;
+  const canSpend = embedBudgetGate(bf.guildId);
+
+  // Imported in windows: rows are created first, then the whole window's passages are
+  // embedded in ONE request (instead of one request per thread), then each thread is
+  // folded/published in order. Sequencing the fold pass *after* the batch — but still
+  // one thread at a time — keeps auto-fold semantics intact: thread N still searches a
+  // database that already contains threads 1..N-1 from this same window.
+  for (let w = 0; w < todo.length && !cappedOut; w += batchSize) {
+    const prepared: {
+      t: RawThread;
+      rowId: string;
+      isSolved: boolean;
+      src: { title: string; questionBody: string };
+      chunk: { index: number; hash: string; text: string } | undefined;
+    }[] = [];
+
+    for (const t of todo.slice(w, w + batchSize)) {
+      if (indexedMessages >= limits.indexCap) {
+        cappedOut = true;
+        break;
       }
-
-      // Already a duplicate from a prior run, or fold it now under an older
-      // near-identical canonical (resolve to root; only ever fold newer → older
-      // so the graph stays acyclic).
-      let isDup = !!row.duplicateOfThreadId;
-      if (!isDup && vector) {
-        const [match] = await semanticSearch(db, {
+      try {
+        const starter = await fetchStarterMessage(t.id);
+        const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
+        const row = await upsertThread(db, {
           guildId: bf.guildId,
-          queryVector: vector,
-          limit: 1,
-          minSimilarity: AUTO_FOLD_SIMILARITY,
-          excludeThreadId: t.id,
-          solvedOnly: false,
-          modelId: storedModelId,
+          channelId: bf.channelId,
+          threadId: t.id,
+          title: t.name,
+          questionBody: starter?.content ?? '',
+          opUserId: starter?.author?.id ?? null,
+          status: isSolved ? 'solved' : 'open',
         });
-        if (match && match.threadId !== t.id) {
-          const matchRow = await getThreadByDiscordId(db, bf.guildId, match.threadId);
-          const root = matchRow?.duplicateOfThreadId ?? match.threadId;
-          if (root !== t.id && BigInt(root) < BigInt(t.id)) {
-            await setDuplicateOf(db, bf.guildId, t.id, root);
-            isDup = true;
+        indexedMessages++;
+        // Backfill only has the starter message (no full transcript), so this is the
+        // canonical title + question chunk — the same chunk 0 the live job builds.
+        const src = { title: t.name, questionBody: starter?.content ?? '' };
+        prepared.push({ t, rowId: row.id, isSolved, src, chunk: buildEmbeddingChunks(src)[0] });
+      } catch (err) {
+        failed++;
+        log.warn({ err, threadId: t.id }, 'backfill: failed to import thread');
+        processed.add(t.id);
+      }
+    }
+
+    // An import is the single largest embedding spend a guild can trigger — check the
+    // monthly ceiling per window rather than per thread.
+    const withText = (await canSpend()) ? prepared.filter((p) => p.chunk) : [];
+    const { vectors, tokens } = withText.length
+      ? await embedBatch(
+          withText.map((p) => p.chunk!.text),
+          { mode: 'passage', model },
+        )
+      : { vectors: [] as number[][], tokens: 0 };
+    const vectorOf = new Map(withText.map((p, i) => [p.t.id, vectors[i]] as const));
+    // Import is where a guild's embedding spend actually lands — record it.
+    if (tokens > 0) {
+      await recordEmbeddingUsage(db, { guildId: bf.guildId, model: storedModelId, tokens }).catch(
+        () => undefined,
+      );
+      capture('embedding_batch', bf.guildId, {
+        tokens,
+        chunks: withText.length,
+        model_id: storedModelId,
+        reason: 'backfill',
+      });
+    }
+
+    for (const p of prepared) {
+      try {
+        const vector = vectorOf.get(p.t.id);
+        if (vector && p.chunk) {
+          await upsertEmbedding(db, {
+            threadRowId: p.rowId,
+            guildId: bf.guildId,
+            modelId: storedModelId,
+            chunkIndex: p.chunk.index,
+            chunkHash: p.chunk.hash,
+            vector,
+          });
+          // Stamp the thread hash too, so the first live capture doesn't see every
+          // backfilled thread as dirty and re-embed the whole import.
+          await setEmbedContentHash(db, p.rowId, embedContentHash(p.src)).catch(() => undefined);
+        }
+
+        // Already a duplicate from a prior run, or fold it now under an older
+        // near-identical canonical (resolve to root; only ever fold newer → older
+        // so the graph stays acyclic).
+        const existing = await getThreadByDiscordId(db, bf.guildId, p.t.id);
+        let isDup = !!existing?.duplicateOfThreadId;
+        if (!isDup && vector) {
+          const [match] = await semanticSearch(db, {
+            guildId: bf.guildId,
+            queryVector: vector,
+            limit: 1,
+            minSimilarity: AUTO_FOLD_SIMILARITY,
+            excludeThreadId: p.t.id,
+            solvedOnly: false,
+            modelId: storedModelId,
+          });
+          if (match && match.threadId !== p.t.id) {
+            const matchRow = await getThreadByDiscordId(db, bf.guildId, match.threadId);
+            const root = matchRow?.duplicateOfThreadId ?? match.threadId;
+            if (root !== p.t.id && BigInt(root) < BigInt(p.t.id)) {
+              await setDuplicateOf(db, bf.guildId, p.t.id, root);
+              isDup = true;
+            }
           }
         }
+
+        if (isDup) {
+          // A folded copy never stands alone on the KB.
+          await setPublished(db, bf.guildId, p.t.id, false);
+        } else if (mode === 'knowledge' || p.isSolved) {
+          // Auto-publish everything online. Open questions stay private until solved.
+          await setPublished(db, bf.guildId, p.t.id, true);
+          await enqueueRevalidateKb({
+            guildId: bf.guildId,
+            threadId: p.t.id,
+            action: 'publish',
+          }).catch(() => undefined);
+        }
+
+        processedCount++;
+      } catch (err) {
+        failed++;
+        log.warn({ err, threadId: p.t.id }, 'backfill: failed to import thread');
       }
-
-      if (isDup) {
-        // A folded copy never stands alone on the KB.
-        await setPublished(db, bf.guildId, t.id, false);
-      } else if (mode === 'knowledge' || isSolved) {
-        // Auto-publish everything online. Open questions stay private until solved.
-        await setPublished(db, bf.guildId, t.id, true);
-        await enqueueRevalidateKb({ guildId: bf.guildId, threadId: t.id, action: 'publish' }).catch(
-          () => undefined,
-        );
-      }
-
-      processedCount++;
-    } catch (err) {
-      failed++;
-      log.warn({ err, threadId: t.id }, 'backfill: failed to import thread');
-    }
-    processed.add(t.id);
-
-    if (processedCount % CHECKPOINT_EVERY === 0) {
-      await updateBackfillJob(db, bf.id, {
-        processed: processedCount,
-        failed,
-        processedThreadIds: [...processed],
-      });
-      live?.update(
-        backfillProgressEmbed({
-          channelLabel: label,
-          phase: 'importing',
-          done: processedCount,
-          total: all.length,
-        }),
-      );
+      processed.add(p.t.id);
+      if (processedCount % CHECKPOINT_EVERY === 0) await checkpoint();
     }
   }
 

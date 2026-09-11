@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import { ChannelType, type ForumChannel, type Guild } from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import {
@@ -151,5 +152,6 @@ export async function runDemo(guild: Guild): Promise<DemoResult> {
   }
 
   log.info({ guildId: guild.id, forumId: forum.id }, 'demo created');
+  capture('demo_created', guild.id);
   return { forumId: forum.id, solved: KB.length, fresh: FRESH.length };
 }

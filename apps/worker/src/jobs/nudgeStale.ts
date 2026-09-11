@@ -25,7 +25,11 @@ export async function handleNudgeStale(job: NudgeStaleJob): Promise<void> {
     if (!cfg?.nudgeEnabled) continue;
     const tier =
       env.DEV_FORCE_TIER ??
-      (await resolveGuildTier(db, guildId, { plus: env.SKU_PLUS, pro: env.SKU_PRO }));
+      (await resolveGuildTier(db, guildId, {
+        plus: env.SKU_PLUS,
+        pro: env.SKU_PRO,
+        max: env.SKU_MAX,
+      }));
     if (tier === 'free') continue; // nudges are a Plus+ feature
 
     const stale = await getStaleUnansweredThreads(db, guildId, cfg.nudgeAfterHours);

@@ -1,4 +1,4 @@
-import { buildEmbeddingText, embed, embedContentHash, embeddingModelId } from '@dejavue/ai';
+import { embeddingModelId } from '@dejavue/ai';
 import {
   childLogger,
   getEnv,
@@ -23,15 +23,12 @@ import {
   type ReindexJob,
   semanticSearch,
   setDuplicateOf,
-  setEmbedContentHash,
-  setLastEmbedMsgCount,
   setPublished,
   setTranscript,
   type TranscriptAttachment,
   type TranscriptMessage,
   updateChannelName,
   updateReindexJob,
-  upsertEmbedding,
   upsertThread,
 } from '@dejavue/db';
 import {
@@ -50,7 +47,8 @@ import {
   type RawThread,
 } from '../lib/discordRest';
 import { LiveProgress } from '../lib/progress';
-import { guildLimits } from '../lib/quota';
+import { syncThreadEmbeddings } from '../lib/embedChunks';
+import { embedBudgetGate, guildLimits } from '../lib/quota';
 
 const log = childLogger({ mod: 'job:reindex-channel' });
 const CHECKPOINT_EVERY = 25;
@@ -106,6 +104,7 @@ async function reindexForum(
   const db = getDb();
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model);
+  const canSpend = embedBudgetGate(rj.guildId);
   const solvedTagId = cfg?.solvedTagId ?? undefined;
   const mode = channelMode(cfg, rj.channelId);
   const limits = await guildLimits(rj.guildId);
@@ -131,7 +130,8 @@ async function reindexForum(
   await updateReindexJob(db, rj.id, { total: all.length, phase: 'indexing' });
   live?.update(reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'listing', done: all.length }));
 
-  // 2. INDEX — force re-embed every thread (not skip-if-present like backfill).
+  // 2. INDEX — revisit every thread (not skip-if-present like backfill). The embedding
+  //    itself is still chunk-diffed, so an unchanged thread costs no API calls.
   // `seen` = the COMPLETE listing (every thread Discord returned), built up front so the
   // prune in step 3 is correct even if indexing stops early at the cap. Deriving it from
   // the loop instead would omit everything after an early `break` and prune live threads.
@@ -162,20 +162,16 @@ async function reindexForum(
         acceptedAnswerText: row.acceptedAnswerText,
         transcript: row.transcript,
       };
-      const text = buildEmbeddingText(src);
-      let vector: number[] | undefined;
-      if (text) {
-        [vector] = await embed([text], { mode: 'passage', model });
-        if (vector) {
-          await upsertEmbedding(db, {
-            threadRowId: row.id,
-            guildId: rj.guildId,
-            modelId: storedModelId,
-            vector,
-          });
-          await setEmbedContentHash(db, row.id, embedContentHash(src));
-        }
-      }
+      // Chunk-diffed: an unchanged thread costs nothing, a model switch rebuilds it.
+      const { primaryVector: vector } = await syncThreadEmbeddings(db, {
+        threadRowId: row.id,
+        guildId: rj.guildId,
+        modelId: storedModelId,
+        modelKey: model,
+        src,
+        canSpend,
+        reason: 'reindex',
+      });
 
       // Fold near-duplicate reposts under the older canonical.
       let isDup = !!row.duplicateOfThreadId;
@@ -339,6 +335,7 @@ async function reindexTracked(
   const db = getDb();
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model);
+  const canSpend = embedBudgetGate(rj.guildId);
   const limits = await guildLimits(rj.guildId);
 
   const info = await fetchChannelInfo(rj.channelId);
@@ -402,16 +399,15 @@ async function reindexTracked(
       await enqueueRevalidateKb({ guildId: rj.guildId, threadId, action: 'publish' }).catch(() => undefined);
     }
     await setTranscript(db, row.id, transcript);
-    const src = { title: row.title, questionBody: row.questionBody, transcript };
-    const text = buildEmbeddingText(src);
-    if (text) {
-      const [vector] = await embed([text], { mode: 'passage', model });
-      if (vector) {
-        await upsertEmbedding(db, { threadRowId: row.id, guildId: rj.guildId, modelId: storedModelId, vector });
-        await setEmbedContentHash(db, row.id, embedContentHash(src));
-        await setLastEmbedMsgCount(db, row.id, Math.max(transcript.length, 1));
-      }
-    }
+    await syncThreadEmbeddings(db, {
+      threadRowId: row.id,
+      guildId: rj.guildId,
+      modelId: storedModelId,
+      modelKey: model,
+      src: { title: row.title, questionBody: row.questionBody, transcript },
+      canSpend,
+      reason: 'reindex',
+    });
     processedCount++;
     if (processedCount % CHECKPOINT_EVERY === 0) {
       await updateReindexJob(db, rj.id, { processed: processedCount });

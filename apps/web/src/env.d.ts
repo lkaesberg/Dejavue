@@ -16,6 +16,11 @@ declare global {
       tier: Tier;
       /** Whether to show the "powered by dejavue" branding (false once removed on Plus+). */
       branded: boolean;
+      /**
+       * Whether this knowledge base carries ads (Free only, and only when an ad network
+       * is configured). Removing them is a paid perk — see TierLimits.ads.
+       */
+      showAds: boolean;
     }
   }
 }

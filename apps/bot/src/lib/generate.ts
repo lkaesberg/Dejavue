@@ -1,3 +1,4 @@
+import { capture } from '@dejavue/analytics';
 import {
   type ButtonInteraction,
   type ChatInputCommandInteraction,
@@ -42,6 +43,7 @@ async function blockedOnCredits(
 ): Promise<boolean> {
   const quota = await checkQuota(getDb(), guildId, baseCredits);
   if (quota.allowed) return false;
+  capture('credits_exhausted', guildId, { gate: 'credits' });
   // One-time purchases are user-owned; remember the guild before showing the buttons.
   const topUpSkus = await prepareTopUpSkus(interaction.user.id, guildId);
   await interaction.reply({
@@ -65,12 +67,13 @@ export async function runGaps(interaction: Repliable): Promise<void> {
   const db = getDb();
   const limits = limitsFor(await getGuildTier(guildId));
   if (!limits.generative) {
+    capture('upsell_shown', guildId, { gate: 'generative_gaps' });
     await interaction.reply({
       ...upsellPayload({
-        title: 'Knowledge-gap clustering is a Pro feature',
+        title: 'Knowledge-gap clustering needs AI credits',
         description:
-          'Group recurring unanswered questions so you know exactly which docs to write. Upgrade to **Pro**.',
-        skuId: getEnv().SKU_PRO,
+          'Group recurring unanswered questions so you know exactly which docs to write. Available from **Plus**.',
+        skuId: getEnv().SKU_PLUS,
       }),
       flags: MessageFlags.Ephemeral,
     });
@@ -111,11 +114,13 @@ export async function runFaq(interaction: Repliable): Promise<void> {
   const db = getDb();
   const limits = limitsFor(await getGuildTier(guildId));
   if (!limits.generative) {
+    capture('upsell_shown', guildId, { gate: 'generative_faq' });
     await interaction.reply({
       ...upsellPayload({
-        title: 'Auto-FAQ is a Pro feature',
-        description: 'Dejavue drafts and maintains a FAQ from your recurring questions. Upgrade to **Pro**.',
-        skuId: getEnv().SKU_PRO,
+        title: 'Auto-FAQ needs AI credits',
+        description:
+          'Dejavue drafts and maintains a FAQ from your recurring questions. Available from **Plus**.',
+        skuId: getEnv().SKU_PLUS,
       }),
       flags: MessageFlags.Ephemeral,
     });

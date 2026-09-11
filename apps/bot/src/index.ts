@@ -1,3 +1,4 @@
+import { shutdownAnalytics } from '@dejavue/analytics';
 import '@dejavue/core/env-preload';
 import { createServer, type Server } from 'node:http';
 import { installCrashHandlers, logger, notify, requireEnv } from '@dejavue/core';
@@ -46,7 +47,20 @@ async function main(): Promise<void> {
   registerEvents(client);
   // Listen before login so the endpoint answers 503 (rather than refusing the
   // connection) while the gateway handshake is still in flight.
-  startHealthServer(client);
+  const health = startHealthServer(client);
+
+  // Close the gateway and flush buffered analytics on a container stop, instead of
+  // being killed mid-batch on every deploy.
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      log.info({ sig }, 'shutting down bot');
+      health.close();
+      void Promise.allSettled([client.destroy(), shutdownAnalytics()]).finally(() =>
+        process.exit(0),
+      );
+    });
+  }
+
   await client.login(token);
 }
 

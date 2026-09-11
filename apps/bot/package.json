@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@dejavue/ai": "workspace:*",
+    "@dejavue/analytics": "workspace:*",
     "@dejavue/core": "workspace:*",
     "@dejavue/db": "workspace:*",
     "@dejavue/queue": "workspace:*",

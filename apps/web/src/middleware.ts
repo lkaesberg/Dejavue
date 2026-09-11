@@ -1,7 +1,26 @@
 import { getEnv, tierLimits, verifyPassphrase } from '@dejavue/core';
 import { defineMiddleware } from 'astro:middleware';
 import { getDb, getGuildByCustomDomain, getGuildBySlug, resolveGuildTier } from '@dejavue/db';
+import { clientIp } from './lib/clientIp';
 import { gateCookieName, gateHtml, gateToken, isUnlocked } from './lib/gate';
+import { takeAll } from './lib/rateLimit';
+
+/**
+ * Passphrase attempts per minute on `POST /unlock`.
+ *
+ * Two limits, because the per-visitor one is keyed on an IP we cannot fully trust (see
+ * lib/clientIp.ts). The per-guild ceiling is keyed on the tenant resolved from the Host
+ * header via the database, which a client cannot choose, so it holds even against a
+ * forged IP. Both are needed: without the ceiling a spoofed IP restores unlimited
+ * guessing, and without the per-visitor limit one attacker starves real visitors.
+ *
+ * This guards two things at once. A passphrase is one shared human-chosen secret, so
+ * unlimited guesses are a real risk; and verifying one is a deliberately expensive scrypt
+ * hash, so unlimited attempts were also a cheap way to keep every CPU on the single web
+ * process busy — for every tenant, not just the one being attacked.
+ */
+const UNLOCK_PER_IP_PER_MIN = 10;
+const UNLOCK_PER_GUILD_PER_MIN = 60;
 
 /** Extract the tenant subdomain from a Host header (handles localhost dev). */
 function extractSubdomain(host: string): string | null {
@@ -40,8 +59,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // self-canonicalizing copies. Scoped to KB_BASE_DOMAIN so tenant custom domains
   // — which may legitimately live on www.<their-domain> — are never touched. Runs
   // before any DB lookup: a redirected request needs no tenant resolution.
-  const baseDomain = getEnv().KB_BASE_DOMAIN;
-  if (host === `www.${baseDomain}`) {
+  // Compare against the port-stripped base domain: `host` above has already had its port
+  // removed, so a KB_BASE_DOMAIN carrying one (`localhost:4321`, as local dev sets) could
+  // never match and the redirect silently did nothing. Production sets a bare domain, so
+  // this only ever showed up as "the canonical redirect doesn't work on my machine".
+  const baseDomain = (getEnv().KB_BASE_DOMAIN.split(':')[0] ?? '').toLowerCase();
+  if (baseDomain && host === `www.${baseDomain}`) {
     // Force https + drop any port so it's a single hop straight to the secure
     // apex (the base domain is always TLS-served in prod; this branch never
     // matches localhost). Path + query are preserved by reusing the URL.
@@ -58,6 +81,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
   context.locals.cfg = null;
   context.locals.tier = 'free';
   context.locals.branded = true;
+  // Default off: the apex marketing site never carries ads, only tenant KBs can.
+  context.locals.showAds = false;
 
   const db = getDb();
   // Subdomain ({slug}.dejavue.app) first, then a custom domain (help.acme.com).
@@ -78,6 +103,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
       (await resolveGuildTier(db, guild.guildId, { plus: env.SKU_PLUS, pro: env.SKU_PRO, max: env.SKU_MAX }));
     context.locals.tier = tier;
     context.locals.branded = !tierLimits(tier).removeBranding;
+    // Ads are Free-tier only, and only when a network is actually configured — so a
+    // self-hosted instance (ADS_PROVIDER unset) never shows them.
+    context.locals.showAds = tierLimits(tier).ads && env.ADS_PROVIDER !== 'none';
 
     // Private KB passphrase gate. The cookie token is bound to the current passphrase
     // hash, so changing the passphrase instantly revokes every already-unlocked visitor.
@@ -109,9 +137,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
         const forwardedProto = context.request.headers.get('x-forwarded-proto');
         const isHttps = forwardedProto ? forwardedProto.split(',')[0]!.trim() === 'https' : url.protocol === 'https:';
 
+        // Throttle BEFORE the scrypt verify, so a refused attempt costs us nothing.
+        const ip = clientIp(context.request, context.clientAddress);
+        const withinAttemptBudget = takeAll([
+          { key: `unlock:${guild.guildId}:${ip}`, perMinute: UNLOCK_PER_IP_PER_MIN },
+          { key: `unlock:${guild.guildId}`, perMinute: UNLOCK_PER_GUILD_PER_MIN },
+        ]);
+        if (!withinAttemptBudget) {
+          return new Response(gateHtml(guild, { error: true, branded: context.locals.branded }), {
+            status: 429,
+            headers: { 'content-type': 'text/html; charset=utf-8', 'retry-after': '60' },
+          });
+        }
+
         const form = await context.request.formData();
         const passphrase = String(form.get('passphrase') ?? '');
-        if (verifyPassphrase(passphrase, guild.kbPassphraseHash)) {
+        if (await verifyPassphrase(passphrase, guild.kbPassphraseHash)) {
           context.cookies.set(gateCookieName(guild.guildId), gateToken(guild.guildId, guild.kbPassphraseHash), {
             httpOnly: true,
             sameSite: 'lax',

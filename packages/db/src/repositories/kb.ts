@@ -1,6 +1,7 @@
 import { and, cosineDistance, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { embedding, type GuildConfig, guildConfig, type Thread, thread } from '../schema';
+import { CHUNK_OVERFETCH } from './search';
 
 /** A public-KB search hit: the same shape for keyword and semantic, plus an optional match %. */
 export interface KbSearchResult {
@@ -233,9 +234,11 @@ export async function searchPublishedSemantic(
       ),
     )
     .orderBy(distance)
-    .limit(limit);
+    // Over-fetch: a thread owns one vector per chunk, so limiting the raw hits would
+    // collapse to far fewer than `limit` distinct threads once de-duplicated below.
+    .limit(limit * CHUNK_OVERFETCH);
 
-  // One row per thread (a thread may have several passage embeddings); keep the best.
+  // One row per thread (a thread has several chunk embeddings); keep the best.
   const best = new Map<string, KbSearchResult>();
   for (const r of rows) {
     const existing = best.get(r.threadId);
@@ -249,7 +252,9 @@ export async function searchPublishedSemantic(
       relevance: r.relevance,
     });
   }
-  return [...best.values()].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+  return [...best.values()]
+    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
+    .slice(0, limit);
 }
 
 /**

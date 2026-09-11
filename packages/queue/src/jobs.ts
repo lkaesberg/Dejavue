@@ -20,6 +20,8 @@ export const QUEUES = {
   INGEST_ATTACHMENT: 'ingest-attachment',
   /** Full rescan of a channel: re-embed everything + prune deleted content (durable). */
   REINDEX_CHANNEL: 'reindex-channel',
+  /** Daily instance-wide rollup emitted to product analytics. */
+  STATS_SNAPSHOT: 'stats-snapshot',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

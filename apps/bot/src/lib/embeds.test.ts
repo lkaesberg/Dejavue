@@ -2,8 +2,13 @@ import type { SearchMatch } from '@dejavue/db';
 import type { ActionRowBuilder, BaseMessageOptions, ButtonBuilder, EmbedBuilder } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 import {
+  channelFitMessage,
+  channelGuardMessage,
   draftingMessage,
   duplicatesMessage,
+  MOVE_BUTTON_PREFIX,
+  movedNotice,
+  movingNotice,
   noMatchesMessage,
   searchingMessage,
 } from './embeds';
@@ -103,5 +108,47 @@ describe('duplicatesMessage', () => {
     const e = embedJson(duplicatesMessage('g1', matches, false, { draft: 'Rotate in Settings → API.' }));
     expect(e.fields?.[0]?.name).toBe('✦ Suggested answer (AI draft)');
     expect(e.fields?.[0]?.value).toContain('Rotate in Settings');
+  });
+});
+
+describe('channelFitMessage', () => {
+  it('offers a move button targeting the suggested channel', () => {
+    const payload = channelFitMessage('999', false);
+    expect(buttonIds(payload)).toEqual([`${MOVE_BUTTON_PREFIX}999`]);
+    expect(embedJson(payload).description).toContain('<#999>');
+  });
+});
+
+describe('channelGuardMessage', () => {
+  it('offers the move button when it knows where the post belongs', () => {
+    expect(buttonIds(channelGuardMessage('999', false))).toEqual([`${MOVE_BUTTON_PREFIX}999`]);
+  });
+
+  it('falls back to "repost it yourself" when no channel fits', () => {
+    const payload = channelGuardMessage(null, false);
+    expect(payload.components).toEqual([]);
+    expect(embedJson(payload).description).toContain('repost it in the right place');
+  });
+});
+
+describe('movingNotice', () => {
+  it('leaves a dead button behind so the move can\'t be triggered twice', () => {
+    const payload = movingNotice('999', false);
+    const [row] = payload.components as ActionRowBuilder<ButtonBuilder>[];
+    const button = row!.components[0]!.toJSON() as { disabled?: boolean };
+    expect(button.disabled).toBe(true);
+  });
+});
+
+describe('movedNotice', () => {
+  it('names the new home and links to the moved post, with no pressable move button', () => {
+    const payload = movedNotice('g1', '222', '999', false);
+    expect(embedJson(payload).description).toContain('<#999>');
+    expect(embedJson(payload).description).toContain('/g1/222');
+    // A link button carries a url and no custom id, so pressing it can't move anything.
+    const [row] = payload.components as ActionRowBuilder<ButtonBuilder>[];
+    const button = row!.components[0]!.toJSON() as { url?: string; custom_id?: string };
+    expect(button.custom_id).toBeUndefined();
+    expect(button.url).toContain('/g1/222');
   });
 });
