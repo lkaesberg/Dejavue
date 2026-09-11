@@ -90,7 +90,24 @@ export type ThreadKind = 'forum' | 'channel';
 // Enums
 // ---------------------------------------------------------------------------
 export const threadStatus = pgEnum('thread_status', ['open', 'solved', 'unsolved']);
-export const embeddingSource = pgEnum('embedding_source', ['question', 'answer', 'summary']);
+/**
+ * What a vector represents. 'question' / 'answer' / 'summary' are RETRIEVAL vectors —
+ * chunks of the thread, embedded with the model's document prompt, searched by
+ * /dejavue search and the MCP endpoint. 'dedup' is different in kind: one vector per
+ * thread covering only the question that was asked, embedded with the model's symmetric
+ * *similarity* prompt, so a new post can be compared question-to-question. The two sets
+ * are never searched together — see the `sources` option on semanticSearch.
+ */
+export const embeddingSource = pgEnum('embedding_source', [
+  'question',
+  'answer',
+  'summary',
+  'dedup',
+]);
+
+/** Vector kinds that answer "find me a thread about X" (everything except 'dedup'). */
+export const RETRIEVAL_SOURCES = ['question', 'answer', 'summary'] as const;
+export type EmbeddingSource = (typeof embeddingSource.enumValues)[number];
 export const entitlementType = pgEnum('entitlement_type', [
   'guild_subscription',
   'user_subscription',

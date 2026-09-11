@@ -1,6 +1,14 @@
 import { capture } from '@dejavue/analytics';
-import { buildEmbeddingChunks, type EmbedChunk, embedBatch, embedContentHash } from '@dejavue/ai';
-import { getEnv } from '@dejavue/core';
+import {
+  buildEmbeddingChunks,
+  dedupText,
+  type EmbedChunk,
+  embedBatch,
+  embedContentHash,
+  embedOne,
+  fnv1a,
+} from '@dejavue/ai';
+import { childLogger, getEnv } from '@dejavue/core';
 import {
   type Database,
   deleteEmbeddingChunksNotIn,
@@ -9,6 +17,8 @@ import {
   setEmbedContentHash,
   upsertEmbedding,
 } from '@dejavue/db';
+
+const log = childLogger({ mod: 'embed-chunks' });
 
 export interface SyncThreadEmbeddingsInput {
   threadRowId: string;
@@ -40,6 +50,48 @@ export interface SyncThreadEmbeddingsResult {
   /** Chunk 0's vector when it was (re)computed — the auto-fold paths need it. */
   primaryVector?: number[];
 }
+
+/**
+ * Keep the thread's single 'dedup' vector current.
+ *
+ * Separate from the chunk loop because it is a different kind of vector: the question
+ * text only, embedded with the model's symmetric similarity prompt so a new post can be
+ * compared question-to-question (see dedupText). It re-embeds only when the question
+ * itself changes — a reply, an accepted answer, or a 200-message discussion leaves it
+ * untouched, so an active thread costs nothing here.
+ *
+ * Best-effort: a thread that fails to get one still works, it just falls back to being
+ * undetectable as a duplicate until the next sync.
+ */
+async function syncDedupVector(db: Database, input: SyncThreadEmbeddingsInput): Promise<number> {
+  const text = dedupText(input.src.title ?? '', input.src.questionBody ?? '');
+  if (!text) return 0;
+  const hash = fnv1a(text);
+  const stored = await getThreadChunkHashes(db, input.threadRowId, input.modelId, ['dedup']);
+  if (stored.get(DEDUP_CHUNK_INDEX) === hash) return 0;
+
+  try {
+    const vector = await embedOne(text, { mode: 'similarity', model: input.modelKey });
+    await upsertEmbedding(db, {
+      threadRowId: input.threadRowId,
+      guildId: input.guildId,
+      modelId: input.modelId,
+      source: 'dedup',
+      chunkIndex: DEDUP_CHUNK_INDEX,
+      chunkHash: hash,
+      vector,
+    });
+    return estimateDedupTokens(text);
+  } catch (err) {
+    log.warn({ err, threadRowId: input.threadRowId }, 'failed to build dedup vector');
+    return 0;
+  }
+}
+
+/** The dedup vector is always a thread's only one, so its slot is fixed. */
+const DEDUP_CHUNK_INDEX = 0;
+/** Same ~4 chars/token rule the embedding backends use for unreported usage. */
+const estimateDedupTokens = (text: string): number => Math.ceil(text.length / 4);
 
 /**
  * Bring a thread's chunk embeddings up to date, embedding only what changed.
@@ -90,6 +142,11 @@ export async function syncThreadEmbeddings(
       });
     }
   }
+
+  // The dedup vector: one per thread, the asked question only, symmetric prompt. Kept
+  // beside the retrieval chunks rather than derived from them because it answers a
+  // different question ("has this been asked?") and must not drift with the transcript.
+  tokens += await syncDedupVector(db, input);
 
   // Drop slots the thread no longer has (messages deleted, or a cap now applies).
   await deleteEmbeddingChunksNotIn(

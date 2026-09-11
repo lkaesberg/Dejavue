@@ -1,6 +1,6 @@
-import { and, eq, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import type { Database } from '../client';
-import { embedding, type Embedding } from '../schema';
+import { type Embedding, type EmbeddingSource, embedding, RETRIEVAL_SOURCES } from '../schema';
 
 export interface UpsertEmbeddingInput {
   threadRowId: string;
@@ -65,11 +65,20 @@ export async function getThreadChunkHashes(
   db: Database,
   threadRowId: string,
   modelId: string,
+  sources: readonly EmbeddingSource[] = RETRIEVAL_SOURCES,
 ): Promise<Map<number, string>> {
   const rows = await db
     .select({ chunkIndex: embedding.chunkIndex, chunkHash: embedding.chunkHash })
     .from(embedding)
-    .where(and(eq(embedding.threadId, threadRowId), eq(embedding.modelId, modelId)));
+    .where(
+      and(
+        eq(embedding.threadId, threadRowId),
+        eq(embedding.modelId, modelId),
+        // Scoped by kind: the 'dedup' vector also lives at chunk 0, and letting it into
+        // this map would make chunk 0 look permanently stale (or wrongly fresh).
+        inArray(embedding.source, [...sources]),
+      ),
+    );
   const out = new Map<number, string>();
   for (const r of rows) if (r.chunkHash) out.set(r.chunkIndex, r.chunkHash);
   return out;
@@ -85,11 +94,18 @@ export async function deleteEmbeddingChunksNotIn(
   threadRowId: string,
   keepIndices: number[],
 ): Promise<void> {
+  // Retrieval chunks only — the single 'dedup' vector is not part of this numbering and
+  // must survive a thread whose transcript chunks all disappeared.
+  const retrieval = inArray(embedding.source, [...RETRIEVAL_SOURCES]);
   await db
     .delete(embedding)
     .where(
       keepIndices.length === 0
-        ? eq(embedding.threadId, threadRowId)
-        : and(eq(embedding.threadId, threadRowId), notInArray(embedding.chunkIndex, keepIndices)),
+        ? and(eq(embedding.threadId, threadRowId), retrieval)
+        : and(
+            eq(embedding.threadId, threadRowId),
+            retrieval,
+            notInArray(embedding.chunkIndex, keepIndices),
+          ),
     );
 }

@@ -1,6 +1,6 @@
-import { and, cosineDistance, desc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, cosineDistance, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../client';
-import { embedding, thread } from '../schema';
+import { type EmbeddingSource, embedding, RETRIEVAL_SOURCES, thread } from '../schema';
 
 /**
  * The ONLY place vector / full-text SQL lives. The bot and worker call these
@@ -43,6 +43,14 @@ export interface SemanticSearchOptions {
    * stale vectors from a different model (different geometry → garbage scores).
    */
   modelId?: string;
+  /**
+   * Which vector kinds to search. Defaults to the retrieval set, so the per-thread
+   * 'dedup' vectors never leak into /dejavue search or MCP results — and duplicate
+   * detection, which passes ['dedup'], never matches a transcript chunk. Mixing the two
+   * would compare vectors built with different instruction prompts, whose cosines are
+   * not on the same scale.
+   */
+  sources?: readonly EmbeddingSource[];
   /** HNSW recall knob; higher = better recall, slower. */
   efSearch?: number;
 }
@@ -68,6 +76,7 @@ export async function semanticSearch(
     excludeThreadId,
     solvedOnly = true,
     canonicalOnly = true,
+    sources = RETRIEVAL_SOURCES,
     modelId,
     efSearch = DEFAULT_EF_SEARCH,
   } = opts;
@@ -81,7 +90,7 @@ export async function semanticSearch(
     // SET LOCAL doesn't take bind params — inline a sanitized integer.
     await tx.execute(sql`SET LOCAL hnsw.ef_search = ${sql.raw(String(Math.trunc(efSearch)))}`);
 
-    const conditions = [eq(embedding.guildId, guildId)];
+    const conditions = [eq(embedding.guildId, guildId), inArray(embedding.source, [...sources])];
     if (modelId) conditions.push(eq(embedding.modelId, modelId));
     if (solvedOnly) conditions.push(eq(thread.status, 'solved'));
     if (canonicalOnly) {

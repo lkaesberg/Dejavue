@@ -34,6 +34,12 @@ export interface ModelInfo {
   queryPrefix: string;
   passagePrefix: string;
   /**
+   * Prefix for symmetric similarity (EmbedMode 'similarity'). Empty string is a valid
+   * value and means "this model compares best with no instruction at all" — which is
+   * the correct symmetric setup for bge and for the OpenAI models.
+   */
+  similarityPrefix: string;
+  /**
    * How the local ONNX export turns tokens into one vector (local only):
    *  - 'pipeline' — feature-extraction + mean pooling over the last hidden state.
    *    Correct for the e5 family, which is trained with mean pooling.
@@ -77,6 +83,8 @@ const LOCAL_MODELS: Record<string, Omit<ModelInfo, 'provider'>> = {
     // and a mismatched one quietly costs retrieval quality.
     queryPrefix: 'task: search result | query: ',
     passagePrefix: 'title: none | text: ',
+    // The card's dedicated symmetric task prompt — not the retrieval one.
+    similarityPrefix: 'task: sentence similarity | query: ',
     backend: 'sentence-embedding',
     // q8 over fp32: ~4x less RAM per container, and bot/worker/web each load a copy.
     dtype: 'q8',
@@ -89,6 +97,8 @@ const LOCAL_MODELS: Record<string, Omit<ModelInfo, 'provider'>> = {
     dim: 384,
     queryPrefix: 'Represent this sentence for searching relevant passages: ',
     passagePrefix: '',
+    // bge's instruction is a retrieval instruction; symmetric pairs take none.
+    similarityPrefix: '',
     // OFF-SPEC: bge is trained with CLS pooling, not mean. Correcting it would change
     // every vector this model produces, so it needs a new `id` (to re-embed via
     // kbStartupReconcile) rather than a silent flip that mismatches stored vectors
@@ -103,6 +113,8 @@ const LOCAL_MODELS: Record<string, Omit<ModelInfo, 'provider'>> = {
     dim: 384,
     queryPrefix: 'query: ',
     passagePrefix: 'passage: ',
+    // e5 uses 'query: ' on both sides for symmetric similarity.
+    similarityPrefix: 'query: ',
     backend: 'pipeline',
     maxTokens: 512,
   },
@@ -131,6 +143,7 @@ export function resolveModel(id?: string): ModelInfo {
       dim: env.EMBEDDING_DIM,
       queryPrefix: '',
       passagePrefix: '',
+      similarityPrefix: '',
       backend: 'pipeline', // unused on the API path
       maxTokens: 8192,
     };
@@ -460,7 +473,15 @@ export function embedContentHash(src: EmbedSource): string {
   );
 }
 
-export type EmbedMode = 'query' | 'passage';
+/**
+ * How a text is being embedded, which selects the model's instruction prefix:
+ *  - 'query' / 'passage' — asymmetric retrieval (a question against stored documents).
+ *  - 'similarity' — SYMMETRIC comparison, both sides embedded the same way. Duplicate
+ *    detection is question-against-question, and using the retrieval pair there costs
+ *    real accuracy: on EmbeddingGemma a genuine duplicate measured 0.67 query-vs-passage
+ *    but 0.90 with a matched prompt on both sides.
+ */
+export type EmbedMode = 'query' | 'passage' | 'similarity';
 
 export interface EmbedOptions {
   mode: EmbedMode;
@@ -494,7 +515,12 @@ export async function embedBatch(texts: string[], opts: EmbedOptions): Promise<E
   if (info.provider === 'openrouter') {
     ({ vectors, tokens } = await embedViaApi(texts, info.apiModel as string, info.dim));
   } else {
-    const prefix = opts.mode === 'query' ? info.queryPrefix : info.passagePrefix;
+    const prefix =
+      opts.mode === 'query'
+        ? info.queryPrefix
+        : opts.mode === 'similarity'
+          ? info.similarityPrefix
+          : info.passagePrefix;
     const inputs = texts.map((t) => prefix + (t ?? '').slice(0, MAX_CHARS));
     const repo = info.repo as string;
     if (info.backend === 'sentence-embedding') {
@@ -525,6 +551,26 @@ export async function embed(texts: string[], opts: EmbedOptions): Promise<number
 }
 
 /** Embed a single text. */
+/**
+ * The text a thread is compared against for duplicate detection: the question that was
+ * asked, and nothing else.
+ *
+ * Deliberately NOT the transcript. A duplicate check asks "has someone asked this
+ * before?", so the accepted answer and the discussion that follows are noise — and they
+ * are precisely what makes a thread long. Excluding them means thread LENGTH cannot
+ * affect this vector at all: a question with 200 replies embeds exactly like the same
+ * question with none, and one vector per thread is always enough. The incoming side of
+ * the comparison is a brand-new post with no replies, so this also keeps both sides the
+ * same shape.
+ *
+ * Only the question itself can overflow, and it is capped at the retrieval chunk budget
+ * rather than the model's full window: a wall-of-text bug report would otherwise let
+ * incidental detail outvote the actual problem, which is stated up front.
+ */
+export function dedupText(title: string, question: string): string {
+  return [title.trim(), question.trim()].filter(Boolean).join('\n').slice(0, CHUNK_CHARS);
+}
+
 export async function embedOne(text: string, opts: EmbedOptions): Promise<number[]> {
   const [vector] = await embed([text], opts);
   if (!vector) throw new Error('embedOne produced no vector');

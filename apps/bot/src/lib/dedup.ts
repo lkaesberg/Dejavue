@@ -295,10 +295,23 @@ async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promis
 
   const searchStarted = Date.now();
   let matches: SearchMatch[];
-  let queryVector: number[] | undefined;
+  // Two different vectors, deliberately. `dedupVector` uses the symmetric similarity
+  // prompt and is compared against other threads' dedup vectors. `fitVector` uses the
+  // retrieval prompt because channel topics are stored as passages (channelFit.ts) —
+  // comparing a similarity-prompted vector against those would shift every score, and
+  // the guard ACTS on that score by closing threads. Only computed when a fit/guard
+  // feature is actually on, so the common path still embeds once.
+  let fitVector: number[] | undefined;
   if (limits.semanticSearch) {
     const { embedOne, embeddingModelId } = await import('@dejavue/ai');
-    queryVector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
+    // 'similarity', not 'query': this is question-against-question, and both sides must
+    // carry the same instruction prompt. The stored side is each thread's 'dedup' vector
+    // (built the same way), so the two are directly comparable — mixing in the retrieval
+    // prompt measurably deflates the score for a genuine duplicate.
+    const dedupVector = await embedOne(query, { mode: 'similarity', model: cfg?.embeddingModel });
+    if (cfg?.channelFitCheck || cfg?.guardEnabled) {
+      fitVector = await embedOne(query, { mode: 'query', model: cfg?.embeddingModel });
+    }
     // Hybrid: direct keyword overlap boosts the similarity, so an identically-
     // worded repost (same error message, same command) ranks above a merely
     // related thread and can clear the sensitivity bar. Keyword-only hits are
@@ -306,11 +319,13 @@ async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promis
     matches = await hybridSearch(db, {
       guildId,
       query,
-      queryVector,
+      queryVector: dedupVector,
       limit: 3,
       minSimilarity: dedupMinSimilarity(cfg?.dedupSensitivity),
       excludeThreadId: thread.id,
       modelId: embeddingModelId(cfg?.embeddingModel),
+      // Compare against the per-thread dedup vectors only, never transcript chunks.
+      sources: ['dedup'],
       includeKeywordOnly: false,
     });
   } else {
@@ -320,8 +335,8 @@ async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promis
 
   // Channel-fit advisory + off-topic guard (Plus+, opt-in). Runs before the no-matches
   // early return. If the guard auto-closes the thread, skip duplicate suggestions.
-  if ((cfg?.channelFitCheck || cfg?.guardEnabled) && forum && queryVector) {
-    const closed = await maybeGuardOrSuggest(thread, forum.id, queryVector, cfg, showBranding, finish);
+  if ((cfg?.channelFitCheck || cfg?.guardEnabled) && forum && fitVector) {
+    const closed = await maybeGuardOrSuggest(thread, forum.id, fitVector, cfg, showBranding, finish);
     if (closed) return;
   }
 

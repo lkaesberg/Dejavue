@@ -6,34 +6,44 @@
  */
 
 /**
- * Cosine thresholds are a property of the EMBEDDING MODEL, not a taste setting: each
- * model spreads similarity differently, so these numbers have to be re-anchored
- * whenever the default model changes. Measured for EmbeddingGemma-300m (768-d):
+ * Cosine thresholds are a property of the EMBEDDING MODEL *and* of the prompt each side
+ * was embedded with, so they must be re-fitted whenever either changes. The two preset
+ * sets below are on DIFFERENT scales and are not comparable with each other.
  *
- *   identical repost   0.93     same area, different question  0.50
- *   near-identical     0.89     same product, unrelated        0.17
- *   paraphrase         0.40     unrelated                      0.11
+ * Duplicate detection compares a new question against each thread's 'dedup' vector —
+ * both embedded with EmbeddingGemma's symmetric similarity prompt. Measured:
  *
- * The previous numbers (0.8 / 0.65 / 0.5) were anchored on bge-small, whose cosine
- * floor is far higher — carried over unchanged they would fire only on near-identical
- * reposts and miss every reworded duplicate.
+ *   exact repost            0.86      adjacent question        0.55
+ *   reworded, same problem  0.68      same domain, other bug   0.63
+ *   paraphrase              0.64      unrelated                0.50
  *
- * PROVISIONAL: the bracket above is a handful of synthetic pairs, not a calibration.
- * Re-fit these against real accepted duplicates (thread.duplicate_of_thread_id) before
- * treating them as settled.
+ * Note the OVERLAP: "same domain, other bug" (0.63) lands between two genuine
+ * paraphrases (0.64, 0.68). No threshold separates those cleanly, so `medium` is set
+ * below the paraphrases and accepts that a same-area question sometimes gets suggested.
+ * That trade is deliberate — a suggestion is dismissible in one click and at most three
+ * are shown, whereas a missed duplicate is the failure users actually notice.
+ *
+ * PROVISIONAL: fitted on a handful of synthetic pairs. Re-fit against real accepted
+ * duplicates (thread.duplicate_of_thread_id) before treating these as settled.
  */
 
 /** Duplicate-suggestion presets: sensitivity name → minimum cosine similarity. */
 export const DEDUP_PRESET_SIMILARITY = {
   /** Only near-identical reposts. */
-  low: 0.85,
+  low: 0.8,
   /** Balanced (default). */
-  medium: 0.55,
+  medium: 0.6,
   /** Also flag loosely-related posts. */
-  high: 0.4,
+  high: 0.5,
 } as const;
 
-/** `/dejavue search` match presets → minimum cosine similarity. */
+/**
+ * `/dejavue search` match presets → minimum cosine similarity.
+ *
+ * A different scale from the dedup presets above: search compares a query-prompted
+ * question against document-prompted retrieval chunks, whose cosines run lower — a
+ * genuine hit measured ~0.67 where the same pair scores ~0.86 symmetrically.
+ */
 export const SEARCH_PRESET_SIMILARITY = {
   broad: 0.25,
   balanced: 0.4,
