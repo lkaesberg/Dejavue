@@ -183,6 +183,13 @@
       "when": 1789082940457,
       "tag": "0025_bumpy_colleen_wing",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789087017912,
+      "tag": "0026_sloppy_captain_stacy",
+      "breakpoints": true
     }
   ]
 }

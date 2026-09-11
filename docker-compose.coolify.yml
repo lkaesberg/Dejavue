@@ -157,6 +157,12 @@ services:
       PORT: '4321'
     expose:
       - '4321'
+    # The web app embeds search queries too (KB search + the MCP endpoint), so under
+    # EMBEDDING_PROVIDER=local it needs the same model cache as bot/worker — otherwise
+    # it re-downloads the ONNX weights into the container on the first search after
+    # every deploy, and that cold start lands on a visitor.
+    volumes:
+      - dejavue_models:/app/.models
     # The HostRegexp below is written out literally, NOT as ${KB_BASE_DOMAIN_REGEX}.
     # Coolify deploys this app with "escape special characters in labels" on, which
     # rewrites every `$` in a label to `$$`. Compose then reads `$$` as a literal `$`,

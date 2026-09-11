@@ -5,21 +5,39 @@
  * numeric string in the same text column as the preset names, so no migration.
  */
 
+/**
+ * Cosine thresholds are a property of the EMBEDDING MODEL, not a taste setting: each
+ * model spreads similarity differently, so these numbers have to be re-anchored
+ * whenever the default model changes. Measured for EmbeddingGemma-300m (768-d):
+ *
+ *   identical repost   0.93     same area, different question  0.50
+ *   near-identical     0.89     same product, unrelated        0.17
+ *   paraphrase         0.40     unrelated                      0.11
+ *
+ * The previous numbers (0.8 / 0.65 / 0.5) were anchored on bge-small, whose cosine
+ * floor is far higher — carried over unchanged they would fire only on near-identical
+ * reposts and miss every reworded duplicate.
+ *
+ * PROVISIONAL: the bracket above is a handful of synthetic pairs, not a calibration.
+ * Re-fit these against real accepted duplicates (thread.duplicate_of_thread_id) before
+ * treating them as settled.
+ */
+
 /** Duplicate-suggestion presets: sensitivity name → minimum cosine similarity. */
 export const DEDUP_PRESET_SIMILARITY = {
   /** Only near-identical reposts. */
-  low: 0.8,
+  low: 0.85,
   /** Balanced (default). */
-  medium: 0.65,
+  medium: 0.55,
   /** Also flag loosely-related posts. */
-  high: 0.5,
+  high: 0.4,
 } as const;
 
 /** `/dejavue search` match presets → minimum cosine similarity. */
 export const SEARCH_PRESET_SIMILARITY = {
-  broad: 0.35,
-  balanced: 0.5,
-  exact: 0.7,
+  broad: 0.25,
+  balanced: 0.4,
+  exact: 0.6,
 } as const;
 
 /** Parse a custom "0"–"100" percentage into a 0–1 similarity, else undefined. */

@@ -1,6 +1,10 @@
 import {
+  AutoModel,
+  AutoTokenizer,
   env as hfEnv,
   type FeatureExtractionPipeline,
+  type PreTrainedModel,
+  type PreTrainedTokenizer,
   pipeline,
 } from '@huggingface/transformers';
 import OpenAI from 'openai';
@@ -23,32 +27,84 @@ export interface ModelInfo {
   /** openrouter: the API model id (e.g. openai/text-embedding-3-large). */
   apiModel?: string;
   /**
-   * Retrieval prefixes (local only). bge/e5 need an asymmetric query/passage
+   * Retrieval prefixes (local only). bge/e5/gemma need an asymmetric query/passage
    * prefix; forgetting them silently degrades retrieval, so the prefix is bound
    * to the model here. OpenAI embedding models are instruction-free (no prefix).
    */
   queryPrefix: string;
   passagePrefix: string;
+  /**
+   * How the local ONNX export turns tokens into one vector (local only):
+   *  - 'pipeline' — feature-extraction + mean pooling over the last hidden state.
+   *    Correct for the e5 family, which is trained with mean pooling.
+   *  - 'sentence-embedding' — the export already contains pooling and the model's
+   *    dense projection head, and emits a `sentence_embedding` output. Pooling the
+   *    hidden states ourselves would BYPASS that head and produce off-spec vectors,
+   *    so these models must go through AutoModel instead of the pipeline.
+   */
+  backend: 'pipeline' | 'sentence-embedding';
+  /** ONNX weight precision (local only). Smaller = less RAM and faster on CPU. */
+  dtype?: 'fp32' | 'fp16' | 'q8' | 'q4';
+  /** Model context window in tokens — bounds how large a chunk may usefully get. */
+  maxTokens: number;
 }
 
-export const DEFAULT_DIM = 384;
+export const DEFAULT_DIM = 768;
 const DEFAULT_OPENROUTER_MODEL = 'openai/text-embedding-3-large';
 
-/** Self-hosted CPU models (Transformers.js). All 384-d so swaps are non-destructive. */
+/**
+ * Self-hosted CPU models (Transformers.js).
+ *
+ * `dim` must match the vector() column in the DB, so switching between models of
+ * DIFFERENT dimensions is a migration + full re-embed, not an env change. The 384-d
+ * entries below are kept for self-hosters who ran the pre-768 schema; on the current
+ * schema only the 768-d models are usable.
+ *
+ * Weights are downloaded from the Hub at runtime rather than vendored, so this repo
+ * redistributes no model files and each model's own licence applies to the operator.
+ */
 const LOCAL_MODELS: Record<string, Omit<ModelInfo, 'provider'>> = {
+  // Default. 300M params, 100+ languages, 768-d (MRL-truncatable to 512/256/128),
+  // 2048-token context. The ONNX export emits `sentence_embedding` — it bundles the
+  // mean pooling AND the two dense projection layers, which is why it can't go
+  // through the feature-extraction pipeline. Licence: Gemma Terms of Use.
+  // NOTE: the upstream card is explicit that activations do NOT support fp16.
+  'embeddinggemma-300m': {
+    id: 'embeddinggemma-300m',
+    repo: 'onnx-community/embeddinggemma-300m-ONNX',
+    dim: 768,
+    // Exact strings from the model card — the task prefix is part of the contract,
+    // and a mismatched one quietly costs retrieval quality.
+    queryPrefix: 'task: search result | query: ',
+    passagePrefix: 'title: none | text: ',
+    backend: 'sentence-embedding',
+    // q8 over fp32: ~4x less RAM per container, and bot/worker/web each load a copy.
+    dtype: 'q8',
+    maxTokens: 2048,
+  },
+  // 384-d, pre-768 schema only.
   'bge-small-en-v1.5': {
     id: 'bge-small-en-v1.5',
     repo: 'Xenova/bge-small-en-v1.5',
     dim: 384,
     queryPrefix: 'Represent this sentence for searching relevant passages: ',
     passagePrefix: '',
+    // OFF-SPEC: bge is trained with CLS pooling, not mean. Correcting it would change
+    // every vector this model produces, so it needs a new `id` (to re-embed via
+    // kbStartupReconcile) rather than a silent flip that mismatches stored vectors
+    // against live queries. Left as-is because the model is no longer the default.
+    backend: 'pipeline',
+    maxTokens: 512,
   },
+  // 384-d, pre-768 schema only. Mean pooling is correct for the e5 family.
   'multilingual-e5-small': {
     id: 'multilingual-e5-small',
     repo: 'Xenova/multilingual-e5-small',
     dim: 384,
     queryPrefix: 'query: ',
     passagePrefix: 'passage: ',
+    backend: 'pipeline',
+    maxTokens: 512,
   },
 };
 
@@ -75,6 +131,8 @@ export function resolveModel(id?: string): ModelInfo {
       dim: env.EMBEDDING_DIM,
       queryPrefix: '',
       passagePrefix: '',
+      backend: 'pipeline', // unused on the API path
+      maxTokens: 8192,
     };
   }
 
@@ -103,14 +161,55 @@ export function embeddingModelId(id?: string): string {
 
 const pipelines = new Map<string, Promise<FeatureExtractionPipeline>>();
 
-function getPipeline(repo: string): Promise<FeatureExtractionPipeline> {
+function getPipeline(repo: string, dtype?: ModelInfo['dtype']): Promise<FeatureExtractionPipeline> {
   let p = pipelines.get(repo);
   if (!p) {
-    log.info({ repo }, 'loading embedding model (first use)');
-    p = pipeline('feature-extraction', repo) as Promise<FeatureExtractionPipeline>;
+    log.info({ repo, dtype }, 'loading embedding model (first use)');
+    p = pipeline('feature-extraction', repo, dtype ? { dtype } : undefined) as Promise<
+      FeatureExtractionPipeline
+    >;
     pipelines.set(repo, p);
   }
   return p;
+}
+
+/** Tokenizer + model for exports that emit `sentence_embedding` (see ModelInfo.backend). */
+type SentenceEncoder = { tokenizer: PreTrainedTokenizer; model: PreTrainedModel };
+const encoders = new Map<string, Promise<SentenceEncoder>>();
+
+function getEncoder(repo: string, dtype?: ModelInfo['dtype']): Promise<SentenceEncoder> {
+  let e = encoders.get(repo);
+  if (!e) {
+    log.info({ repo, dtype }, 'loading sentence-embedding model (first use)');
+    e = (async () => ({
+      tokenizer: await AutoTokenizer.from_pretrained(repo),
+      model: await AutoModel.from_pretrained(repo, dtype ? { dtype } : undefined),
+    }))();
+    encoders.set(repo, e);
+  }
+  return e;
+}
+
+/**
+ * Run an export whose ONNX graph already contains pooling + the dense head. Returns
+ * L2-normalized vectors: the head normalizes already, so this is a cheap no-op that
+ * also guarantees the invariant cosine search depends on.
+ */
+async function encodeSentences(
+  repo: string,
+  inputs: string[],
+  dtype?: ModelInfo['dtype'],
+): Promise<number[][]> {
+  const { tokenizer, model } = await getEncoder(repo, dtype);
+  const tokens = await tokenizer(inputs, { padding: true });
+  const output = await model(tokens);
+  const embedding = output.sentence_embedding;
+  if (!embedding) {
+    throw new Error(
+      `model ${repo} produced no sentence_embedding output — it is not a sentence-embedding export`,
+    );
+  }
+  return (embedding.tolist() as number[][]).map(l2normalize);
 }
 
 // ---------------------------------------------------------------------------
@@ -174,14 +273,18 @@ export interface EmbedSource {
  * Target size of one chunk, in characters (~300 tokens). Small enough that a single
  * topic dominates its vector, large enough that a chunk carries real context.
  */
-const CHUNK_CHARS = 1200;
+// Sized for the active model's context window, with generous headroom: 3000 chars is
+// ~750 tokens against EmbeddingGemma's 2048, so a chunk never silently truncates even
+// on token-dense text (code blocks, CJK). It was 1200 when the default model was
+// bge-small, whose window is 512 tokens — a limit we no longer have.
+const CHUNK_CHARS = 3000;
 /**
  * Messages per chunk. Chunk boundaries are pinned to message POSITIONS, not to a
  * running character count, and that is load-bearing: with length-based packing, editing
  * one message changes its length and re-flows every chunk after it, so a one-word edit
  * would re-embed the whole thread. Position-based boundaries keep an edit local.
  */
-const MESSAGES_PER_CHUNK = 6;
+const MESSAGES_PER_CHUNK = 12;
 /**
  * Index slots reserved per message-group. A group whose messages are unusually long
  * splits into several sub-chunks; reserving a band per group keeps every chunk index
@@ -393,9 +496,14 @@ export async function embedBatch(texts: string[], opts: EmbedOptions): Promise<E
   } else {
     const prefix = opts.mode === 'query' ? info.queryPrefix : info.passagePrefix;
     const inputs = texts.map((t) => prefix + (t ?? '').slice(0, MAX_CHARS));
-    const extractor = await getPipeline(info.repo as string);
-    const output = await extractor(inputs, { pooling: 'mean', normalize: true });
-    vectors = output.tolist() as number[][];
+    const repo = info.repo as string;
+    if (info.backend === 'sentence-embedding') {
+      vectors = await encodeSentences(repo, inputs, info.dtype);
+    } else {
+      const extractor = await getPipeline(repo, info.dtype);
+      const output = await extractor(inputs, { pooling: 'mean', normalize: true });
+      vectors = output.tolist() as number[][];
+    }
     // Local inference costs CPU, not money, but keep the number for comparability.
     tokens = estimateTokens(inputs);
   }

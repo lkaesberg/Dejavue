@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { embed } from '@dejavue/ai';
+import { embed, embeddingModelId } from '@dejavue/ai';
 import {
   closeDb,
   getDb,
@@ -13,7 +13,9 @@ import {
  * Idempotent (upserts), so it can be re-run. Requires Postgres up + migrations applied.
  */
 const GUILD = 'verify-semantic-guild';
-const MODEL = 'bge-small-en-v1.5';
+// Whatever the deployment is configured to use — pinning a model here would break the
+// script the moment its dimension stops matching the vector() column.
+const MODEL = embeddingModelId();
 
 const docs = [
   {

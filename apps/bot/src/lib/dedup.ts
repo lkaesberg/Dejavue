@@ -37,7 +37,9 @@ const DEBOUNCE_MS = 4000;
 const NO_MATCH_TTL_MS = 30_000;
 // How readily to flag a reworded post as a duplicate: the guild's chosen preset
 // or custom similarity % (/dejavue settings) resolves to a cosine floor via
-// dedupMinSimilarity. bge-small cosine for genuine paraphrases sits ~0.65–0.85.
+// dedupMinSimilarity. Those floors are anchored to the active embedding model's
+// cosine spread — see DEDUP_PRESET_SIMILARITY, which documents the measured range
+// for EmbeddingGemma-300m and must be re-fitted if the default model changes.
 
 /** Threads we've already scheduled, so threadCreate + messageCreate collapse to one run. */
 const scheduled = new Set<string>();

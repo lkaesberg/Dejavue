@@ -27,7 +27,9 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
  * multilingual-e5-small) are 384-dim, so model swaps never touch the schema.
  * Changing this is a destructive migration (reindex + re-embed).
  */
-export const EMBEDDING_DIM = 384;
+// Must match the deployed vector() columns AND the active model's output dim.
+// Changing it is a migration (see 0026) plus a full re-embed, never an env flip.
+export const EMBEDDING_DIM = 768;
 
 /** An attachment reference stored on a transcript message. */
 export interface TranscriptAttachment {
