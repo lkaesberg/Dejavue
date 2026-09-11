@@ -45,6 +45,7 @@ import {
   getTopClusters,
   updateGuildConfig,
 } from '@dejavue/db';
+import { embeddingModelId } from '@dejavue/ai';
 import { refreshAllChannelTopics } from './channelFit';
 import { COLOR } from './embeds';
 import { runFaq, runGaps } from './generate';
@@ -234,7 +235,9 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
     .addFields(
       { name: 'Tier', value: tier, inline: true },
       { name: 'Indexed', value: indexValue, inline: true },
-      { name: 'Embedding model', value: cfg?.embeddingModel ?? 'bge-small-en-v1.5', inline: true },
+      // The RESOLVED model, not the stored override: those differ whenever a guild row
+      // predates a model change, and showing the stale value is how this went unnoticed.
+      { name: 'Embedding model', value: embeddingModelId(cfg?.embeddingModel), inline: true },
       ...((limits.aiDrafts || limits.generative)
         ? [
             {

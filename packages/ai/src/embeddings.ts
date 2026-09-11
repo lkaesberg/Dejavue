@@ -149,11 +149,33 @@ export function resolveModel(id?: string): ModelInfo {
     };
   }
 
-  const key = id && LOCAL_MODELS[id] ? id : env.EMBEDDING_MODEL;
+  // A per-guild override is honoured ONLY if its dimension matches the deployment's
+  // vector() column. Guild rows outlive model changes — a guild still carrying
+  // 'bge-small-en-v1.5' (the old column default) would otherwise select a 384-d model on
+  // a 768-d schema, and every embedding insert would be rejected by Postgres while the
+  // bot reported success. Silently falling back is right here: the guild gets the
+  // deployment's model instead of no embeddings at all.
+  const override = id ? LOCAL_MODELS[id] : undefined;
+  if (id && !override) {
+    log.debug({ model: id }, 'ignoring unknown per-guild embedding model');
+  } else if (override && override.dim !== env.EMBEDDING_DIM) {
+    log.warn(
+      { model: id, modelDim: override.dim, columnDim: env.EMBEDDING_DIM },
+      'ignoring per-guild embedding model: wrong dimension for this deployment',
+    );
+  }
+  const key = override && override.dim === env.EMBEDDING_DIM ? (id as string) : env.EMBEDDING_MODEL;
   const info = LOCAL_MODELS[key];
   if (!info) {
     throw new Error(
       `unknown local embedding model "${key}" (known: ${Object.keys(LOCAL_MODELS).join(', ')})`,
+    );
+  }
+  if (info.dim !== env.EMBEDDING_DIM) {
+    // Fail loudly at resolve time rather than as an opaque insert error per thread.
+    throw new Error(
+      `embedding model "${info.id}" is ${info.dim}-d but EMBEDDING_DIM is ${env.EMBEDDING_DIM} — ` +
+        'they must match the vector() column; changing dimension needs a migration.',
     );
   }
   return { ...info, provider: 'local' };

@@ -176,7 +176,9 @@ export const guildConfig = pgTable('guild_config', {
   // Per-guild forum tag snowflakes — never hardcoded constants.
   solvedTagId: text('solved_tag_id'),
   unsolvedTagId: text('unsolved_tag_id'),
-  embeddingModel: text('embedding_model').notNull().default('bge-small-en-v1.5'),
+  // Per-guild model override. Must stay dimension-compatible with the vec columns —
+  // resolveModel ignores a row whose model has the wrong dim rather than trusting it.
+  embeddingModel: text('embedding_model').notNull().default('embeddinggemma-300m'),
   // Stale-question nudges (Plus+)
   nudgeEnabled: boolean('nudge_enabled').notNull().default(false),
   nudgeAfterHours: integer('nudge_after_hours').notNull().default(24),
