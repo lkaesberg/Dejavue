@@ -22,7 +22,6 @@ import {
   getDb,
   recordPurchaseIntent,
   isSlugTaken,
-  getGuildConfig,
   type GuildConfig,
   type KbAccent,
   type KbCorners,
@@ -35,6 +34,7 @@ import {
 } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
 import { checkDomainDns, dnsInstructions } from './domainDns';
+import { assertRowBudget, type HubCtx, hubCtx, navRow } from './hubNav';
 import { COLOR } from './embeds';
 import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
@@ -44,28 +44,53 @@ import { upsellPayload } from './upsell';
 const log = childLogger({ mod: 'cmd:customize' });
 
 // ---------------------------------------------------------------------------
-// One command — `/dejavue customize` — replaces the old `kb` + `domain` commands
-// and covers the design's full set of KB-customization options. It posts an
-// ephemeral *hub* (appearance selects + buttons); text fields are entered in a
-// modal that pops up from the "Edit details" / "Imprint" buttons.
+// One command — `/dejavue website` (formerly `/dejavue customize`) — covers
+// everything about the public knowledge-base site. It posts an ephemeral *hub*;
+// text fields are entered in modals opened from its buttons.
+//
+// The hub has two PAGES because appearance needs four select menus, and four
+// selects plus a nav row is exactly Discord's five-row limit — there was no room
+// left for the buttons. Splitting them also puts the things an admin sets once
+// (name, address, privacy, imprint) on a different screen from the things they
+// fiddle with (theme, accent, corners, font).
+//
+// The `dejavue:cust:` prefix is deliberately unchanged despite the rename: the
+// command name is user-facing, the custom ids are not, and keeping them means
+// hubs opened before a deploy keep working.
 // ---------------------------------------------------------------------------
 
 export const CUST_PREFIX = 'dejavue:cust:';
+
+export type WebsitePageId = 'site' | 'appearance';
+const DEFAULT_PAGE: WebsitePageId = 'site';
+
+const id = (page: WebsitePageId, control: string): string => `${CUST_PREFIX}${page}:${control}`;
+
 const ID = {
-  theme: `${CUST_PREFIX}theme`,
-  accent: `${CUST_PREFIX}accent`,
-  corners: `${CUST_PREFIX}corners`,
-  font: `${CUST_PREFIX}font`,
-  details: `${CUST_PREFIX}details`,
-  imprint: `${CUST_PREFIX}imprint`,
-  publish: `${CUST_PREFIX}publish`,
-  detailsModal: `${CUST_PREFIX}details-modal`,
-  imprintModal: `${CUST_PREFIX}imprint-modal`,
+  // site page
+  details: id('site', 'details'),
+  imprint: id('site', 'imprint'),
+  publish: id('site', 'publish'),
+  appearance: id('site', 'appearance'),
+  back: id('site', 'back'),
+  detailsModal: id('site', 'details-modal'),
+  imprintModal: id('site', 'imprint-modal'),
+  // appearance page
+  theme: id('appearance', 'theme'),
+  accent: id('appearance', 'accent'),
+  corners: id('appearance', 'corners'),
+  font: id('appearance', 'font'),
 } as const;
 
-/** True for any interaction belonging to the customize hub (routed in interactionCreate). */
+/** True for any interaction belonging to the website hub (routed in interactionCreate). */
 export function isCustomizeInteraction(customId: string): boolean {
   return customId.startsWith(CUST_PREFIX);
+}
+
+/** The page a website-hub customId belongs to. Unknown ids fall back to the site page. */
+function pageOf(customId: string): WebsitePageId {
+  const seg = customId.slice(CUST_PREFIX.length).split(':')[0];
+  return seg === 'appearance' ? 'appearance' : DEFAULT_PAGE;
 }
 
 // ---- option lists (mirror the design's appearance dock) -------------------
@@ -122,25 +147,64 @@ function appearanceRow(
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
 }
 
-/** Build the whole hub message (embed + components) for a guild's current config. */
-function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMessageOptions {
+/**
+ * Build the hub for one page. `page` is required, not optional — an optional
+ * parameter would silently render the site page from every existing call site,
+ * which is exactly the state loss the pages are meant to avoid.
+ */
+export function websiteHubPayload(
+  cfg: GuildConfig,
+  tier: Tier,
+  kbBaseDomain: string,
+  page: WebsitePageId,
+  ctx: HubCtx,
+): BaseMessageOptions {
   // Appearance is available on every tier; `paid` now only drives branding-related copy.
   const paid = tierAtLeast(tier, 'plus');
   const limits = limitsFor(tier);
   const url = cfg.kbSlug ? `https://${cfg.kbSlug}.${kbBaseDomain}` : '—';
-  const brand = cfg.brandName?.trim() || cfg.kbSlug || '(uses slug)';
+  const brand = cfg.brandName?.trim() || cfg.kbSlug || '(uses the address)';
   const imprintOk = imprintComplete(cfg.kbImprint);
   const needsImprint = isPubliclyLive(cfg) && !imprintOk;
 
+  if (page === 'appearance') {
+    const embed = new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle('🎨 Website ▸ Appearance')
+      .setDescription(
+        'How your public site looks. Changes apply to the live site straight away — there is nothing to save.' +
+          (paid ? '' : '\n\nUpgrade to **Plus** to remove the Dejavue branding and the ad from your site.'),
+      )
+      .addFields(
+        { name: 'Theme', value: labelFor(THEME_OPTS, cfg.kbTheme), inline: true },
+        { name: 'Accent', value: labelFor(ACCENT_OPTS, cfg.kbAccent), inline: true },
+        { name: 'Corners', value: labelFor(CORNER_OPTS, cfg.kbCorners), inline: true },
+        { name: 'Heading font', value: labelFor(FONT_OPTS, cfg.kbHeadingFont), inline: true },
+      );
+    return {
+      embeds: [embed],
+      // Four selects + the nav row is exactly five. Nothing else fits on this page,
+      // which is why the nav row's Website slot becomes "◀ Back" instead of a
+      // separate button.
+      components: assertRowBudget(
+        [
+          appearanceRow(ID.theme, 'Theme', THEME_OPTS, cfg.kbTheme, false),
+          appearanceRow(ID.accent, 'Accent colour', ACCENT_OPTS, cfg.kbAccent, false),
+          appearanceRow(ID.corners, 'Corner style', CORNER_OPTS, cfg.kbCorners, false),
+          appearanceRow(ID.font, 'Heading font', FONT_OPTS, cfg.kbHeadingFont, false),
+          navRow('website', { admin: ctx.admin, backTo: ID.back }),
+        ],
+        'website:appearance',
+      ),
+    };
+  }
+
   const embed = new EmbedBuilder()
     .setColor(COLOR)
-    .setTitle('🎨 Customize your knowledge base')
+    .setTitle('🌐 Your knowledge-base website')
     .setDescription(
-      (paid
-        ? 'Pick a theme, accent, corners and heading font below — they apply to your live site instantly. ' +
-          'Use **Edit details** for the name, slug, domain and passphrase.'
-        : 'Pick a theme, accent, corners and heading font below — they apply to your live site instantly. ' +
-          'Upgrade to **Plus** to remove the Dejavue branding from your site.') +
+      'Everything Dejavue indexes can also be published as a searchable website — good for SEO, and for people who never joined your server.\n\n' +
+        'Use **Edit details** for the name, web address and passphrase, **Appearance** for how it looks, and **Imprint** for the legal notice a public site needs.' +
         // Ads run on Free knowledge bases, and the pages carry a community's own
         // content — its admins should learn that here rather than by discovering it
         // on their live site.
@@ -155,20 +219,30 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
           : ''),
     )
     .addFields(
-      { name: 'Brand name', value: brand, inline: true },
-      { name: 'Public URL', value: cfg.customDomain ? `https://${cfg.customDomain}` : url, inline: true },
-      { name: 'Public site', value: cfg.kbPublishOptIn ? '✅ on' : '⛔ off', inline: true },
-      { name: 'Privacy', value: cfg.kbPassphraseHash ? '🔒 passphrase' : '🌐 public', inline: true },
-      { name: 'Theme', value: labelFor(THEME_OPTS, cfg.kbTheme), inline: true },
-      { name: 'Accent', value: labelFor(ACCENT_OPTS, cfg.kbAccent), inline: true },
-      { name: 'Corners', value: labelFor(CORNER_OPTS, cfg.kbCorners), inline: true },
-      { name: 'Heading font', value: labelFor(FONT_OPTS, cfg.kbHeadingFont), inline: true },
-      { name: 'Imprint', value: imprintOk ? '✅ set' : needsImprint ? '⚠️ required — site is public' : '— not set', inline: true },
+      { name: 'Public site', value: cfg.kbPublishOptIn ? '✅ on' : '⛔ off — nothing is published', inline: true },
+      { name: 'Web address', value: cfg.customDomain ? `https://${cfg.customDomain}` : url, inline: true },
+      { name: 'Name shown on it', value: brand, inline: true },
+      {
+        name: 'Who can read it',
+        value: cfg.kbPassphraseHash ? '🔒 anyone with the passphrase' : '🌐 anyone on the internet',
+        inline: true,
+      },
+      {
+        name: 'Imprint',
+        value: imprintOk ? '✅ set' : needsImprint ? '⚠️ required — the site is public' : '— not set',
+        inline: true,
+      },
+      {
+        name: 'Look',
+        value: `${labelFor(THEME_OPTS, cfg.kbTheme)} · ${labelFor(ACCENT_OPTS, cfg.kbAccent)} · ${labelFor(CORNER_OPTS, cfg.kbCorners)}`,
+        inline: true,
+      },
     );
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(ID.details).setLabel('Edit details…').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(ID.imprint).setLabel('Imprint…').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(ID.appearance).setLabel('Appearance…').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(ID.imprint).setLabel('Imprint…').setEmoji('⚖️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(ID.publish)
       .setLabel(cfg.kbPublishOptIn ? 'Turn site off' : 'Turn site on')
@@ -178,14 +252,19 @@ function hubPayload(cfg: GuildConfig, tier: Tier, kbBaseDomain: string): BaseMes
 
   return {
     embeds: [embed],
-    components: [
-      appearanceRow(ID.theme, 'Theme', THEME_OPTS, cfg.kbTheme, !paid),
-      appearanceRow(ID.accent, 'Accent color', ACCENT_OPTS, cfg.kbAccent, !paid),
-      appearanceRow(ID.corners, 'Corner style', CORNER_OPTS, cfg.kbCorners, !paid),
-      appearanceRow(ID.font, 'Heading font', FONT_OPTS, cfg.kbHeadingFont, !paid),
-      buttons,
-    ],
+    components: assertRowBudget([buttons, navRow('website', { admin: ctx.admin })], 'website:site'),
   };
+}
+
+/** Build the website hub for a guild, fetching the config and tier itself. */
+export async function renderWebsiteHub(
+  guildId: string,
+  page: WebsitePageId,
+  ctx: HubCtx,
+): Promise<BaseMessageOptions> {
+  const cfg = await ensureGuildConfig(getDb(), guildId);
+  const tier = await getGuildTier(guildId);
+  return websiteHubPayload(cfg, tier, getEnv().KB_BASE_DOMAIN, page, ctx);
 }
 
 function detailsModal(cfg: GuildConfig): ModalBuilder {
@@ -287,28 +366,36 @@ function imprintRequiredPayload(): BaseMessageOptions {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/** `/dejavue customize` entry — posts the hub (admin only). */
-export async function handleCustomize(interaction: ChatInputCommandInteraction): Promise<void> {
+/**
+ * `/dejavue website` entry — posts the hub (admin only).
+ *
+ * Also serves the deprecated `/dejavue customize` alias, which gets a one-line
+ * note about the new name rather than a dead end.
+ */
+export async function handleWebsite(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    await interaction.reply(eph('You need the **Manage Server** permission to customize the knowledge base.'));
+    await interaction.reply(eph('You need the **Manage Server** permission to change the website.'));
     return;
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const guildId = interaction.guildId!;
-  const db = getDb();
-  const cfg = await ensureGuildConfig(db, guildId);
-  const tier = await getGuildTier(guildId);
-  await interaction.editReply(hubPayload(cfg, tier, getEnv().KB_BASE_DOMAIN));
+  const renamed = interaction.options.getSubcommand(false) === 'customize';
+  await interaction.editReply({
+    ...(await renderWebsiteHub(interaction.guildId!, DEFAULT_PAGE, hubCtx(interaction))),
+    ...(renamed ? { content: '_`/dejavue customize` is now `/dejavue website`._' } : {}),
+  });
 }
 
+/**
+ * Redraw the hub in place. The page comes from the custom id that fired, so a
+ * theme change lands back on Appearance and a publish toggle lands back on the
+ * site page — `page` lets a caller override that (the Appearance button).
+ */
 async function rerender(
   interaction: StringSelectMenuInteraction | ButtonInteraction | ModalSubmitInteraction,
   guildId: string,
+  page: WebsitePageId = pageOf(interaction.customId),
 ): Promise<void> {
-  const cfg = await getGuildConfig(getDb(), guildId);
-  if (!cfg) return;
-  const tier = await getGuildTier(guildId);
-  const payload = hubPayload(cfg, tier, getEnv().KB_BASE_DOMAIN);
+  const payload = await renderWebsiteHub(guildId, page, hubCtx(interaction));
   if (interaction.isModalSubmit()) {
     if (interaction.isFromMessage()) await interaction.update(payload);
     return;
@@ -344,6 +431,15 @@ export async function handleCustomizeButton(interaction: ButtonInteraction): Pro
   }
   if (interaction.customId === ID.imprint) {
     await interaction.showModal(imprintModal(cfg));
+    return;
+  }
+  // Page moves: no config change, just redraw the other page.
+  if (interaction.customId === ID.appearance) {
+    await rerender(interaction, guildId, 'appearance');
+    return;
+  }
+  if (interaction.customId === ID.back) {
+    await rerender(interaction, guildId, 'site');
     return;
   }
   if (interaction.customId === ID.publish) {

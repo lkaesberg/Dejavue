@@ -4,7 +4,7 @@ import type { GuildConfig } from '@dejavue/db';
 import { brandOf, brandInitial, themeVars } from './theme';
 
 // A private knowledge base is protected by one shared passphrase (set in
-// `/dejavue customize`). On unlock we set a signed, HttpOnly cookie so the visitor
+// `/dejavue website`). On unlock we set a signed, HttpOnly cookie so the visitor
 // stays in without re-entering it. The cookie is an HMAC over the guild id AND the
 // current passphrase hash, so it can't be forged, is scoped to this tenant, and —
 // critically — every existing cookie is invalidated the moment the admin changes the

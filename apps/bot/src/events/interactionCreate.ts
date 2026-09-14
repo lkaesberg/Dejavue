@@ -38,7 +38,10 @@ import {
   handleHubSelect,
   isHubInteraction,
 } from '../lib/hubs';
+import { isNavInteraction } from '../lib/hubNav';
+import { handleNavButton } from '../lib/hubRouter';
 import { missingBotPermissions } from '../lib/botPerms';
+import { showBrandingFor } from '../lib/branding';
 import {
   applyTag,
   ensureForumTags,
@@ -50,14 +53,9 @@ import {
 import { canResolveThread, isThreadAsker, NO_PERMISSION_MESSAGE } from '../lib/permissions';
 import { eph, safeReply } from '../lib/reply';
 import { closeThread, solveThread } from '../lib/solve';
-import { getGuildTier, limitsFor } from '../lib/tier';
 import { contextByName, slashByName } from '../commands/registry';
 
 const log = childLogger({ mod: 'event:interaction' });
-
-async function showBrandingFor(guildId: string): Promise<boolean> {
-  return !limitsFor(await getGuildTier(guildId)).removeBranding;
-}
 
 /** Borrow a previous solved post's answer into this thread and mark it solved + duplicate. */
 async function acceptDuplicate(
@@ -327,8 +325,11 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     } else if (interaction.isMessageContextMenuCommand()) {
       await contextByName.get(interaction.commandName)?.execute(interaction);
     } else if (interaction.isButton()) {
-      // Hubs (customize / settings / setup / insights) run anywhere, so route them first.
-      if (isCustomizeInteraction(interaction.customId)) await handleCustomizeButton(interaction);
+      // Nav first: handleHubButton admin-gates everything it doesn't recognise
+      // early, and Insights/Help are open to every member.
+      if (isNavInteraction(interaction.customId)) await handleNavButton(interaction);
+      // Hubs (website / settings / dashboard / insights) run anywhere, so route them next.
+      else if (isCustomizeInteraction(interaction.customId)) await handleCustomizeButton(interaction);
       else if (isHubInteraction(interaction.customId)) await handleHubButton(interaction);
       else await handleButton(interaction);
     } else if (interaction.isStringSelectMenu()) {
@@ -345,7 +346,7 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     log.error({ err }, 'interaction handler failed');
     await safeReply(
       interaction,
-      '⚠️ Something went wrong handling that — please try again in a moment. If it keeps happening, check that I have the permissions listed in `/dejavue setup`.',
+      '⚠️ Something went wrong handling that — please try again in a moment. If it keeps happening, check that I have the permissions listed in `/dejavue dashboard`.',
     );
   }
 }

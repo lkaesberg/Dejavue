@@ -146,29 +146,45 @@ It's useful for any server where the same questions keep coming back:
 
 ### Next steps
 
-- `/dejavue customize` — set up your public website: branding, theme, custom domain and privacy
-- `/dejavue settings` — turn nudges, channel-fit suggestions and the off-topic guard on or off
-- `/dejavue insights` — see stats, analytics, recurring-question clusters and the auto-FAQ
-
-> 💡 Run `/dejavue setup` with no channel to open the channel manager and review everything you've
-> indexed.
+- `/dejavue dashboard` — your home screen: every indexed channel, how fresh it is, and buttons
+  through to everything below
+- `/dejavue settings` — duplicate sensitivity, stale-question nudges, the off-topic guard and
+  cleanup, one page each with a plain-English explanation
+- `/dejavue website` — set up your public site: name, address, theme, privacy and imprint
+- `/dejavue insights` — stats, analytics, recurring-question clusters and the auto-FAQ
 
 ---
 
 ## 📝 Commands
 
 Everything lives under one `/dejavue` command, plus a **Mark as Answer** message context menu.
+Every admin screen links to every other one, so `/dejavue dashboard` is enough to find the rest.
 
 | Command | Description | Who |
 |---------|-------------|-----|
-| `/dejavue setup [channel] [mode]` | Add a channel, or run it alone to view & manage indexed channels | admin |
-| `/dejavue rescan [channel]` | Re-scan a channel's full history and remove deleted posts | admin |
-| `/dejavue settings` | Toggle nudges, channel-fit suggestions & the off-topic guard | admin |
-| `/dejavue customize` | Customize your public website — branding, theme, domain & privacy | admin |
-| `/dejavue insights` | Stats, analytics, recurring-question clusters & the auto-FAQ | anyone |
-| `/dejavue search <query> [match] [threshold]` | Search your knowledge base | anyone |
-| `/dejavue help` | Learn how Dejavue works | anyone |
+| `/dejavue dashboard` | See what Dejavue is watching — channels, index size, sync status and your plan | admin |
+| `/dejavue setup <channel> [mode]` | Start indexing a channel — forum, text or announcement | admin |
+| `/dejavue search <query> [match] [threshold]` | Search every answer Dejavue has archived | anyone |
+| `/dejavue insights` | Stats, resolution rate, top helpers, most-asked topics and the auto-FAQ | anyone |
+| `/dejavue settings` | Duplicate detection, stale-question nudges, the off-topic guard and cleanup | admin |
+| `/dejavue website` | Your public knowledge-base site — name, address, theme, privacy and imprint | admin |
+| `/dejavue rescan [channel]` | Re-read a channel's full history and drop posts that were deleted | admin |
+| `/dejavue help` | What Dejavue does, and every command explained | anyone |
 | **Mark as Answer** (right-click a message → Apps) | Mark that reply as the accepted answer | OP/mod/admin |
+
+> `/dejavue customize` was renamed to `/dejavue website`. The old name still works for now and
+> points you at the new one.
+
+### Settings
+
+`/dejavue settings` opens one page per feature. None of them are locked behind a paid plan.
+
+| Page | What it controls |
+|------|------------------|
+| 🔁 Duplicate detection | How closely a new question must match an archived one before I suggest it. Presets, or an exact minimum match % |
+| ⏰ Stale-question nudges | Whether to chase up unanswered questions, after how long, and which role to ping |
+| 🧭 Channel routing & off-topic guard | Gentle "might fit better in #other" suggestions, and the stricter guard that warns on — and optionally closes — clearly off-topic posts |
+| 🧹 Cleanup & branding | Whether my "Got your answer?" prompt is deleted when a post is solved, and whether the "Powered by Dejavue" footer is shown (always on for Free) |
 
 ### Options
 
@@ -178,11 +194,19 @@ Everything lives under one `/dejavue` command, plus a **Mark as Answer** message
 | `match` | `broad`, `balanced`, `exact` | How closely search results must match. Default: `balanced` |
 | `threshold` | `0`–`100` | Custom minimum match percentage — overrides the `match` preset |
 
+> ⚠️ The search `threshold` and the duplicate-detection sensitivity in `/dejavue settings` are both
+> percentages, but they are **not on the same scale** — search compares a question against retrieval
+> chunks, duplicate detection compares two questions, and the same genuine match scores much higher
+> in the second. Tune each against its own results, not against the other's number.
+
 ### Important: Bot Permissions
 
 Dejavue needs **View Channels, Manage Channels, Send Messages, Embed Links, Read Message History,
 Manage Threads** and **Send Messages in Threads**. Manage Channels is what lets it create and swap
 the `solved` / `unsolved` forum tags — without it, tag automation fails.
+
+**View Audit Log** is optional. It is used once, to work out who added the bot so the setup
+walkthrough can be sent to them by DM; without it, that DM goes to the server owner instead.
 
 The **Message Content** privileged intent must be enabled, since Dejavue reads question text to
 detect duplicates.

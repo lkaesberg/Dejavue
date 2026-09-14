@@ -59,7 +59,7 @@ export interface TranscriptMessage {
   reactions?: number;
 }
 
-/** Public KB appearance, set by the admin via `/dejavue customize` (Plus+). */
+/** Public KB appearance, set by the admin via `/dejavue website`. Every tier. */
 export type KbTheme = 'light' | 'dark';
 export type KbAccent = 'indigo' | 'blue' | 'teal' | 'violet' | 'amber';
 export type KbCorners = 'rounded' | 'sharp';
@@ -179,11 +179,12 @@ export const guildConfig = pgTable('guild_config', {
   // Per-guild model override. Must stay dimension-compatible with the vec columns —
   // resolveModel ignores a row whose model has the wrong dim rather than trusting it.
   embeddingModel: text('embedding_model').notNull().default('embeddinggemma-300m'),
-  // Stale-question nudges (Plus+)
+  // Stale-question nudges. NOT tier-gated — tierLimits gives every tier nudges,
+  // and nothing reads limits.nudges. Exposed in `/dejavue settings`.
   nudgeEnabled: boolean('nudge_enabled').notNull().default(false),
   nudgeAfterHours: integer('nudge_after_hours').notNull().default(24),
   nudgeHelperRoleId: text('nudge_helper_role_id'),
-  // Public web KB — OFF by default; opt in via /dejavue customize, which requires a slug
+  // Public web KB — OFF by default; opt in via /dejavue website, which requires a slug
   // or custom domain (and a complete imprint) before the site can go live.
   kbPublishOptIn: boolean('kb_publish_opt_in').notNull().default(false),
   kbSlug: text('kb_slug').unique(),
@@ -192,13 +193,15 @@ export const guildConfig = pgTable('guild_config', {
   // Custom-domain feature unlock — set true when the consumable custom-domain SKU is
   // bought (recorded here permanently, since the consumable entitlement is consumed).
   customDomainUnlocked: boolean('custom_domain_unlocked').notNull().default(false),
-  // "powered by Dejavue" branding (forced on for Free tier regardless of this flag)
+  // "Powered by Dejavue" branding, toggled in `/dejavue settings` ▸ Cleanup &
+  // branding. Forced on for Free regardless of this flag — see showBrandingFor,
+  // which is the only thing that should read it.
   brandingEnabled: boolean('branding_enabled').notNull().default(true),
-  // Channel-fit check (Plus+): embed each monitored channel's name + description and,
+  // Channel-fit check (every tier): embed each monitored channel's name + description and,
   // when a new question is posted, suggest a better-fitting channel if one scores
   // notably higher. See the channel_topic table for the stored topic vectors.
   channelFitCheck: boolean('channel_fit_check').notNull().default(false),
-  // ---- Off-topic guard (Plus+): the channel-fit check, escalated. When a post is
+  // ---- Off-topic guard (every tier): the channel-fit check, escalated. When a post is
   // clearly off-topic it's warned about; with auto-close on, it's tagged
   // "wrong-channel" and the thread is closed. Sensitivity tunes the confidence bar.
   guardEnabled: boolean('guard_enabled').notNull().default(false),
@@ -206,7 +209,7 @@ export const guildConfig = pgTable('guild_config', {
   guardSensitivity: text('guard_sensitivity').$type<GuardSensitivity>().notNull().default('medium'),
   wrongChannelTagId: text('wrong_channel_tag_id'),
   // How readily a new post is suggested as a duplicate of an existing one (semantic
-  // dedup, Plus+). Either a preset name ('low' | 'medium' | 'high') or a custom
+  // dedup, every tier). Either a preset name ('low' | 'medium' | 'high') or a custom
   // minimum-similarity percentage stored as a numeric string ('0'–'100') — resolved
   // by dedupMinSimilarity in @dejavue/core.
   dedupSensitivity: text('dedup_sensitivity').$type<DedupSensitivity>().notNull().default('medium'),
@@ -216,8 +219,8 @@ export const guildConfig = pgTable('guild_config', {
   // ---- Tracked normal (non-forum) channels: indexed as searchable KB content with
   // a quota separate from the forum archive. A flat list of text/announcement channel ids.
   trackedChannelIds: text('tracked_channel_ids').array().notNull().default(emptyTextArray),
-  // ---- Public KB customization (`/dejavue customize`). Appearance is Plus+; brand /
-  // slug / passphrase work on any tier.
+  // ---- Public KB customization (`/dejavue website`). Every tier; what Plus buys
+  // is removing the branding and the ad.
   brandName: text('brand_name'),
   kbTheme: text('kb_theme').$type<KbTheme>().notNull().default('light'),
   kbAccent: text('kb_accent').$type<KbAccent>().notNull().default('indigo'),

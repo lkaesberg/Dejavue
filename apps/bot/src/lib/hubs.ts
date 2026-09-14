@@ -11,8 +11,6 @@ import {
   MessageFlags,
   ModalBuilder,
   type ModalSubmitInteraction,
-  PermissionFlagsBits,
-  RoleSelectMenuBuilder,
   type RoleSelectMenuInteraction,
   StringSelectMenuBuilder,
   type StringSelectMenuInteraction,
@@ -23,7 +21,6 @@ import {
   activeForumChannels,
   APPROX_CREDITS_PER_FEATURE,
   customSimilarity,
-  dedupSettingLabel,
   getEnv,
 } from '@dejavue/core';
 import {
@@ -47,11 +44,23 @@ import {
 } from '@dejavue/db';
 import { embeddingModelId } from '@dejavue/ai';
 import { refreshAllChannelTopics } from './channelFit';
+import { showBrandingFor } from './branding';
 import { COLOR } from './embeds';
 import { runFaq, runGaps } from './generate';
+import { assertRowBudget, type HubCtx, hubCtx, type HubId, isHubAdmin, navRow } from './hubNav';
 import { imprintComplete, isPubliclyLive } from './kbGate';
 import { eph } from './reply';
 import { allTargets, startReindex } from './reindexTrigger';
+import {
+  ctrl,
+  DEFAULT_PAGE,
+  isSettingsInteraction,
+  PAGER_ID,
+  pageOf,
+  pagerRow,
+  type SettingsPageId,
+  settingsPage,
+} from './settingsPages';
 import { channelSyncDisplay, joinChannelLines, type LiveJobDisplay } from './syncDisplay';
 import { getGuildTier, limitsFor } from './tier';
 import { prepareTopUpSkus } from './topUp';
@@ -60,118 +69,49 @@ import { premiumButtonRows } from './upsell';
 const PREFIX = 'dv:';
 export const isHubInteraction = (id: string): boolean => id.startsWith(PREFIX);
 
+/** Dashboard and insights controls. Settings ids are built by `ctrl()`. */
 const ID = {
-  // settings hub
-  nudges: 'dv:set:nudges',
-  fit: 'dv:set:fit',
-  guard: 'dv:set:guard',
-  guardac: 'dv:set:guardac',
-  gsens: 'dv:set:gsens',
-  dedup: 'dv:set:dedup',
-  dedupModal: 'dv:set:dedupmodal',
-  nudgehours: 'dv:set:nudgehours',
-  nudgerole: 'dv:set:nudgerole',
-  // setup (channel) hub
-  reindexAll: 'dv:setup:reindex',
-  demo: 'dv:setup:demo',
-  remove: 'dv:setup:remove',
+  // dashboard
+  rescanAll: 'dv:d:rescan',
+  demo: 'dv:d:demo',
+  remove: 'dv:d:remove',
   // insights
-  gaps: 'dv:ins:gaps',
-  faq: 'dv:ins:faq',
+  gaps: 'dv:i:gaps',
+  faq: 'dv:i:faq',
 } as const;
 
-const isAdmin = (i: { memberPermissions?: { has(p: bigint): boolean } | null }): boolean =>
-  !!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+/** The custom dedup threshold modal. Carries its page so the hub re-renders in place. */
+const DEDUP_MODAL_ID = ctrl('duplicates', 'custommodal');
+
+const isAdmin = isHubAdmin;
+
+export { hubCtx, type HubCtx };
 
 // ---------------------------------------------------------------------------
-// Settings hub — stale nudges, channel-fit, off-topic guard (all Plus)
+// Settings hub — one page per feature, each explaining itself
 // ---------------------------------------------------------------------------
 
-function toggleBtn(id: string, label: string, on: boolean): ButtonBuilder {
-  return new ButtonBuilder()
-    .setCustomId(id)
-    .setLabel(label)
-    .setStyle(on ? ButtonStyle.Success : ButtonStyle.Secondary);
-}
-
-export async function renderSettingsHub(guildId: string): Promise<BaseMessageOptions> {
+export async function renderSettingsHub(
+  guildId: string,
+  page: SettingsPageId,
+  ctx: HubCtx,
+): Promise<BaseMessageOptions> {
   const cfg = await ensureGuildConfig(getDb(), guildId);
-  const onOff = (b: boolean): string => (b ? 'on' : 'off');
+  const limits = limitsFor(await getGuildTier(guildId));
+  const pageCtx = { brandingLocked: !limits.removeBranding };
+  const def = settingsPage(page);
+
   const embed = new EmbedBuilder()
     .setColor(COLOR)
-    .setTitle('Dejavue settings')
-    .setDescription('Automated helpers for your channels.')
-    .addFields(
-      {
-        name: 'Stale-question nudges',
-        value: cfg.nudgeEnabled
-          ? `on · after ${cfg.nudgeAfterHours}h${cfg.nudgeHelperRoleId ? ` → <@&${cfg.nudgeHelperRoleId}>` : ''}`
-          : 'off',
-      },
-      { name: 'Channel-fit suggestions', value: onOff(cfg.channelFitCheck), inline: true },
-      {
-        name: 'Off-topic guard',
-        value: cfg.guardEnabled
-          ? `on · ${cfg.guardAutoClose ? 'auto-close · ' : ''}${cfg.guardSensitivity}`
-          : 'off',
-        inline: true,
-      },
-      { name: 'Duplicate suggestions', value: dedupSettingLabel(cfg.dedupSensitivity), inline: true },
-    );
-  const toggles = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    toggleBtn(ID.nudges, `Nudges: ${onOff(cfg.nudgeEnabled)}`, cfg.nudgeEnabled),
-    toggleBtn(ID.fit, `Fit-check: ${onOff(cfg.channelFitCheck)}`, cfg.channelFitCheck),
-    toggleBtn(ID.guard, `Guard: ${onOff(cfg.guardEnabled)}`, cfg.guardEnabled),
-    toggleBtn(ID.guardac, `Auto-close: ${onOff(cfg.guardAutoClose)}`, cfg.guardAutoClose),
+    .setTitle(`${def.emoji} ${def.title}`)
+    .setDescription(def.explain)
+    .addFields(def.fields(cfg, pageCtx));
+
+  const components = assertRowBudget(
+    [pagerRow(page), ...def.rows(cfg, pageCtx), navRow('settings', { admin: ctx.admin })],
+    `settings:${page}`,
   );
-  const sens = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(ID.gsens)
-      .setPlaceholder(`Guard sensitivity: ${cfg.guardSensitivity}`)
-      .addOptions(
-        { label: 'Guard: low — only the most obvious', value: 'low', default: cfg.guardSensitivity === 'low' },
-        { label: 'Guard: medium — balanced', value: 'medium', default: cfg.guardSensitivity === 'medium' },
-        { label: 'Guard: high — flag aggressively', value: 'high', default: cfg.guardSensitivity === 'high' },
-      ),
-  );
-  const dedupIsCustom = customSimilarity(cfg.dedupSensitivity) !== undefined;
-  const dedup = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(ID.dedup)
-      .setPlaceholder(`Duplicate suggestions: ${dedupSettingLabel(cfg.dedupSensitivity)}`)
-      .addOptions(
-        { label: 'Duplicates: low — only near-identical reposts', value: 'low', default: cfg.dedupSensitivity === 'low' },
-        { label: 'Duplicates: medium — balanced', value: 'medium', default: cfg.dedupSensitivity === 'medium' },
-        { label: 'Duplicates: high — also flag loosely-related', value: 'high', default: cfg.dedupSensitivity === 'high' },
-        {
-          label: dedupIsCustom
-            ? `Duplicates: ${dedupSettingLabel(cfg.dedupSensitivity)} — change…`
-            : 'Duplicates: custom — type an exact match %…',
-          value: 'custom',
-          default: dedupIsCustom,
-        },
-      ),
-  );
-  const hours = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(ID.nudgehours)
-      .setPlaceholder(`Nudge after: ${cfg.nudgeAfterHours}h`)
-      .addOptions(
-        [6, 12, 24, 48, 72].map((h) => ({
-          label: `Nudge after ${h}h`,
-          value: String(h),
-          default: cfg.nudgeAfterHours === h,
-        })),
-      ),
-  );
-  const role = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
-    new RoleSelectMenuBuilder()
-      .setCustomId(ID.nudgerole)
-      .setPlaceholder('Helper role to ping (clear = none)')
-      .setMinValues(0)
-      .setMaxValues(1),
-  );
-  return { embeds: [embed], components: [toggles, sens, dedup, hours, role] };
+  return { embeds: [embed], components };
 }
 
 /** `/dejavue settings` entry. */
@@ -181,14 +121,16 @@ export async function handleSettings(interaction: ChatInputCommandInteraction): 
     return;
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  await interaction.editReply(await renderSettingsHub(interaction.guildId!));
+  await interaction.editReply(
+    await renderSettingsHub(interaction.guildId!, DEFAULT_PAGE, hubCtx(interaction)),
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Setup (channel) hub — status + per-channel freshness + remove / reindex / demo
+// Dashboard — status + per-channel freshness + remove / re-scan / demo
 // ---------------------------------------------------------------------------
 
-export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> {
+export async function renderDashboard(guild: Guild, ctx: HubCtx): Promise<BaseMessageOptions> {
   const db = getDb();
   const guildId = guild.id;
   const env = getEnv();
@@ -203,7 +145,7 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
   // Legacy KBs that went public before the imprint gate existed get a nag here.
   const imprintWarn =
     cfg && isPubliclyLive(cfg) && !imprintComplete(cfg.kbImprint)
-      ? '\n⚠️ **Imprint incomplete** — public sites must name an operator and contact. Add them in `/dejavue customize`.'
+      ? '\n⚠️ **Imprint incomplete** — public sites must name an operator and contact. Add them in `/dejavue website`.'
       : '';
 
   const syncMap = new Map((await listChannelSync(db, guildId)).map((r) => [r.channelId, r]));
@@ -227,13 +169,16 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
     return line(id, channelMode(cfg, id) === 'knowledge' ? ' _(knowledge)_' : '');
   };
 
-  const indexValue = `${indexed.toLocaleString()} / ${Number.isFinite(indexCap) ? indexCap.toLocaleString() : '∞'} messages${atCap ? '\n⚠️ **Index full** — reindex or remove a channel to free space.' : ''}`;
+  const indexValue = `${indexed.toLocaleString()} / ${Number.isFinite(indexCap) ? indexCap.toLocaleString() : '∞'} messages${atCap ? '\n⚠️ **Index full** — re-scan or remove a channel to free space.' : ''}`;
 
   const embed = new EmbedBuilder()
     .setColor(COLOR)
-    .setTitle('Dejavue — channels & status')
+    .setTitle('🏠 Dejavue — channels & status')
+    .setDescription(
+      'Everything I am watching in this server. Add a channel with `/dejavue setup #channel`, or use the buttons below to go anywhere else.',
+    )
     .addFields(
-      { name: 'Tier', value: tier, inline: true },
+      { name: 'Plan', value: tier, inline: true },
       { name: 'Indexed', value: indexValue, inline: true },
       // The RESOLVED model, not the stored override: those differ whenever a guild row
       // predates a model change, and showing the stale value is how this went unnoticed.
@@ -251,21 +196,21 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
         name: `Forums (${cfg?.forumChannelIds.length ?? 0} / ${channelCap})`,
         value: cfg?.forumChannelIds.length
           ? joinChannelLines(cfg.forumChannelIds.map(forumLine))
-          : '_none — `/dejavue setup #forum mode`_',
+          : '_none yet — `/dejavue setup #forum`_',
       },
       {
         name: `Tracked channels (${cfg?.trackedChannelIds.length ?? 0})`,
         value: cfg?.trackedChannelIds.length
           ? joinChannelLines(cfg.trackedChannelIds.map((id) => line(id)))
-          : '_none — `/dejavue setup #channel`_',
+          : '_none yet — `/dejavue setup #channel`_',
       },
       {
         name: 'Public site',
-        value: cfg?.kbPublishOptIn && kbUrl ? `on — ${kbUrl}${imprintWarn}` : cfg?.kbPublishOptIn ? `on — _set a slug in_ \`/dejavue customize\`${imprintWarn}` : 'off — _turn on in_ `/dejavue customize`',
+        value: cfg?.kbPublishOptIn && kbUrl ? `on — ${kbUrl}${imprintWarn}` : cfg?.kbPublishOptIn ? `on — _set an address in_ \`/dejavue website\`${imprintWarn}` : 'off — _turn it on in_ `/dejavue website`',
       },
     );
-  if (limits.mcp && kbUrl) embed.addFields({ name: 'MCP (Max)', value: `\`${kbUrl}/mcp\`` });
-  embed.setFooter({ text: 'Add: /dejavue setup #channel · Re-scan one: /dejavue rescan #channel' });
+  if (limits.mcp && kbUrl) embed.addFields({ name: 'MCP (Pro & Max)', value: `\`${kbUrl}/mcp\`` });
+  embed.setFooter({ text: 'Add a channel: /dejavue setup #channel · Re-scan one: /dejavue rescan #channel' });
 
   const monitored = [...(cfg?.forumChannelIds ?? []), ...(cfg?.trackedChannelIds ?? [])];
   const removeRows =
@@ -274,14 +219,14 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
           new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             new StringSelectMenuBuilder()
               .setCustomId(ID.remove)
-              .setPlaceholder('Remove a channel…')
+              .setPlaceholder('Stop watching a channel…')
               .addOptions(
                 monitored.slice(0, 25).map((id) => {
                   const ch = guild.channels.cache.get(id) as GuildBasedChannel | undefined;
                   return {
                     label: (ch?.name ?? id).slice(0, 100),
                     value: id,
-                    description: 'Stop monitoring this channel',
+                    description: 'Remove it from the knowledge base',
                   };
                 }),
               ),
@@ -289,10 +234,32 @@ export async function renderSetupHub(guild: Guild): Promise<BaseMessageOptions> 
         ]
       : [];
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(ID.reindexAll).setLabel('Reindex all').setEmoji('🔄').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(ID.rescanAll).setLabel('Re-scan all').setEmoji('🔄').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(ID.demo).setLabel('Create demo').setEmoji('✨').setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [embed], components: [...removeRows, actionRow] };
+  return {
+    embeds: [embed],
+    components: assertRowBudget(
+      [...removeRows, actionRow, navRow('dashboard', { admin: ctx.admin })],
+      'dashboard',
+    ),
+  };
+}
+
+/** `/dejavue dashboard` entry. */
+export async function handleDashboard(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!isAdmin(interaction)) {
+    await interaction.reply(eph('You need the **Manage Server** permission to see the dashboard.'));
+    return;
+  }
+  if (!interaction.guild) {
+    await interaction.reply(eph('Run this in a server.'));
+    return;
+  }
+  // Defer first: renderDashboard does several DB round-trips and could otherwise
+  // blow Discord's 3s window into a hard "did not respond".
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.editReply(await renderDashboard(interaction.guild, hubCtx(interaction)));
 }
 
 // ---------------------------------------------------------------------------
@@ -307,16 +274,18 @@ function formatDuration(seconds: number | null): string {
   return `${Math.max(1, Math.round(seconds / 60))}m`;
 }
 
-export async function handleInsights(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const guildId = interaction.guildId!;
+export async function renderInsights(
+  guildId: string,
+  userId: string,
+  ctx: HubCtx,
+): Promise<BaseMessageOptions> {
   const db = getDb();
   const limits = limitsFor(await getGuildTier(guildId));
   const counts = await countByStatus(db, guildId);
   const total = counts.open + counts.solved + counts.unsolved;
   const embed = new EmbedBuilder()
     .setColor(COLOR)
-    .setTitle('Dejavue insights')
+    .setTitle('📈 Dejavue insights')
     .addFields(
       { name: 'Solved / total', value: `${counts.solved} / ${total}`, inline: true },
       { name: 'Open', value: String(counts.open), inline: true },
@@ -324,7 +293,7 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
     );
   if (total === 0) {
     embed.setDescription(
-      'No questions tracked yet — add a help channel with `/dejavue setup`, or hit **Create demo** in `/dejavue setup` to try it out.',
+      'No questions tracked yet — add a help channel with `/dejavue setup #channel`, or open `/dejavue dashboard` and hit **Create demo** to try it out.',
     );
   }
 
@@ -357,7 +326,7 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
     if (top.length)
       embed.addFields({ name: 'Most-asked topics', value: top.map((c) => `• ${c.label ?? c.representativeText ?? 'topic'} (${c.size})`).join('\n') });
   }
-  if (!limits.removeBranding) embed.setFooter({ text: 'Powered by Dejavue' });
+  if (await showBrandingFor(guildId)) embed.setFooter({ text: 'Powered by Dejavue' });
 
   const components: ActionRowBuilder<ButtonBuilder>[] = [];
   if (limits.generative) {
@@ -372,12 +341,20 @@ export async function handleInsights(interaction: ChatInputCommandInteraction): 
   if (quota && !quota.allowed) {
     const env = getEnv();
     // One-time purchases are user-owned; remember the guild before showing the buttons.
-    const topUpSkus = await prepareTopUpSkus(interaction.user.id, guildId);
+    const topUpSkus = await prepareTopUpSkus(userId, guildId);
     const maxSku = limits.mcp ? undefined : env.SKU_MAX;
     const skus = [...topUpSkus, ...(maxSku ? [maxSku] : [])];
     if (skus.length > 0) components.push(...premiumButtonRows(skus));
   }
-  await interaction.editReply({ embeds: [embed], components });
+  components.push(navRow('insights', { admin: ctx.admin }));
+  return { embeds: [embed], components: assertRowBudget(components, 'insights') };
+}
+
+export async function handleInsights(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.editReply(
+    await renderInsights(interaction.guildId!, interaction.user.id, hubCtx(interaction)),
+  );
 }
 
 /** Render `▰▰▰▰▰▰▱▱▱▱ 620 / 1,000 credits (+250 top-up) · ≈ 470 drafts left`. */
@@ -392,7 +369,86 @@ function creditUsageField(q: QuotaStatus): string {
 }
 
 // ---------------------------------------------------------------------------
-// Interaction routing (buttons / string selects / role selects)
+// Stale components from an older deploy
+// ---------------------------------------------------------------------------
+
+/**
+ * An admin can be holding an ephemeral hub built by the previous release. Its
+ * custom ids no longer match anything, and a handler that just falls through
+ * without acknowledging leaves Discord showing "This interaction failed" after
+ * three seconds.
+ *
+ * Every handler below ends here instead. Ids from a known old hub re-render that
+ * hub in place; anything else gets an ephemeral pointer. Keep this — it retires
+ * the whole class of problem for every future id change, not just this one.
+ */
+const LEGACY_HUB: readonly [string, HubId][] = [
+  ['dv:set:', 'settings'],
+  ['dv:setup:', 'dashboard'],
+  ['dv:ins:', 'insights'],
+];
+
+const isLegacyId = (customId: string): boolean =>
+  LEGACY_HUB.some(([prefix]) => customId.startsWith(prefix));
+
+type HubComponentInteraction =
+  | ButtonInteraction
+  | StringSelectMenuInteraction
+  | RoleSelectMenuInteraction
+  | ModalSubmitInteraction;
+
+/**
+ * Edit the message the component sits on. A modal submitted from a standalone
+ * modal has no message to edit, which is the one case this can't do.
+ */
+async function updateInPlace(
+  interaction: HubComponentInteraction,
+  payload: BaseMessageOptions & { content?: string },
+): Promise<boolean> {
+  if (interaction.isModalSubmit()) {
+    if (!interaction.isFromMessage()) return false;
+    await interaction.update(payload);
+    return true;
+  }
+  await interaction.update(payload);
+  return true;
+}
+
+async function handleStale(interaction: HubComponentInteraction): Promise<void> {
+  const hub = LEGACY_HUB.find(([p]) => interaction.customId.startsWith(p))?.[1];
+  const ctx = hubCtx(interaction);
+  const guildId = interaction.guildId;
+
+  if (hub && guildId) {
+    // Only rebuild a hub this viewer is allowed to open — a member holding a
+    // stale settings panel gets the pointer, not someone else's settings.
+    const payload =
+      hub === 'insights'
+        ? await renderInsights(guildId, interaction.user.id, ctx)
+        : !ctx.admin
+          ? null
+          : hub === 'settings'
+            ? await renderSettingsHub(guildId, DEFAULT_PAGE, ctx)
+            : interaction.guild
+              ? await renderDashboard(interaction.guild, ctx)
+              : null;
+    if (
+      payload &&
+      (await updateInPlace(interaction, {
+        ...payload,
+        content: '_This panel was rebuilt — Dejavue updated since you opened it._',
+      }))
+    ) {
+      return;
+    }
+  }
+  await interaction.reply(
+    eph('This panel is from an older version of Dejavue. Run `/dejavue dashboard` to open a fresh one.'),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Interaction routing (buttons / string selects / role selects / modals)
 // ---------------------------------------------------------------------------
 
 async function refreshTopics(interaction: ButtonInteraction): Promise<void> {
@@ -400,61 +456,77 @@ async function refreshTopics(interaction: ButtonInteraction): Promise<void> {
   if (cfg && interaction.guild) await refreshAllChannelTopics(interaction.guild, cfg).catch(() => undefined);
 }
 
+/** Apply a settings change, then redraw the page the control lives on. */
+async function updateSettings(
+  interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction,
+  patch: Parameters<typeof updateGuildConfig>[2],
+): Promise<void> {
+  const guildId = interaction.guildId!;
+  await updateGuildConfig(getDb(), guildId, patch);
+  const page = pageOf(interaction.customId) ?? DEFAULT_PAGE;
+  await interaction.update(await renderSettingsHub(guildId, page, hubCtx(interaction)));
+}
+
 export async function handleHubButton(interaction: ButtonInteraction): Promise<void> {
   const id = interaction.customId;
   const guildId = interaction.guildId!;
   const db = getDb();
 
-  // Insights generation buttons (Pro-gated inside runGaps/runFaq).
+  // Insights generation buttons (Pro-gated inside runGaps/runFaq) — before the
+  // admin gate, since /dejavue insights is open to everyone.
   if (id === ID.gaps) return void (await runGaps(interaction));
   if (id === ID.faq) return void (await runFaq(interaction));
+
+  // A pre-deploy id can never match below, and insights is open to everyone —
+  // answer it here rather than letting the admin gate give a misleading reason.
+  if (isLegacyId(id)) return void (await handleStale(interaction));
 
   if (!isAdmin(interaction)) {
     await interaction.reply(eph('You need the **Manage Server** permission to change this.'));
     return;
   }
 
-  // Settings toggles → flip + re-render the hub in place.
   const cfg = await ensureGuildConfig(db, guildId);
-  if (id === ID.nudges) {
-    await updateGuildConfig(db, guildId, { nudgeEnabled: !cfg.nudgeEnabled });
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+
+  // Settings toggles → flip + redraw the page in place.
+  if (id === ctrl('nudges', 'toggle')) {
+    return void (await updateSettings(interaction, { nudgeEnabled: !cfg.nudgeEnabled }));
   }
-  if (id === ID.fit) {
+  // Turning either of these on builds an embedding per monitored channel, which
+  // is far too slow to do before acknowledging. Save and redraw first, then let
+  // the topic build run on behind it — the feature reads the topics lazily and
+  // channelFitReconcile heals anything that fails.
+  if (id === ctrl('routing', 'fit')) {
     const next = !cfg.channelFitCheck;
-    await updateGuildConfig(db, guildId, { channelFitCheck: next });
-    if (next) await refreshTopics(interaction);
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+    await updateSettings(interaction, { channelFitCheck: next });
+    if (next) void refreshTopics(interaction);
+    return;
   }
-  if (id === ID.guard) {
+  if (id === ctrl('routing', 'guard')) {
     const next = !cfg.guardEnabled;
-    await updateGuildConfig(db, guildId, { guardEnabled: next });
-    if (next) await refreshTopics(interaction);
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+    await updateSettings(interaction, { guardEnabled: next });
+    if (next) void refreshTopics(interaction);
+    return;
   }
-  if (id === ID.guardac) {
-    await updateGuildConfig(db, guildId, { guardAutoClose: !cfg.guardAutoClose });
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+  if (id === ctrl('routing', 'autoclose')) {
+    return void (await updateSettings(interaction, { guardAutoClose: !cfg.guardAutoClose }));
+  }
+  if (id === ctrl('cleanup', 'prompt')) {
+    return void (await updateSettings(interaction, { removeSolvedPrompt: !cfg.removeSolvedPrompt }));
+  }
+  if (id === ctrl('cleanup', 'branding')) {
+    return void (await updateSettings(interaction, { brandingEnabled: !cfg.brandingEnabled }));
   }
 
-  // Setup hub actions.
-  if (id === ID.reindexAll) {
+  // Dashboard actions.
+  if (id === ID.rescanAll) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const targets = allTargets({ forumChannelIds: cfg.forumChannelIds, trackedChannelIds: cfg.trackedChannelIds });
     if (targets.length === 0) {
-      await interaction.editReply('Nothing to reindex yet.');
+      await interaction.editReply('Nothing to re-scan yet.');
       return;
     }
-    const { started, skipped, throttled } = await startReindex(interaction, targets);
-    const lines = [];
-    if (started.length) lines.push(`🔄 Reindexing ${started.join(', ')} — watch the live messages here.`);
-    if (skipped.length) lines.push(`⏭️ Already running: ${skipped.join(', ')}.`);
-    if (throttled.length) {
-      lines.push(
-        `⏳ Recently reindexed: ${throttled.join(', ')} — a reindex re-reads the whole channel, so it's rate-limited. Try again later.`,
-      );
-    }
-    await interaction.editReply(lines.join('\n') || 'Nothing to reindex.');
+    await interaction.editReply(rescanSummary(await startReindex(interaction, targets)));
     return;
   }
   if (id === ID.demo) {
@@ -475,9 +547,33 @@ export async function handleHubButton(interaction: ButtonInteraction): Promise<v
     }
     return;
   }
+
+  await handleStale(interaction);
+}
+
+/** The shared "what happened" summary for a re-scan, used by the button and `/dejavue rescan`. */
+export function rescanSummary(res: {
+  started: string[];
+  skipped: string[];
+  throttled: string[];
+}): string {
+  const lines: string[] = [];
+  if (res.started.length) {
+    lines.push(
+      `🔄 Re-scanning ${res.started.join(', ')} — watch the live message${res.started.length > 1 ? 's' : ''} I posted here.`,
+    );
+  }
+  if (res.skipped.length) lines.push(`⏭️ Already running: ${res.skipped.join(', ')}.`);
+  if (res.throttled.length) {
+    lines.push(
+      `⏳ Re-scanned recently: ${res.throttled.join(', ')} — a re-scan re-reads the whole channel, so it's rate-limited. Try again later.`,
+    );
+  }
+  return lines.join('\n') || 'Nothing to re-scan.';
 }
 
 export async function handleHubSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (isLegacyId(interaction.customId)) return void (await handleStale(interaction));
   if (!isAdmin(interaction)) {
     await interaction.reply(eph('You need the **Manage Server** permission to change this.'));
     return;
@@ -487,13 +583,19 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
   const db = getDb();
   const value = interaction.values[0];
 
-  if (id === ID.gsens && value) {
-    await updateGuildConfig(db, guildId, { guardSensitivity: value as 'low' | 'medium' | 'high' });
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+  if (id === PAGER_ID && value) {
+    const page = (settingsPage(value as SettingsPageId).id ?? DEFAULT_PAGE) as SettingsPageId;
+    return void (await interaction.update(await renderSettingsHub(guildId, page, hubCtx(interaction))));
   }
-  if (id === ID.dedup && value) {
+  if (id === ctrl('routing', 'sens') && value) {
+    return void (await updateSettings(interaction, {
+      guardSensitivity: value as 'low' | 'medium' | 'high',
+    }));
+  }
+  if (id === ctrl('duplicates', 'sens') && value) {
     if (value === 'custom') {
       // Ask for the exact minimum match % in a modal instead of storing 'custom'.
+      // showModal must be the FIRST acknowledgement — don't defer before it.
       const cfg = await getGuildConfig(db, guildId);
       const current = customSimilarity(cfg?.dedupSensitivity);
       const input = new TextInputBuilder()
@@ -506,18 +608,18 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
       if (current !== undefined) input.setValue(String(Math.round(current * 100)));
       await interaction.showModal(
         new ModalBuilder()
-          .setCustomId(ID.dedupModal)
+          .setCustomId(DEDUP_MODAL_ID)
           .setTitle('Custom duplicate threshold')
           .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)),
       );
       return;
     }
-    await updateGuildConfig(db, guildId, { dedupSensitivity: value as 'low' | 'medium' | 'high' });
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+    return void (await updateSettings(interaction, {
+      dedupSensitivity: value as 'low' | 'medium' | 'high',
+    }));
   }
-  if (id === ID.nudgehours && value) {
-    await updateGuildConfig(db, guildId, { nudgeAfterHours: Number(value) });
-    return void (await interaction.update(await renderSettingsHub(guildId)));
+  if (id === ctrl('nudges', 'hours') && value) {
+    return void (await updateSettings(interaction, { nudgeAfterHours: Number(value) }));
   }
   if (id === ID.remove && value) {
     const cfg = await getGuildConfig(db, guildId);
@@ -535,13 +637,21 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
       await deleteChannelTopic(db, guildId, value).catch(() => undefined);
     }
     await deleteChannelSync(db, guildId, value).catch(() => undefined);
-    if (interaction.guild) await interaction.update(await renderSetupHub(interaction.guild));
+    if (interaction.guild) {
+      await interaction.update(await renderDashboard(interaction.guild, hubCtx(interaction)));
+    }
+    return;
   }
+
+  await handleStale(interaction);
 }
 
 /** Modal submits from the settings hub (currently: the custom dedup threshold). */
 export async function handleHubModal(interaction: ModalSubmitInteraction): Promise<void> {
-  if (interaction.customId !== ID.dedupModal) return;
+  if (interaction.customId !== DEDUP_MODAL_ID) {
+    await handleStale(interaction);
+    return;
+  }
   if (!isAdmin(interaction)) {
     await interaction.reply(eph('You need the **Manage Server** permission to change this.'));
     return;
@@ -556,21 +666,26 @@ export async function handleHubModal(interaction: ModalSubmitInteraction): Promi
   await updateGuildConfig(getDb(), guildId, {
     dedupSensitivity: String(Math.round(similarity * 100)),
   });
-  // The modal came from the settings-hub select, so refresh that message in place.
+  // The modal id carries its page, so we land back on Duplicate detection rather
+  // than bouncing the admin to Overview.
+  const page = pageOf(interaction.customId) ?? DEFAULT_PAGE;
   if (interaction.isFromMessage()) {
-    await interaction.update(await renderSettingsHub(guildId));
+    await interaction.update(await renderSettingsHub(guildId, page, hubCtx(interaction)));
   } else {
     await interaction.reply(eph(`✅ Duplicate suggestions now require ≥${Math.round(similarity * 100)}% match.`));
   }
 }
 
 export async function handleHubRoleSelect(interaction: RoleSelectMenuInteraction): Promise<void> {
-  if (interaction.customId !== ID.nudgerole) return;
+  if (interaction.customId !== ctrl('nudges', 'role')) {
+    await handleStale(interaction);
+    return;
+  }
   if (!isAdmin(interaction)) {
     await interaction.reply(eph('You need the **Manage Server** permission to change this.'));
     return;
   }
-  const roleId = interaction.values[0] ?? null;
-  await updateGuildConfig(getDb(), interaction.guildId!, { nudgeHelperRoleId: roleId });
-  await interaction.update(await renderSettingsHub(interaction.guildId!));
+  await updateSettings(interaction, { nudgeHelperRoleId: interaction.values[0] ?? null });
 }
+
+export { isSettingsInteraction };

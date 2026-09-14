@@ -1,7 +1,7 @@
 import type { GuildConfig } from '@dejavue/db';
 
 // Port of the Claude Design `applyTheme()` token system. Each tenant's
-// `/dejavue customize` choices (theme / accent / corners / heading font) become a
+// `/dejavue website` choices (theme / accent / corners / heading font) become a
 // block of CSS custom properties rendered into the page <head>, so every component
 // can reference var(--token) and the whole site re-skins per guild.
 

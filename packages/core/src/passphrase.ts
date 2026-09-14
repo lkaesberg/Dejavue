@@ -19,7 +19,7 @@ const scryptAsync = promisify(scrypt) as (
  * Hash a shared KB passphrase for storage (private knowledge-base gate). Format is
  * `scrypt$<saltHex>$<hashHex>` so it's self-describing and salt travels with the hash.
  * The passphrase is low-stakes (one shared secret per guild) but we never store it in
- * the clear. Used by `/dejavue customize` (bot) and verified by the web gate.
+ * the clear. Used by `/dejavue website` (bot) and verified by the web gate.
  */
 export async function hashPassphrase(passphrase: string): Promise<string> {
   const salt = randomBytes(16);

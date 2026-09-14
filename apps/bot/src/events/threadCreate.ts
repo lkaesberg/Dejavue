@@ -2,11 +2,12 @@ import type { AnyThreadChannel, ThreadChannel } from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import { channelMode, getDb, getGuildConfig, getThreadByDiscordId } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
+import { showBrandingFor } from '../lib/branding';
 import { controlMessage } from '../lib/embeds';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
 import { ensureThreadRow, tagUnsolved } from '../lib/solve';
-import { getGuildTier, limitsFor, monitoredForum } from '../lib/tier';
+import { monitoredForum } from '../lib/tier';
 
 const log = childLogger({ mod: 'event:threadCreate' });
 
@@ -38,7 +39,7 @@ export async function onThreadCreate(
     }
     await ensureThreadRow(t);
     await tagUnsolved(t);
-    const showBranding = !limitsFor(await getGuildTier(guildId)).removeBranding;
+    const showBranding = await showBrandingFor(guildId);
     await t.send(controlMessage(showBranding));
     // Debounced duplicate detection (handles the starter-message race in-process).
     scheduleDedup(t);

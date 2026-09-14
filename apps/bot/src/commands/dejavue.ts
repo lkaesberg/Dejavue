@@ -2,7 +2,6 @@ import { capture } from '@dejavue/analytics';
 import {
   ChannelType,
   type ChatInputCommandInteraction,
-  EmbedBuilder,
   type ForumChannel,
   MessageFlags,
   type NewsChannel,
@@ -25,11 +24,15 @@ import {
   updateGuildConfig,
 } from '@dejavue/db';
 import { botPermissionWarning } from '../lib/botPerms';
+import { showBrandingFor } from '../lib/branding';
 import { refreshChannelTopic } from '../lib/channelFit';
-import { handleCustomize } from '../lib/customize';
-import { COLOR, searchResultsEmbed } from '../lib/embeds';
+import { commandDescription, type SubcommandName } from '../lib/commandCopy';
+import { handleWebsite } from '../lib/customize';
+import { searchResultsEmbed } from '../lib/embeds';
 import { ensureForumTags } from '../lib/forum';
-import { handleInsights, handleSettings, renderSetupHub } from '../lib/hubs';
+import { renderHelp } from '../lib/help';
+import { hubCtx } from '../lib/hubNav';
+import { handleDashboard, handleInsights, handleSettings, rescanSummary } from '../lib/hubs';
 import { allTargets, type ReindexTarget, startForumImport, startReindex } from '../lib/reindexTrigger';
 import { eph } from '../lib/reply';
 import { getGuildTier, limitsFor } from '../lib/tier';
@@ -39,70 +42,49 @@ import type { SlashCommand } from './types';
 
 const log = childLogger({ mod: 'cmd:dejavue' });
 
+const desc = (name: SubcommandName) => commandDescription(name);
+
+// Declaration order is picker order, so this reads as a getting-started list.
+// Admin-only subcommands still appear for everyone: Discord's
+// setDefaultMemberPermissions applies to the TOP-LEVEL command, and search /
+// insights / help are open to all members. The "(admin)" suffix on the
+// description is what sets expectations; the runtime checks are what enforce it.
 const data = new SlashCommandBuilder()
   .setName('dejavue')
   .setDescription('Duplicate detection + a searchable knowledge base for your server')
+  .addSubcommand((s) => s.setName('dashboard').setDescription(desc('dashboard')))
   .addSubcommand((s) =>
     s
       .setName('setup')
-      .setDescription('Add a channel, or run it alone to view & manage your indexed channels (admin)')
+      .setDescription(desc('setup'))
       .addChannelOption((o) =>
         o
           .setName('channel')
-          .setDescription('Channel to add to the knowledge base (leave empty to open the channel manager)')
+          .setDescription('The channel to start indexing')
           .addChannelTypes(
             ChannelType.GuildForum,
             ChannelType.GuildText,
             ChannelType.GuildAnnouncement,
           )
-          .setRequired(false),
+          // Required, so this subcommand does exactly one thing. The status hub
+          // it used to double as now has its own name: /dejavue dashboard.
+          .setRequired(true),
       )
       .addStringOption((o) =>
         o
           .setName('mode')
-          .setDescription('Forums only — how the channel works (default: question)')
+          .setDescription('Forums only — whether posts are questions to answer or just content to archive')
           .setRequired(false)
           .addChoices(
-            { name: 'question — Q&A: find duplicates, mark answers', value: 'question' },
-            { name: 'knowledge — archive everything, no prompts', value: 'knowledge' },
+            { name: 'question — find duplicates and prompt for an answer (default)', value: 'question' },
+            { name: 'knowledge — archive every thread, never prompt', value: 'knowledge' },
           ),
       ),
   )
   .addSubcommand((s) =>
     s
-      .setName('rescan')
-      .setDescription("Re-scan a channel's full history and remove deleted posts (admin)")
-      .addChannelOption((o) =>
-        o
-          .setName('channel')
-          .setDescription('Channel to re-scan (leave empty to re-scan every channel)')
-          .addChannelTypes(
-            ChannelType.GuildForum,
-            ChannelType.GuildText,
-            ChannelType.GuildAnnouncement,
-          )
-          .setRequired(false),
-      ),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName('settings')
-      .setDescription('Turn on/off nudges, channel-fit suggestions & the off-topic guard (admin)'),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName('customize')
-      .setDescription('Customize your public website — branding, theme, domain & privacy (admin)'),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName('insights')
-      .setDescription('Stats, analytics, recurring-question clusters & the auto-FAQ'),
-  )
-  .addSubcommand((s) =>
-    s
       .setName('search')
-      .setDescription('Search your knowledge base')
+      .setDescription(desc('search'))
       .addStringOption((o) =>
         o.setName('query').setDescription('What are you looking for?').setRequired(true),
       )
@@ -126,14 +108,42 @@ const data = new SlashCommandBuilder()
           .setMaxValue(100),
       ),
   )
-  .addSubcommand((s) => s.setName('help').setDescription('Learn how Dejavue works'));
+  .addSubcommand((s) => s.setName('insights').setDescription(desc('insights')))
+  .addSubcommand((s) => s.setName('settings').setDescription(desc('settings')))
+  .addSubcommand((s) => s.setName('website').setDescription(desc('website')))
+  .addSubcommand((s) =>
+    s
+      .setName('rescan')
+      .setDescription(desc('rescan'))
+      .addChannelOption((o) =>
+        o
+          .setName('channel')
+          .setDescription('Channel to re-scan (leave empty to re-scan every channel)')
+          .addChannelTypes(
+            ChannelType.GuildForum,
+            ChannelType.GuildText,
+            ChannelType.GuildAnnouncement,
+          )
+          .setRequired(false),
+      ),
+  )
+  .addSubcommand((s) => s.setName('help').setDescription(desc('help')))
+  // Deprecated alias, kept for one release so muscle memory and older docs still
+  // land somewhere useful. Remove once the rename has been out a while.
+  .addSubcommand((s) =>
+    s.setName('customize').setDescription('Renamed — use /dejavue website instead'),
+  );
 
 const requireAdmin = (interaction: ChatInputCommandInteraction): boolean =>
   !!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
 
 /**
- * `/dejavue setup` — with no channel it opens the channels & status hub; with a channel
- * it adds it (a forum in question/knowledge mode, or a text channel as a tracked KB).
+ * `/dejavue setup #channel` — add one channel: a forum in question/knowledge
+ * mode, or a text/announcement channel as a tracked knowledge base.
+ *
+ * This used to double as the status hub when run with no options, which meant
+ * the most useful screen in the bot had no name. That is `/dejavue dashboard`
+ * now, and `channel` is required here.
  */
 async function handleSetup(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!requireAdmin(interaction)) {
@@ -145,15 +155,9 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
     return;
   }
 
-  const picked = interaction.options.getChannel('channel', false);
-  if (!picked) {
-    // Defer first: renderSetupHub does several DB round-trips and could otherwise
-    // blow Discord's 3s window into a hard "did not respond".
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    await interaction.editReply(await renderSetupHub(interaction.guild));
-    return;
-  }
-
+  // `channel` is required by the builder, so there is no bare-invocation branch
+  // any more — the status hub it used to open is `/dejavue dashboard`.
+  const picked = interaction.options.getChannel('channel', true);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const channel = await interaction.guild.channels.fetch(picked.id).catch(() => null);
   if (!channel) {
@@ -211,7 +215,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       ? ' 📥 An import of this channel is already running — it resumes where it left off.'
       : imp.posted
         ? ' 📥 Importing existing threads now — the progress message below updates live and turns ✅ when everything is in.'
-        : ' 📥 Importing existing threads in the background — run `/dejavue setup` (no options) to watch the status.';
+        : ' 📥 Importing existing threads in the background — run `/dejavue dashboard` to watch the status.';
     const note =
       `${importNote} Everything indexed ` +
       'is published to your knowledge base automatically; run `/dejavue rescan` anytime to refresh.' +
@@ -246,7 +250,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
     await interaction.editReply(
       `✅ Now indexing <#${channel.id}> as a knowledge base. I'll capture recent conversations now — ` +
         'everything indexed is searchable and published to your knowledge base automatically.\n' +
-        '_Run `/dejavue rescan` to re-scan full history, or `/dejavue setup` (no options) for status._' +
+        '_Run `/dejavue rescan` to re-read the full history, or `/dejavue dashboard` for status._' +
         botPermissionWarning(channel, 'text'),
     );
     return;
@@ -255,9 +259,17 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
   await interaction.editReply('Pick a **forum**, **text**, or **announcement** channel.');
 }
 
-async function handleReindex(interaction: ChatInputCommandInteraction): Promise<void> {
+/**
+ * `/dejavue rescan` — re-read a channel's full history.
+ *
+ * Named "rescan" everywhere a user can see it. The internals stay `reindex`:
+ * that word is load-bearing in the DB (`reindex_job`, the `reindexing` status)
+ * and the queue (`reindex-channel`), so renaming it would mean a migration for
+ * no user-visible gain.
+ */
+async function handleRescan(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!requireAdmin(interaction)) {
-    await interaction.reply(eph('You need the **Manage Server** permission to reindex.'));
+    await interaction.reply(eph('You need the **Manage Server** permission to re-scan a channel.'));
     return;
   }
   const guildId = interaction.guildId!;
@@ -270,32 +282,21 @@ async function handleReindex(interaction: ChatInputCommandInteraction): Promise<
     if (cfg?.forumChannelIds.includes(picked.id)) targets = [{ id: picked.id, kind: 'forum' }];
     else if (cfg?.trackedChannelIds.includes(picked.id)) targets = [{ id: picked.id, kind: 'tracked' }];
     else {
-      await interaction.reply(eph(`<#${picked.id}> isn't monitored. Add it with \`/dejavue setup\` first.`));
+      await interaction.reply(
+        eph(`<#${picked.id}> isn't being watched. Add it with \`/dejavue setup\` first.`),
+      );
       return;
     }
   } else if (cfg) {
     targets = allTargets(cfg);
   }
   if (targets.length === 0) {
-    await interaction.reply(eph('Nothing to reindex yet — add a channel with `/dejavue setup`.'));
+    await interaction.reply(eph('Nothing to re-scan yet — add a channel with `/dejavue setup`.'));
     return;
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const { started, skipped, throttled } = await startReindex(interaction, targets);
-  const lines: string[] = [];
-  if (started.length) {
-    lines.push(
-      `🔄 Reindexing ${started.join(', ')} — watch the live message${started.length > 1 ? 's' : ''} I posted here.`,
-    );
-  }
-  if (skipped.length) lines.push(`⏭️ Already running: ${skipped.join(', ')}.`);
-  if (throttled.length) {
-    lines.push(
-      `⏳ Recently reindexed: ${throttled.join(', ')} — a reindex re-reads the whole channel, so it's rate-limited. Try again later.`,
-    );
-  }
-  await interaction.editReply(lines.join('\n') || 'Nothing to reindex.');
+  await interaction.editReply(rescanSummary(await startReindex(interaction, targets)));
 }
 
 // How closely a `/dejavue search` result must match the query, by the `match` option.
@@ -343,30 +344,14 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
   // implying their keywords were wrong.
   const nothingIndexed = results.length === 0 && (await countIndexedMessages(db, guildId)) === 0;
   await interaction.editReply({
-    embeds: [searchResultsEmbed(guildId, query, results, !limits.removeBranding, { nothingIndexed })],
+    embeds: [
+      searchResultsEmbed(guildId, query, results, await showBrandingFor(guildId), { nothingIndexed }),
+    ],
   });
 }
 
 async function handleHelp(interaction: ChatInputCommandInteraction): Promise<void> {
-  const embed = new EmbedBuilder()
-    .setColor(COLOR)
-    .setTitle('Dejavue')
-    .setDescription(
-      [
-        '**What I do:** I watch your help **forums** and **text channels**, flag likely duplicate ',
-        'questions, and turn the conversations into a searchable knowledge base (and a public site).',
-        '',
-        '**Add channels & see status:** `/dejavue setup` — run it bare for the channel manager, or ',
-        '`/dejavue setup #channel [mode]` to add a forum or text channel.',
-        '**Keep it fresh:** `/dejavue rescan [#channel]` re-scans full history and removes deleted posts.',
-        '**Find answers:** `/dejavue search <question>`.',
-        '**Mark answers:** click **Mark as solved** in a post, or right-click a reply → **Apps → Mark as Answer**.',
-        '**Insights:** `/dejavue insights` — counts, analytics, knowledge gaps & auto-FAQ in one place.',
-        '**Settings:** `/dejavue settings` — stale nudges, channel-fit suggestions, off-topic guard (Plus).',
-        '**Customize:** `/dejavue customize` — branding, theme, domain & privacy.',
-      ].join('\n'),
-    );
-  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  await interaction.reply({ ...renderHelp(hubCtx(interaction)), flags: MessageFlags.Ephemeral });
 }
 
 export const dejavueCommand: SlashCommand = {
@@ -379,14 +364,18 @@ export const dejavueCommand: SlashCommand = {
     const subcommand = interaction.options.getSubcommand();
     capture('command_used', interaction.guildId!, { subcommand });
     switch (subcommand) {
+      case 'dashboard':
+        return handleDashboard(interaction);
       case 'setup':
         return handleSetup(interaction);
       case 'rescan':
-        return handleReindex(interaction);
+        return handleRescan(interaction);
       case 'settings':
         return handleSettings(interaction);
+      // Deprecated alias — same hub, plus a note pointing at the new name.
       case 'customize':
-        return handleCustomize(interaction);
+      case 'website':
+        return handleWebsite(interaction);
       case 'insights':
         return handleInsights(interaction);
       case 'search':

@@ -17,6 +17,7 @@ import {
 } from '@dejavue/db';
 import { enqueueEmbedThread, enqueueRevalidateKb } from '@dejavue/queue';
 import { refreshForumFreshness } from './channelFreshness';
+import { showBrandingFor } from './branding';
 import { keyedTrailingDebounce } from './debounce';
 import { SOLVE_BUTTON_ID, solvedNotice } from './embeds';
 import {
@@ -27,7 +28,6 @@ import {
   getStarterText,
   threadLabels,
 } from './forum';
-import { getGuildTier, limitsFor } from './tier';
 
 const log = childLogger({ mod: 'solve' });
 
@@ -179,7 +179,7 @@ async function resolveControlPrompt(
     await msg.delete().catch(() => undefined);
     return;
   }
-  const showBranding = !limitsFor(await getGuildTier(thread.guildId)).removeBranding;
+  const showBranding = await showBrandingFor(thread.guildId);
   await msg
     .edit(solvedNotice({ showBranding, solverId: opts.solverId, answerAuthorId }))
     .catch(() => undefined);

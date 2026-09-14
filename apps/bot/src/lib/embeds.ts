@@ -370,7 +370,7 @@ export function searchResultsEmbed(
   if (results.length === 0) {
     embed.setDescription(
       opts?.nothingIndexed
-        ? "No answers indexed yet — mark some questions solved (or add a channel with `/dejavue setup`), then search again."
+        ? "No answers indexed yet — mark some questions solved (or add a channel with `/dejavue setup #channel`), then search again."
         : 'No solved posts matched. Try different keywords.',
     );
   } else {

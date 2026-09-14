@@ -18,6 +18,7 @@ import {
   updateGuildConfig,
 } from '@dejavue/db';
 import { assessChannel, ensureChannelTopics } from './channelFit';
+import { showBrandingFor } from './branding';
 import {
   channelFitMessage,
   channelGuardMessage,
@@ -104,17 +105,14 @@ export async function editPlaceholderTransient(
 function postSearchingPlaceholder(thread: ThreadChannel): Placeholder {
   return (async () => {
     try {
-      const [limits, indexed] = await Promise.all([
+      const [limits, indexed, showBranding] = await Promise.all([
         getGuildTier(thread.guildId).then(limitsFor),
         countIndexedMessages(getDb(), thread.guildId),
+        showBrandingFor(thread.guildId),
       ]);
       if (indexed === 0) return null;
       return await thread.send(
-        searchingMessage({
-          indexedCount: indexed,
-          semantic: limits.semanticSearch,
-          showBranding: !limits.removeBranding,
-        }),
+        searchingMessage({ indexedCount: indexed, semantic: limits.semanticSearch, showBranding }),
       );
     } catch (err) {
       log.debug({ err, threadId: thread.id }, 'failed to post searching placeholder');
@@ -283,7 +281,7 @@ async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promis
   }
 
   const limits = limitsFor(await getGuildTier(guildId));
-  const showBranding = !limits.removeBranding;
+  const showBranding = await showBrandingFor(guildId);
   // Edit the live placeholder into the outcome; fall back to a fresh message when
   // a mod deleted it mid-search.
   const finish = async (payload: BaseMessageOptions): Promise<void> => {
