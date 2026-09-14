@@ -109,6 +109,15 @@ async function reindexForum(
   const mode = channelMode(cfg, rj.channelId);
   const limits = await guildLimits(rj.guildId);
 
+  // The KB groups its channel rail by the denormalized name on each row, so a forum
+  // imported by the worker (rather than captured live) needs it stamped here too —
+  // and a single update repairs rows written before this ran (or after a rename).
+  const info = await fetchChannelInfo(rj.channelId);
+  const channelName = info?.name ?? null;
+  if (channelName) {
+    await updateChannelName(db, rj.guildId, rj.channelId, channelName).catch(() => undefined);
+  }
+
   // 1. LIST active + archived threads. Always a full pass (no cursor resume): the prune
   // below relies on `seen` being the COMPLETE set, so a partial listing must never drive
   // it. Re-listing thread metadata on retry is cheap; processedThreadIds (below) still
@@ -148,6 +157,7 @@ async function reindexForum(
       const row = await upsertThread(db, {
         guildId: rj.guildId,
         channelId: rj.channelId,
+        channelName: channelName ?? undefined, // never clobber a known name with null
         threadId: t.id,
         title: t.name,
         questionBody: starter?.content ?? '',

@@ -20,6 +20,7 @@ import {
   setEmbedContentHash,
   setPublished,
   updateBackfillJob,
+  updateChannelName,
   upsertEmbedding,
   upsertThread,
 } from '@dejavue/db';
@@ -28,6 +29,7 @@ import type { BackfillForumJob } from '@dejavue/queue';
 import {
   fetchActiveGuildThreads,
   fetchArchivedPublicThreads,
+  fetchChannelInfo,
   fetchStarterMessage,
   type RawThread,
 } from '../lib/discordRest';
@@ -66,6 +68,15 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   const limits = await guildLimits(bf.guildId);
   const mode = channelMode(cfg, bf.channelId);
   const processed = new Set(bf.processedThreadIds);
+
+  // The KB groups its channel rail by the denormalized name on each row, so an import
+  // needs it stamped here too — otherwise every imported forum lands in one nameless
+  // "General" bucket. The update also repairs rows written before this ran.
+  const info = await fetchChannelInfo(bf.channelId);
+  const channelName = info?.name ?? null;
+  if (channelName) {
+    await updateChannelName(db, bf.guildId, bf.channelId, channelName).catch(() => undefined);
+  }
 
   // Collect active + paginated archived threads for the forum.
   const all: RawThread[] = [];
@@ -163,6 +174,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
         const row = await upsertThread(db, {
           guildId: bf.guildId,
           channelId: bf.channelId,
+          channelName: channelName ?? undefined, // never clobber a known name with null
           threadId: t.id,
           title: t.name,
           questionBody: starter?.content ?? '',
