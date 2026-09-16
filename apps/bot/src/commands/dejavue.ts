@@ -23,7 +23,7 @@ import {
   setChannelGuidelines,
   updateGuildConfig,
 } from '@dejavue/db';
-import { botPermissionWarning } from '../lib/botPerms';
+import { botPermissionWarning, missingBotPermissions } from '../lib/botPerms';
 import { showBrandingFor } from '../lib/branding';
 import { refreshChannelTopic } from '../lib/channelFit';
 import { commandDescription, type SubcommandName } from '../lib/commandCopy';
@@ -47,8 +47,9 @@ const desc = (name: SubcommandName) => commandDescription(name);
 // Declaration order is picker order, so this reads as a getting-started list.
 // Admin-only subcommands still appear for everyone: Discord's
 // setDefaultMemberPermissions applies to the TOP-LEVEL command, and search /
-// insights / help are open to all members. The "(admin)" suffix on the
-// description is what sets expectations; the runtime checks are what enforce it.
+// insights / help are open to all members. The "(needs Manage Server)" suffix on
+// the description is what sets expectations; the runtime checks are what enforce
+// it. Both name the Discord permission, never a role — Dejavue has none.
 const data = new SlashCommandBuilder()
   .setName('dejavue')
   .setDescription('Duplicate detection + a searchable knowledge base for your server')
@@ -187,14 +188,21 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
     channels.add(forum.id);
     const channelModes = { ...(cfg.channelModes ?? {}), [forum.id]: mode };
 
+    // Question mode can't work without the `solved` / `unsolved` tags. If that
+    // fails, re-check the permissions and name what's actually missing — the old
+    // message blamed Manage Channels for every failure, including Discord's
+    // 20-tag limit, which no permission grant will fix.
     let tagPatch: { solvedTagId?: string; unsolvedTagId?: string } = {};
     try {
       const { solvedTagId, unsolvedTagId } = await ensureForumTags(forum);
       tagPatch = { solvedTagId, unsolvedTagId };
     } catch (err) {
       if (mode === 'question') {
+        const missing = missingBotPermissions(forum, 'forum');
         await interaction.editReply(
-          'Setup failed — I need the **Manage Channels** permission to create the `solved`/`unsolved` tags. Grant it and re-run.',
+          missing.length > 0
+            ? `Setup failed — I'm missing **${missing.join(', ')}** in <#${forum.id}>. I need **Manage Channels** there to create the \`solved\` / \`unsolved\` tags. Grant it in Server Settings → Roles → Dejavue (or on the channel) and re-run.`
+            : `Setup failed — I couldn't create the \`solved\` / \`unsolved\` tags in <#${forum.id}>. The forum may already be at Discord's 20-tag limit; free a tag and re-run.`,
         );
         return;
       }

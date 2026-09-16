@@ -2,6 +2,7 @@ import { type BaseMessageOptions, EmbedBuilder } from 'discord.js';
 import { commandDescription, SUBCOMMANDS } from './commandCopy';
 import { COLOR } from './embeds';
 import { assertRowBudget, type HubCtx, navRow } from './hubNav';
+import { RESOLVE_PERMISSION_HINT } from './permissions';
 
 /**
  * `/dejavue help`.
@@ -13,7 +14,7 @@ import { assertRowBudget, type HubCtx, navRow } from './hubNav';
  */
 export function renderHelp(ctx: HubCtx): BaseMessageOptions {
   const commands = SUBCOMMANDS.map((c) => {
-    const who = c.who === 'admin' ? ' _(needs Manage Server)_' : '';
+    const who = c.who === 'admin' ? ' _(needs the **Manage Server** permission)_' : '';
     return `\`/dejavue ${c.name}\`${who}\n${c.help}`;
   }).join('\n\n');
 
@@ -37,7 +38,7 @@ export function renderHelp(ctx: HubCtx): BaseMessageOptions {
         value: [
           'Click **Mark as solved** on the post and type the answer, or right-click the helpful reply → **Apps → Mark as Answer**.',
           'When I suggest a duplicate, **Use this answer & close** copies the old answer across.',
-          'Only the original poster, a moderator or an admin can resolve a post.',
+          RESOLVE_PERMISSION_HINT,
         ].join('\n'),
       },
       { name: '📝 Commands', value: commands },

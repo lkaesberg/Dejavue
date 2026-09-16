@@ -74,7 +74,9 @@ It's useful for any server where the same questions keep coming back:
    matches — plus, on Plus and up, an **AI-drafted answer**.
 2. **Someone resolves it**: click **Mark as solved** (a modal captures the answer), right-click the
    helpful reply → **Apps → Mark as Answer**, or hit **Use this answer & close** to borrow a previous
-   answer. Only the **original poster, a moderator, or an admin** can resolve a thread.
+   answer. The person who asked can always resolve their own post; anyone else needs the
+   **Manage Threads**, **Timeout Members**, **Manage Server** or **Administrator** permission.
+   Dejavue defines no roles of its own.
 3. **Dejavue archives it**: swaps the `unsolved` → `solved` tag, stores the accepted answer plus the
    full transcript, embeds it for semantic search, writes an **AI summary** (Pro/Max), and — if the
    server opted in — publishes it to the public website.

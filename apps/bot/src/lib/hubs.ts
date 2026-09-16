@@ -10,6 +10,7 @@ import {
   type GuildBasedChannel,
   MessageFlags,
   ModalBuilder,
+  PermissionFlagsBits,
   type ModalSubmitInteraction,
   type RoleSelectMenuInteraction,
   StringSelectMenuBuilder,
@@ -20,6 +21,7 @@ import {
 import {
   activeForumChannels,
   APPROX_CREDITS_PER_FEATURE,
+  childLogger,
   customSimilarity,
   getEnv,
 } from '@dejavue/core';
@@ -43,6 +45,7 @@ import {
   updateGuildConfig,
 } from '@dejavue/db';
 import { embeddingModelId } from '@dejavue/ai';
+import { hasGuildPermission, permissionReport } from './botPerms';
 import { refreshAllChannelTopics } from './channelFit';
 import { showBrandingFor } from './branding';
 import { COLOR } from './embeds';
@@ -65,6 +68,8 @@ import { channelSyncDisplay, joinChannelLines, type LiveJobDisplay } from './syn
 import { getGuildTier, limitsFor } from './tier';
 import { prepareTopUpSkus } from './topUp';
 import { premiumButtonRows } from './upsell';
+
+const log = childLogger({ mod: 'hubs' });
 
 const PREFIX = 'dv:';
 export const isHubInteraction = (id: string): boolean => id.startsWith(PREFIX);
@@ -209,6 +214,10 @@ export async function renderDashboard(guild: Guild, ctx: HubCtx): Promise<BaseMe
         value: cfg?.kbPublishOptIn && kbUrl ? `on — ${kbUrl}${imprintWarn}` : cfg?.kbPublishOptIn ? `on — _set an address in_ \`/dejavue website\`${imprintWarn}` : 'off — _turn it on in_ `/dejavue website`',
       },
     );
+  embed.addFields({
+    name: 'My permissions',
+    value: permissionReport(guild, cfg?.forumChannelIds ?? [], cfg?.trackedChannelIds ?? []),
+  });
   if (limits.mcp && kbUrl) embed.addFields({ name: 'MCP (Pro & Max)', value: `\`${kbUrl}/mcp\`` });
   embed.setFooter({ text: 'Add a channel: /dejavue setup #channel · Re-scan one: /dejavue rescan #channel' });
 
@@ -535,6 +544,16 @@ export async function handleHubButton(interaction: ButtonInteraction): Promise<v
       await interaction.editReply('Run this in a server.');
       return;
     }
+    // Check before trying, and say exactly which permission is missing: the old
+    // catch-all blamed "permission to create a forum channel" for every failure,
+    // naming nothing an admin could actually grant.
+    if (!hasGuildPermission(interaction.guild, PermissionFlagsBits.ManageChannels)) {
+      await interaction.editReply(
+        "I can't build the demo — I'm missing the **Manage Channels** permission, which is what lets me create the example forum. " +
+          'Grant it in Server Settings → Roles → Dejavue and press **Create demo** again.',
+      );
+      return;
+    }
     try {
       const { runDemo } = await import('./demo');
       const res = await runDemo(interaction.guild);
@@ -542,8 +561,11 @@ export async function handleHubButton(interaction: ButtonInteraction): Promise<v
         `✅ Created <#${res.forumId}> with **${res.solved}** solved examples and **${res.fresh}** fresh questions.\n` +
           `_Done exploring? Just delete <#${res.forumId}> and I'll clean everything up automatically._`,
       );
-    } catch {
-      await interaction.editReply('Demo failed — I need permission to create a forum channel.');
+    } catch (err) {
+      log.warn({ err, guildId }, 'demo creation failed');
+      await interaction.editReply(
+        "Demo failed — I couldn't build the example forum. Please try again in a moment; if it keeps failing, check **My permissions** on this dashboard.",
+      );
     }
     return;
   }

@@ -1,27 +1,41 @@
 import { PermissionFlagsBits, type PermissionsBitField, type ThreadChannel } from 'discord.js';
 import { getDb, getThreadByDiscordId } from '@dejavue/db';
 
-// "Moderator group or admin" — any of these permissions counts. (Administrator
-// implies the rest, so admins always pass.)
-const MOD_PERMS = [
-  PermissionFlagsBits.Administrator,
-  PermissionFlagsBits.ManageGuild,
-  PermissionFlagsBits.ManageThreads,
-  PermissionFlagsBits.ModerateMembers,
-] as const;
+// The permissions that let someone resolve a post they didn't open — any one of
+// them counts. (Administrator implies the rest, so admins always pass.)
+//
+// Each carries the name Discord itself shows in Server Settings → Roles: a
+// refusal that says "you must be a moderator" names a role that may not exist,
+// leaving the member with nothing to ask their admin for.
+const MOD_PERMS: readonly [bigint, string][] = [
+  [PermissionFlagsBits.ManageThreads, 'Manage Threads'],
+  [PermissionFlagsBits.ModerateMembers, 'Timeout Members'],
+  [PermissionFlagsBits.ManageGuild, 'Manage Server'],
+  [PermissionFlagsBits.Administrator, 'Administrator'],
+];
 
-/** Only the thread creator, a moderator, or an admin may resolve a thread. */
+/** "Manage Threads, Timeout Members, Manage Server or Administrator" — bolded. */
+const MOD_PERM_LIST = ((names: string[]) =>
+  `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`)(
+  MOD_PERMS.map(([, label]) => `**${label}**`),
+);
+
+/** Only the thread creator, or someone holding one of MOD_PERMS, may resolve a thread. */
 export function canResolveThread(
   perms: Readonly<PermissionsBitField> | null,
   isOriginalPoster: boolean,
 ): boolean {
   if (isOriginalPoster) return true;
   if (!perms) return false;
-  return MOD_PERMS.some((p) => perms.has(p));
+  return MOD_PERMS.some(([bit]) => perms.has(bit));
 }
 
+/** The one-line "who may resolve a post", for help text. */
+export const RESOLVE_PERMISSION_HINT =
+  `The person who asked can always resolve their own post; anyone else needs the ${MOD_PERM_LIST} permission.`;
+
 export const NO_PERMISSION_MESSAGE =
-  'Only the original poster, a moderator, or an admin can mark this solved.';
+  `Only the person who asked can mark this post solved — or anyone with the ${MOD_PERM_LIST} permission. Dejavue uses no roles of its own.`;
 
 /**
  * Is this user the thread's original poster? `ownerId` can be null on a thread

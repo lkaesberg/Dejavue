@@ -28,7 +28,7 @@ export interface SubcommandCopy {
 export const SUBCOMMANDS = [
   {
     name: 'dashboard',
-    desc: 'See what Dejavue is watching — channels, index size, sync status and your plan',
+    desc: 'See what Dejavue is watching — channels, index size and sync status',
     who: 'admin',
     help: 'Your home screen: every indexed channel and how fresh it is, plus buttons to everything else.',
   },
@@ -87,13 +87,20 @@ export function subcommand(name: SubcommandName): SubcommandCopy {
   return found;
 }
 
+/** Appended to every admin-only subcommand description. */
+export const ADMIN_SUFFIX = ' (needs Manage Server)';
+
 /**
  * The description Discord shows, with the audience appended. Admin-only
  * subcommands still appear in every member's picker — Discord only supports
  * default permissions on the *top-level* command, and search/insights/help are
- * for everyone — so the "(admin)" suffix is what sets expectations.
+ * for everyone — so this suffix is what sets expectations.
+ *
+ * It names the Discord permission rather than saying "(admin)": Dejavue has no
+ * role of its own, and a member who sees "(admin)" can't tell what to ask for.
+ * The runtime refusals use the same words.
  */
 export function commandDescription(name: SubcommandName): string {
   const c = subcommand(name);
-  return c.who === 'admin' ? `${c.desc} (admin)` : c.desc;
+  return c.who === 'admin' ? `${c.desc}${ADMIN_SUFFIX}` : c.desc;
 }

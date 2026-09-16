@@ -346,7 +346,7 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     log.error({ err }, 'interaction handler failed');
     await safeReply(
       interaction,
-      '⚠️ Something went wrong handling that — please try again in a moment. If it keeps happening, check that I have the permissions listed in `/dejavue dashboard`.',
+      '⚠️ Something went wrong handling that — please try again in a moment. If it keeps happening, run `/dejavue dashboard`: **My permissions** there names anything I am missing.',
     );
   }
 }
