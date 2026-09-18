@@ -90,8 +90,8 @@ It's useful for any server where the same questions keep coming back:
 
 - Keyword (Free) or **semantic** (Plus+) duplicate detection on new posts, debounced with a
   starter-message retry so it never misses the question text
-- `/dejavue search` over the solved-answer archive, with `broad` / `balanced` / `exact` match presets
-  or a custom match threshold
+- `/dejavue search` over the solved-answer archive — private to the searcher, with `broad` /
+  `balanced` / `exact` match presets or a custom match threshold
 - **Use this answer & close** borrows a matched answer, posts it, and marks the post solved as a
   duplicate — or **Not a duplicate** dismisses the suggestion
 
@@ -166,7 +166,7 @@ Every admin screen links to every other one, so `/dejavue dashboard` is enough t
 |---------|-------------|-----|
 | `/dejavue dashboard` | See what Dejavue is watching — channels, index size, sync status and your plan | admin |
 | `/dejavue setup <channel> [mode]` | Start indexing a channel — forum, text or announcement | admin |
-| `/dejavue search <query> [match] [threshold]` | Search every answer Dejavue has archived | anyone |
+| `/dejavue search <query> [match] [threshold]` | Search every answer Dejavue has archived (results only you can see) | anyone |
 | `/dejavue insights` | Stats, resolution rate, top helpers, most-asked topics and the auto-FAQ | anyone |
 | `/dejavue settings` | Duplicate detection, stale-question nudges, the off-topic guard and cleanup | admin |
 | `/dejavue website` | Your public knowledge-base site — name, address, theme, privacy and imprint | admin |

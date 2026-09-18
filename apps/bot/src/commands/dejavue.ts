@@ -319,7 +319,11 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
       ? customThreshold / 100
       : (SEARCH_PRESET_SIMILARITY[match] ?? SEARCH_PRESET_SIMILARITY.balanced);
   const guildId = interaction.guildId!;
-  await interaction.deferReply();
+  // Ephemeral: a search is the asker's own half-formed question, and answering
+  // it in the open dumps an embed into whatever channel they happened to run it
+  // in. Only the searcher sees the results; they can still share a hit by
+  // pasting its thread link.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const db = getDb();
   const limits = limitsFor(await getGuildTier(guildId));
 

@@ -42,7 +42,7 @@ export const SUBCOMMANDS = [
     name: 'search',
     desc: 'Search every answer Dejavue has archived',
     who: 'anyone',
-    help: 'Find a past answer. `match` loosens or tightens results; `threshold` sets an exact minimum match %.',
+    help: 'Find a past answer — only you see the results. `match` loosens or tightens them; `threshold` sets an exact minimum match %.',
   },
   {
     name: 'insights',
