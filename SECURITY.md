@@ -16,7 +16,7 @@ Report it privately in either of these ways:
 - **GitHub** — open a
   [private security advisory](https://github.com/lkaesberg/Dejavue/security/advisories/new)
   (preferred; it keeps the discussion attached to the repo)
-- **Email** — [contact@larskaesberg.de](mailto:contact@larskaesberg.de)
+- **Email** — [contact@wksolutions.de](mailto:contact@wksolutions.de)
 
 Please include:
 
