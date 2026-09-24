@@ -1,5 +1,4 @@
 ---
-import { getEnv } from '@dejavue/core';
 import { channelGuidelinesOf, getDb, getPublishedThreads, type Thread } from '@dejavue/db';
 import AssistantDemo from '../components/AssistantDemo.astro';
 import DiscordIcon from '../components/DiscordIcon.astro';
@@ -13,6 +12,7 @@ import SearchDemo from '../components/SearchDemo.astro';
 import Base from '../layouts/Base.astro';
 import { channelPath, threadPath } from '../lib/slug';
 import SiteLayout from '../layouts/SiteLayout.astro';
+import { addToDiscordUrl, REPO_URL, SUPPORT_URL } from '../lib/site';
 import { brandOf, channelDot, channelHandle, channelKind } from '../lib/theme';
 import { jsonForScript } from '../lib/jsonScript';
 import { publicOrigin } from '../lib/origin';
@@ -22,7 +22,6 @@ const notFound = slug !== null && tenant === null;
 if (notFound) Astro.response.status = 404;
 
 const origin = publicOrigin(Astro.request);
-const env = getEnv();
 
 // ---- Tenant KB home data -------------------------------------------------
 let threads: Thread[] = [];
@@ -47,25 +46,9 @@ const chips = mostAsked.slice(0, 4).map((t) => {
 });
 const handle = channelHandle;
 
-// ---- Add-to-Discord install link (marketing) ------------------------------
-const PERMS = (
-  1024n /* View Channels */ +
-  16n /* Manage Channels */ +
-  2048n /* Send Messages */ +
-  16384n /* Embed Links */ +
-  65536n /* Read Message History */ +
-  17179869184n /* Manage Threads */ +
-  274877906944n /* Send Messages in Threads */
-).toString();
-const addUrl = env.DISCORD_CLIENT_ID
-  ? `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_CLIENT_ID}&scope=bot+applications.commands&permissions=${PERMS}`
-  : '#';
-
-// ---- Open source ----------------------------------------------------------
-// Dejavue is AGPL-3.0. The privacy argument on this page ("we don't track you",
-// "authors stay aliased") is only worth as much as it is checkable, so link the
-// source prominently rather than burying it in the footer.
-const repoUrl = 'https://github.com/lkaesberg/Dejavue';
+// ---- Add-to-Discord install link + source (marketing; see lib/site.ts) ----
+const addUrl = addToDiscordUrl() ?? '#';
+const repoUrl = REPO_URL;
 
 // ---- Marketing static content --------------------------------------------
 const featBtn =
@@ -249,6 +232,7 @@ const structuredData = {
             <a href="#kb" style="font-size:14px; color:#9AA0C3;">Knowledge Base</a>
             <a href="#mcp" style="font-size:14px; color:#9AA0C3;">MCP</a>
             <a href="#pricing" style="font-size:14px; color:#9AA0C3;">Pricing</a>
+            <a href={SUPPORT_URL} rel="noopener" style="font-size:14px; color:#9AA0C3;">Support</a>
             {/* Layout lives in .nav-icon-link, not inline: the mobile rule that hides
                 non-CTA nav links sets `display:none`, which an inline display would win against. */}
             <a class="nav-icon-link" href={repoUrl} rel="noopener" style="font-size:14px; color:#9AA0C3;"><GitHubIcon size={15} />Source</a>
@@ -415,6 +399,7 @@ const structuredData = {
           </div>
           <div style="display:flex; gap:24px; font-size:13px; color:#9AA0C3; flex-wrap:wrap; align-items:center;">
             <a href={repoUrl} rel="noopener" style="display:inline-flex; align-items:center; gap:7px; color:#9AA0C3;"><GitHubIcon size={14} />Source (AGPL-3.0)</a>
+            <a href={SUPPORT_URL} rel="noopener" style="color:#9AA0C3;">Support server</a>
             <a href="/terms" style="color:#9AA0C3;">Terms of Service</a>
             <a href="/privacy" style="color:#9AA0C3;">Privacy Policy</a>
             <a href="/imprint" style="color:#9AA0C3;">Impressum</a>

@@ -3,6 +3,7 @@
 // on the marketing domain. Tenant KBs render their own legal pages instead —
 // see pages/imprint.astro and pages/privacy.astro, which branch on the tenant.
 import Echo from '../components/Echo.astro';
+import { SUPPORT_URL } from '../lib/site';
 import SiteLayout from './SiteLayout.astro';
 import { publicOrigin } from '../lib/origin';
 
@@ -61,6 +62,7 @@ const tabs = [
         <span style="font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:15px; letter-spacing:-0.03em;">dejavue</span>
       </div>
       <div style="display:flex; gap:22px; font-size:13px; flex-wrap:wrap;">
+        <a href={SUPPORT_URL} rel="noopener" style="color:#9AA0C3;">Support server</a>
         <a href="/terms" style="color:#9AA0C3;">Terms of Service</a>
         <a href="/privacy" style="color:#9AA0C3;">Privacy Policy</a>
         <a href="/imprint" style="color:#9AA0C3;">Impressum</a>
