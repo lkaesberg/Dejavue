@@ -14,6 +14,7 @@ import Base from '../layouts/Base.astro';
 import { channelPath, threadPath } from '../lib/slug';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { brandOf, channelDot, channelHandle, channelKind } from '../lib/theme';
+import { jsonForScript } from '../lib/jsonScript';
 
 const { tenant, slug } = Astro.locals;
 const notFound = slug !== null && tenant === null;
@@ -234,7 +235,7 @@ const structuredData = {
     </Base>
   ) : (
     <SiteLayout title={pageTitle} description={pageDescription} canonical={`${origin}/`}>
-      <script type="application/ld+json" is:inline set:html={JSON.stringify(structuredData)} slot="head" />
+      <script type="application/ld+json" is:inline set:html={jsonForScript(structuredData)} slot="head" />
 
       {/* ===== NAV ===== */}
       <nav style="position:sticky; top:0; z-index:50; backdrop-filter:blur(14px); background:rgba(10,11,20,0.72); border-bottom:1px solid rgba(244,245,255,0.07);">

@@ -12,6 +12,7 @@ import ChannelRail from '../../../components/ChannelRail.astro';
 import KbFooter from '../../../components/KbFooter.astro';
 import KbNav from '../../../components/KbNav.astro';
 import Base from '../../../layouts/Base.astro';
+import { jsonForScript } from '../../../lib/jsonScript';
 import { renderDiscordMarkdown, resolveMentions } from '../../../lib/discordText';
 import { channelPath, extractThreadId, threadPath } from '../../../lib/slug';
 import { brandOf, channelKind } from '../../../lib/theme';
@@ -136,7 +137,9 @@ const jsonLd = thread
       canonical={`${origin}${threadPath(thread)}`}
       ogType="article"
     >
-      <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} slot="head" />
+      {/* jsonForScript, not JSON.stringify: the question and answer are user-written, and
+          a raw `</script>` in either would close this element and inject markup. */}
+      <script type="application/ld+json" is:inline set:html={jsonForScript(jsonLd)} slot="head" />
       <KbNav query="" />
       <div class="kb-inner">
         <ChannelRail channels={channels} activeChannelId={thread.channelId} topics={topics} isPaid={limits.generative} />
