@@ -22,8 +22,10 @@ interface Props {
   title: string;
   description?: string;
   canonical?: string;
+  /** Heading on the Discord card, when the SEO title is too long for it. Defaults to `title`. */
+  embedTitle?: string;
 }
-const { title, description, canonical } = Astro.props;
+const { title, description, canonical, embedTitle } = Astro.props;
 const origin = publicOrigin(Astro.request);
 // OG/Twitter require absolute image URLs. The card (self-hosted, no external
 // CDN) is the shared social card for every marketing page — designed like a
@@ -38,15 +40,15 @@ const pageUrl = canonical ?? `${origin}/`;
 // in the payload within its 10-second crawl budget.
 const discordEmbed = jsonForScript(
   buildComponentEmbed({
-    title,
+    title: embedTitle ?? title,
     url: pageUrl,
     tagline: 'Stop answering the same questions · free & open source',
     description,
     thumbnailUrl: `${origin}/web-app-manifest-512x512.png`,
     accentColor: '#7C3AED',
     buttons: [
-      { label: 'Add to Discord', url: addToDiscordUrl() ?? '' },
-      { label: 'Pricing', url: `${origin}/#pricing` },
+      { label: 'Add to your server', emoji: '➕', url: addToDiscordUrl() ?? '' },
+      { label: 'Quick start', url: `${REPO_URL}#quick-setup` },
       { label: 'Support server', url: SUPPORT_URL },
       { label: 'Source code', url: REPO_URL },
     ],

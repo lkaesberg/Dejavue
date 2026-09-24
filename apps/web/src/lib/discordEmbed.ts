@@ -15,6 +15,8 @@
 export interface EmbedButton {
   label: string;
   url: string;
+  /** A unicode emoji shown before the label, e.g. '➕'. */
+  emoji?: string;
 }
 
 export interface ComponentEmbedInput {
@@ -38,7 +40,7 @@ type TextDisplay = { type: 10; content: string };
 type Thumbnail = { type: 11; media: { url: string } };
 type Section = { type: 9; components: TextDisplay[]; accessory: Thumbnail };
 type Separator = { type: 14; divider: boolean; spacing: 1 | 2 };
-type LinkButton = { type: 2; style: 5; label: string; url: string };
+type LinkButton = { type: 2; style: 5; label: string; url: string; emoji?: { name: string } };
 type ActionRow = { type: 1; components: LinkButton[] };
 type Container = {
   type: 17;
@@ -62,18 +64,30 @@ const DESCRIPTION_MAX = 350;
 
 const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 
+const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/** Backslash-escape inline markdown; `<`/`>` neutralise mention, timestamp and quote syntax. */
+const escapeInline = (text: string): string => oneLine(text).replace(/[\\*_~`|[\]<>]/g, '\\$&');
+
 /**
- * Make dynamic text render literally in Discord markdown. Whitespace is collapsed to
- * one line first, so the only line start left is the beginning of the string. Discord
- * treats a backslash before any punctuation as an escape, so over-escaping is harmless;
- * `<` and `>` are included to neutralise mention/timestamp/command syntax and quotes.
+ * Make dynamic text render literally in a Discord text display. Whitespace is collapsed
+ * to one line first, so the only line start left is the beginning of the string, where
+ * heading, list and quote markers are escaped too.
  */
 export function escapeMarkdown(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat
-    .replace(/[\\*_~`|[\]<>]/g, '\\$&')
+  return escapeInline(text)
     .replace(/^[#+-]/, '\\$&')
     .replace(/^(\d+)\./, '$1\\.');
+}
+
+/**
+ * Text for a masked link's `[label]`. Discord does not process backslash escapes there
+ * (a title's `\|` showed up as a literal `\|`), so nothing is escaped; brackets become
+ * parentheses instead, since a `]` would end the label early and let a thread title
+ * point the rest of the link somewhere else. Other markdown in a label can only style it.
+ */
+export function linkLabel(text: string): string {
+  return oneLine(text).replace(/\[/g, '(').replace(/\]/g, ')');
 }
 
 /** A URL safe inside a markdown link target `(…)`. */
@@ -87,8 +101,9 @@ const hexToInt = (hex: string | undefined): number | undefined =>
   hex && /^#[0-9a-f]{6}$/i.test(hex) ? Number.parseInt(hex.slice(1), 16) : undefined;
 
 export function buildComponentEmbed(input: ComponentEmbedInput): ComponentEmbed {
-  const heading = `## [${escapeMarkdown(clip(input.title, TITLE_MAX))}](${linkTarget(input.url)})`;
-  const tagline = input.tagline ? `\n-# ${escapeMarkdown(input.tagline)}` : '';
+  const heading = `## [${linkLabel(clip(input.title, TITLE_MAX))}](${linkTarget(input.url)})`;
+  // Mid-line after `-# `, so only inline markdown needs escaping (a leading `#` is fine).
+  const tagline = input.tagline ? `\n-# ${escapeInline(input.tagline)}` : '';
   const texts: TextDisplay[] = [{ type: 10, content: heading + tagline }];
   if (input.description?.trim()) {
     texts.push({ type: 10, content: escapeMarkdown(clip(input.description.trim(), DESCRIPTION_MAX)) });
@@ -101,7 +116,13 @@ export function buildComponentEmbed(input: ComponentEmbedInput): ComponentEmbed 
   const buttons: LinkButton[] = input.buttons
     .filter((b) => b.label.trim() && isHttpUrl(b.url, BUTTON_URL_MAX))
     .slice(0, ROW_MAX)
-    .map((b) => ({ type: 2, style: 5, label: clip(b.label.trim(), LABEL_MAX), url: b.url }));
+    .map((b) => ({
+      type: 2,
+      style: 5,
+      label: clip(b.label.trim(), LABEL_MAX),
+      url: b.url,
+      ...(b.emoji ? { emoji: { name: b.emoji } } : {}),
+    }));
   if (buttons.length > 0) {
     components.push({ type: 14, divider: true, spacing: 1 }, { type: 1, components: buttons });
   }

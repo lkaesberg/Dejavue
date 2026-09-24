@@ -62,7 +62,7 @@ describe('buildComponentEmbed', () => {
               {
                 type: 10,
                 content:
-                  '## [Dejavue \\| Discord Duplicate Question Bot & Knowledge Base](https://dejavue.app/)\n-# Stop answering the same questions',
+                  '## [Dejavue | Discord Duplicate Question Bot & Knowledge Base](https://dejavue.app/)\n-# Stop answering the same questions',
               },
               { type: 10, content: 'Dejavue is a Discord bot that catches duplicate questions.' },
             ],
@@ -109,6 +109,40 @@ describe('buildComponentEmbed', () => {
     });
     expect(embed.component).not.toHaveProperty('accent_color');
     expect(embed.component.components[0]?.type).toBe(10);
+  });
+
+  it('never escapes the link label (Discord shows the backslash) but keeps a title from ending it', () => {
+    const embed = buildComponentEmbed({
+      ...base,
+      thumbnailUrl: null,
+      url: 'https://x.test/',
+      title: '[SOLVED] a](https://evil.test) b | c',
+    });
+    const heading = (embed.component.components[0] as { content: string }).content.split('\n')[0];
+    expect(heading).toBe('## [(SOLVED) a)(https://evil.test) b | c](https://x.test/)');
+    expect(heading).not.toContain('\\');
+  });
+
+  it('escapes only inline markdown in the tagline, which sits mid-line after `-# `', () => {
+    const embed = buildComponentEmbed({ ...base, thumbnailUrl: null, tagline: '#help-forum · **Q&A**' });
+    const content = (embed.component.components[0] as { content: string }).content;
+    expect(content.split('\n')[1]).toBe('-# #help-forum · \\*\\*Q&A\\*\\*');
+  });
+
+  it('puts a unicode emoji on a button as a partial emoji', () => {
+    const embed = buildComponentEmbed({
+      ...base,
+      buttons: [{ label: 'Add to your server', emoji: '➕', url: 'https://discord.com/oauth2/authorize' }],
+    });
+    expect(violations(embed)).toEqual([]);
+    const row = embed.component.components.at(-1) as { components: Record<string, unknown>[] };
+    expect(row.components[0]).toEqual({
+      type: 2,
+      style: 5,
+      label: 'Add to your server',
+      url: 'https://discord.com/oauth2/authorize',
+      emoji: { name: '➕' },
+    });
   });
 
   it('encodes characters that would end the markdown link target early', () => {

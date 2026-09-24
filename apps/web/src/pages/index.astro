@@ -219,7 +219,7 @@ const structuredData = {
       </div>
     </Base>
   ) : (
-    <SiteLayout title={pageTitle} description={pageDescription} canonical={`${origin}/`}>
+    <SiteLayout title={pageTitle} description={pageDescription} canonical={`${origin}/`} embedTitle="Dejavue">
       <script type="application/ld+json" is:inline set:html={jsonForScript(structuredData)} slot="head" />
 
       {/* ===== NAV ===== */}
