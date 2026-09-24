@@ -18,13 +18,14 @@ import { takeAll } from '../lib/rateLimit';
 import { clientIp } from '../lib/clientIp';
 import { threadPath } from '../lib/slug';
 import { brandOf } from '../lib/theme';
+import { publicOrigin } from '../lib/origin';
 
 const { tenant, cfg, slug, tier } = Astro.locals;
 const notFound = slug !== null && tenant === null;
 if (notFound) Astro.response.status = 404;
 
 const url = new URL(Astro.request.url);
-const origin = url.origin;
+const origin = publicOrigin(Astro.request);
 const query = (url.searchParams.get('q') ?? '').trim();
 const channelFilter = url.searchParams.get('channel') ?? undefined;
 const wantSemantic = url.searchParams.get('semantic') === '1';

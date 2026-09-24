@@ -6,12 +6,13 @@ import KbFooter from '../components/KbFooter.astro';
 import KbNav from '../components/KbNav.astro';
 import Base from '../layouts/Base.astro';
 import { brandOf } from '../lib/theme';
+import { publicOrigin } from '../lib/origin';
 
 const { tenant, cfg, slug, tier } = Astro.locals;
 const notFound = slug !== null && tenant === null;
 if (notFound || !tenant) Astro.response.status = 404;
 
-const origin = new URL(Astro.request.url).origin;
+const origin = publicOrigin(Astro.request);
 const brand = brandOf(cfg, tenant?.slug ?? undefined);
 const host = cfg?.customDomain ?? `${tenant?.slug}.dejavue.app`;
 const mcpUrl = `https://${host}/mcp`;

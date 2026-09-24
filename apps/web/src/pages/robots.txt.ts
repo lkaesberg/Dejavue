@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { publicOrigin } from '../lib/origin';
 
 const robots = (body: string) =>
   new Response(body, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
@@ -12,7 +13,7 @@ const robots = (body: string) =>
 const DISALLOW = 'Disallow: /search\nDisallow: /api/\n';
 
 export const GET: APIRoute = ({ locals, request }) => {
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   // Live tenant KB → invite crawlers and point them at the sitemap.
   if (locals.tenant) return robots(`User-agent: *\nAllow: /\n${DISALLOW}Sitemap: ${origin}/sitemap.xml\n`);
   // Apex marketing site (no subdomain) → should be indexed; point crawlers at

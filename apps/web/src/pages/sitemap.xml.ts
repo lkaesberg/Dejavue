@@ -1,6 +1,7 @@
 import { getDb, getPublishedThreads } from '@dejavue/db';
 import type { APIRoute } from 'astro';
 import { threadPath } from '../lib/slug';
+import { publicOrigin } from '../lib/origin';
 
 function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, (c) =>
@@ -27,7 +28,7 @@ function sitemapResponse(urls: SitemapUrl[]): Response {
 }
 
 export const GET: APIRoute = async ({ locals, request }) => {
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const tenant = locals.tenant;
 
   // Apex marketing site (no subdomain) → static sitemap of the public, indexable

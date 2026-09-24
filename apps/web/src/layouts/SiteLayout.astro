@@ -13,6 +13,7 @@ import '@fontsource/inter/700.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
+import { publicOrigin } from '../lib/origin';
 
 interface Props {
   title: string;
@@ -20,7 +21,7 @@ interface Props {
   canonical?: string;
 }
 const { title, description, canonical } = Astro.props;
-const origin = new URL(Astro.request.url).origin;
+const origin = publicOrigin(Astro.request);
 // OG/Twitter require absolute image URLs. The card (self-hosted, no external
 // CDN) is the shared social card for every marketing page — designed like a
 // thumbnail: the promise in display type plus the duplicate→solved story, so it

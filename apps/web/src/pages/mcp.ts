@@ -3,6 +3,7 @@ import { getDb, getKbAnswersByRowIds, hybridSearch, resolveGuildTier } from '@de
 import type { APIRoute } from 'astro';
 import { takeToken } from '../lib/rateLimit';
 import { threadPath } from '../lib/slug';
+import { publicOrigin } from '../lib/origin';
 
 // Minimal MCP (Streamable HTTP, stateless) server exposing each Pro guild's
 // knowledge base as a `search_knowledge_base` tool. Served per-tenant at
@@ -157,7 +158,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const messages = Array.isArray(body) ? body : [body];
   const responses: unknown[] = [];
 

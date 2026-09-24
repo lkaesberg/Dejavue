@@ -4,6 +4,7 @@
 // see pages/imprint.astro and pages/privacy.astro, which branch on the tenant.
 import Echo from '../components/Echo.astro';
 import SiteLayout from './SiteLayout.astro';
+import { publicOrigin } from '../lib/origin';
 
 interface Props {
   title: string;
@@ -14,7 +15,7 @@ interface Props {
   updated?: string;
 }
 const { title, description, heading, sub, active, updated } = Astro.props;
-const origin = new URL(Astro.request.url).origin;
+const origin = publicOrigin(Astro.request);
 const tabs = [
   { key: 'imprint', href: '/imprint', label: 'Impressum' },
   { key: 'privacy', href: '/privacy', label: 'Privacy Policy' },

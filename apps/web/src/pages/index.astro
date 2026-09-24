@@ -15,12 +15,13 @@ import { channelPath, threadPath } from '../lib/slug';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { brandOf, channelDot, channelHandle, channelKind } from '../lib/theme';
 import { jsonForScript } from '../lib/jsonScript';
+import { publicOrigin } from '../lib/origin';
 
 const { tenant, slug } = Astro.locals;
 const notFound = slug !== null && tenant === null;
 if (notFound) Astro.response.status = 404;
 
-const origin = new URL(Astro.request.url).origin;
+const origin = publicOrigin(Astro.request);
 const env = getEnv();
 
 // ---- Tenant KB home data -------------------------------------------------

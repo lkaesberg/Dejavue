@@ -15,11 +15,12 @@ import Base from '../../layouts/Base.astro';
 import { resolveMentions } from '../../lib/discordText';
 import { channelPath, channelSlug, threadPath } from '../../lib/slug';
 import { brandOf, channelHandle, channelKind } from '../../lib/theme';
+import { publicOrigin } from '../../lib/origin';
 
 const { tenant, cfg, tier } = Astro.locals;
 const param = Astro.params.channel ?? '';
 const url = new URL(Astro.request.url);
-const origin = url.origin;
+const origin = publicOrigin(Astro.request);
 const labelParam = url.searchParams.get('label') ?? undefined;
 
 let all: Thread[] = [];

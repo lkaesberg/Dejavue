@@ -16,12 +16,13 @@ import { jsonForScript } from '../../../lib/jsonScript';
 import { renderDiscordMarkdown, resolveMentions } from '../../../lib/discordText';
 import { channelPath, extractThreadId, threadPath } from '../../../lib/slug';
 import { brandOf, channelKind } from '../../../lib/theme';
+import { publicOrigin } from '../../../lib/origin';
 
 const { tenant, cfg, tier } = Astro.locals;
 // The route is /c/{channel-slug}/{title-slug}-{snowflake}. Only the trailing
 // id is the lookup key — both slugs are cosmetic and self-heal via redirect.
 const threadId = extractThreadId(Astro.params.thread ?? '');
-const origin = new URL(Astro.request.url).origin;
+const origin = publicOrigin(Astro.request);
 const limits = tierLimits(tier);
 
 let thread: Thread | undefined;
