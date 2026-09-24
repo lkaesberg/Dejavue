@@ -139,6 +139,12 @@ const fmtBytes = (n: number | undefined): string =>
       title={`${channelName} | ${brandOf(cfg, tenant?.slug ?? undefined)} Knowledge Base`}
       description={`${threads.length} solved answers in ${channelName}.`}
       canonical={`${origin}${canonicalPath}`}
+      embedTagline={`${channelHandle(channelName)} · ${kind.label}`}
+      embedButtons={[
+        { label: `Browse ${channelHandle(channelName)}`, url: `${origin}${canonicalPath}` },
+        { label: 'Search answers', url: `${origin}/search` },
+        { label: 'All channels', url: `${origin}/` },
+      ]}
     >
       <KbNav />
       <div class="kb-inner">

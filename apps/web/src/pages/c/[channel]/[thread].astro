@@ -15,7 +15,7 @@ import Base from '../../../layouts/Base.astro';
 import { jsonForScript } from '../../../lib/jsonScript';
 import { renderDiscordMarkdown, resolveMentions } from '../../../lib/discordText';
 import { channelPath, extractThreadId, threadPath } from '../../../lib/slug';
-import { brandOf, channelKind } from '../../../lib/theme';
+import { brandOf, channelHandle, channelKind } from '../../../lib/theme';
 import { publicOrigin } from '../../../lib/origin';
 
 const { tenant, cfg, tier } = Astro.locals;
@@ -137,6 +137,12 @@ const jsonLd = thread
       description={clean(thread.questionBody || thread.title).slice(0, 160)}
       canonical={`${origin}${threadPath(thread)}`}
       ogType="article"
+      embedTagline={`${isSolved ? '✓ Solved' : 'Answer'}${channelName ? ` in ${channelHandle(channelName)}` : ''}`}
+      embedButtons={[
+        { label: 'Read the answer', url: `${origin}${threadPath(thread)}` },
+        { label: 'Open in Discord', url: discordUrl },
+        { label: 'Search answers', url: `${origin}/search` },
+      ]}
     >
       {/* jsonForScript, not JSON.stringify: the question and answer are user-written, and
           a raw `</script>` in either would close this element and inject markup. */}

@@ -13,6 +13,9 @@ import '@fontsource/inter/700.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
+import { buildComponentEmbed } from '../lib/discordEmbed';
+import { jsonForScript } from '../lib/jsonScript';
+import { addToDiscordUrl, REPO_URL, SUPPORT_URL } from '../lib/site';
 import { publicOrigin } from '../lib/origin';
 
 interface Props {
@@ -29,6 +32,26 @@ const origin = publicOrigin(Astro.request);
 // own URL and doubles as og:url.
 const socialImage = `${origin}/media/og-card.png`;
 const pageUrl = canonical ?? `${origin}/`;
+// Discord component embed (see lib/discordEmbed.ts): the same title/description/URL as
+// the OG tags, laid out as a card with link buttons. The OG tags stay as the fallback.
+// The thumbnail is the 512px app icon (~14 KB), since Discord must fetch every image
+// in the payload within its 10-second crawl budget.
+const discordEmbed = jsonForScript(
+  buildComponentEmbed({
+    title,
+    url: pageUrl,
+    tagline: 'Stop answering the same questions · free & open source',
+    description,
+    thumbnailUrl: `${origin}/web-app-manifest-512x512.png`,
+    accentColor: '#7C3AED',
+    buttons: [
+      { label: 'Add to Discord', url: addToDiscordUrl() ?? '' },
+      { label: 'Pricing', url: `${origin}/#pricing` },
+      { label: 'Support server', url: SUPPORT_URL },
+      { label: 'Source code', url: REPO_URL },
+    ],
+  }),
+);
 ---
 
 <!doctype html>
@@ -69,6 +92,9 @@ const pageUrl = canonical ?? `${origin}/`;
     {description && <meta name="twitter:description" content={description} />}
     <meta name="twitter:image" content={socialImage} />
     <meta name="twitter:image:alt" content="Dejavue: never answer the same question twice" />
+
+    {/* Discord component embed — must be server-rendered; Discord's crawler runs no JS. */}
+    <script id="discord:component-embed" type="application/json" is:inline set:html={discordEmbed} />
 
     <slot name="head" />
     <style is:global>
