@@ -103,6 +103,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    # Memory limits keep a leak in one container from starving the shared VPS
+    # (the other services run there too); a container that hits its limit is
+    # restarted instead.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # Runs migrations once, then exits; the apps wait for it to succeed.
   migrate:
@@ -112,6 +119,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   bot:
     <<: *app
@@ -130,6 +141,12 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # bot and worker run the local embedding model and have peaked at ~1.7 GB
+    # (usually ~250 MB), so they get generous headroom.
+    deploy:
+      resources:
+        limits:
+          memory: 3G
 
   worker:
     <<: *app
@@ -147,6 +164,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 3G
 
   web:
     <<: *app
@@ -209,6 +230,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
   dejavue_pgdata:
