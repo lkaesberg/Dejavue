@@ -61,8 +61,19 @@ export async function fetchChannelInfo(channelId: string): Promise<{ name?: stri
   }
 }
 
-export async function postMessage(channelId: string, content: string): Promise<string | null> {
-  const res = (await rest().post(`/channels/${channelId}/messages`, { body: { content } })) as {
+/**
+ * Post a plain message. `content` can carry member-written text (a thread title), so
+ * Discord is told to ping nothing except the roles listed in `pingRoleIds`: no
+ * @everyone, @here, users or other roles, whatever the text says.
+ */
+export async function postMessage(
+  channelId: string,
+  content: string,
+  pingRoleIds: string[] = [],
+): Promise<string | null> {
+  const res = (await rest().post(`/channels/${channelId}/messages`, {
+    body: { content, allowed_mentions: { parse: [], roles: pingRoleIds } },
+  })) as {
     id?: string;
   };
   return res?.id ?? null;

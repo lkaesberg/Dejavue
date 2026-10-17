@@ -8,6 +8,7 @@ const log = childLogger({ mod: 'job:ingest-attachment' });
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 const MAX_DIMENSION = 1600; // longest side; plenty for a KB, keeps bytes tiny
 const WEBP_QUALITY = 72;
+const MAX_INPUT_PIXELS = 40_000_000; // ~ a 7700×5200 photo; sharp's default is ~268 MP
 
 /**
  * Re-host *images* only: download from Discord's CDN while the signed url is still
@@ -44,7 +45,8 @@ export async function handleIngestAttachment(job: IngestAttachmentJob): Promise<
       if (input.byteLength === 0 || input.byteLength > ATTACHMENT_DOWNLOAD_MAX_BYTES) continue;
 
       // Compress to a small webp (auto-orient, downscale, never upscale).
-      const data = await sharp(input, { failOn: 'none' })
+      // limitInputPixels: a small crafted PNG must not decode to gigabytes of pixels.
+      const data = await sharp(input, { failOn: 'none', limitInputPixels: MAX_INPUT_PIXELS })
         .rotate()
         .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: WEBP_QUALITY })

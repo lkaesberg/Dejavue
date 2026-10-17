@@ -386,6 +386,19 @@ export async function handleWebsite(interaction: ChatInputCommandInteraction): P
 }
 
 /**
+ * Every hub control re-checks Manage Server: the hub message is only shown to admins,
+ * but a member who lost the permission (or a replayed custom id) must not reach the
+ * domain, passphrase or publish settings.
+ */
+async function requireManageGuild(
+  interaction: StringSelectMenuInteraction | ButtonInteraction | ModalSubmitInteraction,
+): Promise<boolean> {
+  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+  await interaction.reply(eph('You need the **Manage Server** permission to change the website.'));
+  return false;
+}
+
+/**
  * Redraw the hub in place. The page comes from the custom id that fired, so a
  * theme change lands back on Appearance and a publish toggle lands back on the
  * site page — `page` lets a caller override that (the Appearance button).
@@ -405,6 +418,7 @@ async function rerender(
 
 /** Appearance selects (theme/accent/corners/font) — apply live, Plus+ only. */
 export async function handleCustomizeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!(await requireManageGuild(interaction))) return;
   const guildId = interaction.guildId!;
   // Theming is CSS variables on a page we already render — it costs nothing per guild,
   // so it is available on every tier. What Plus buys is removing the branding.
@@ -422,6 +436,7 @@ export async function handleCustomizeSelect(interaction: StringSelectMenuInterac
 
 /** Hub buttons: open the detail/imprint modals, or toggle publishing. */
 export async function handleCustomizeButton(interaction: ButtonInteraction): Promise<void> {
+  if (!(await requireManageGuild(interaction))) return;
   const guildId = interaction.guildId!;
   const db = getDb();
   const cfg = await ensureGuildConfig(db, guildId);
@@ -501,6 +516,7 @@ async function domainStatusEmbed(domain: string, kbHost: string): Promise<EmbedB
 
 /** Modal submissions: save details / imprint, then re-render the hub. */
 export async function handleCustomizeModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!(await requireManageGuild(interaction))) return;
   const guildId = interaction.guildId!;
   const db = getDb();
 

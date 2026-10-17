@@ -75,11 +75,13 @@ async function search(
     limit,
     minSimilarity: 0.3,
     modelId: embeddingModelId(model),
+    // Same rule as the public pages: only threads that are on the knowledge base.
+    publishedOnly: true,
   });
   if (matches.length === 0) return 'No matching solved questions found.';
 
   const answers = new Map(
-    (await getKbAnswersByRowIds(db, matches.map((m) => m.rowId))).map((a) => [a.rowId, a]),
+    (await getKbAnswersByRowIds(db, guildId, matches.map((m) => m.rowId))).map((a) => [a.rowId, a]),
   );
   return matches
     .map((m, i) => {
@@ -207,7 +209,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
           responses.push(fail(id, -32601, `Method not found: ${msg.method}`));
       }
     } catch (e) {
-      responses.push(fail(id, -32603, e instanceof Error ? e.message : 'Internal error'));
+      // Never hand database or provider error text to an anonymous caller.
+      console.error('mcp request failed', e);
+      responses.push(fail(id, -32603, 'Internal error'));
     }
   }
 

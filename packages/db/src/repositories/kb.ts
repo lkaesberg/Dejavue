@@ -102,9 +102,13 @@ export async function getPublishedThread(
   return row;
 }
 
-/** Fetch title + best answer (canonical summary or accepted) for row ids — for MCP results. */
+/**
+ * Fetch title + best answer (canonical summary or accepted) for row ids — for MCP results.
+ * Scoped to the tenant and to published threads, like every other public read.
+ */
 export async function getKbAnswersByRowIds(
   db: Database,
+  guildId: string,
   ids: string[],
 ): Promise<{ rowId: string; threadId: string; title: string; answer: string }[]> {
   if (ids.length === 0) return [];
@@ -117,7 +121,14 @@ export async function getKbAnswersByRowIds(
       accepted: thread.acceptedAnswerText,
     })
     .from(thread)
-    .where(inArray(thread.id, ids));
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        inArray(thread.id, ids),
+        eq(thread.publishedToKb, true),
+        eq(thread.doNotPublish, false),
+      ),
+    );
   return rows.map((r) => ({
     rowId: r.rowId,
     threadId: r.threadId,
@@ -135,7 +146,13 @@ export async function getDuplicatesOf(
   return db
     .select({ threadId: thread.threadId, title: thread.title })
     .from(thread)
-    .where(and(eq(thread.guildId, guildId), eq(thread.duplicateOfThreadId, originalThreadId)))
+    .where(
+      and(
+        eq(thread.guildId, guildId),
+        eq(thread.duplicateOfThreadId, originalThreadId),
+        eq(thread.doNotPublish, false),
+      ),
+    )
     .limit(50);
 }
 

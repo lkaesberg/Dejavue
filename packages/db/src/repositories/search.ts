@@ -38,6 +38,11 @@ export interface SemanticSearchOptions {
    */
   canonicalOnly?: boolean;
   /**
+   * Only threads that are on the public knowledge base (published, not marked
+   * do-not-publish). Set by every caller outside Discord, such as the MCP endpoint.
+   */
+  publishedOnly?: boolean;
+  /**
    * Only compare against embeddings produced by this model id. Set to the active
    * model so a provider/model switch never compares the query vector against
    * stale vectors from a different model (different geometry → garbage scores).
@@ -76,6 +81,7 @@ export async function semanticSearch(
     excludeThreadId,
     solvedOnly = true,
     canonicalOnly = true,
+    publishedOnly = false,
     sources = RETRIEVAL_SOURCES,
     modelId,
     efSearch = DEFAULT_EF_SEARCH,
@@ -95,6 +101,9 @@ export async function semanticSearch(
     if (solvedOnly) conditions.push(eq(thread.status, 'solved'));
     if (canonicalOnly) {
       conditions.push(isNull(thread.duplicateOfThreadId), eq(thread.markedDuplicate, false));
+    }
+    if (publishedOnly) {
+      conditions.push(eq(thread.publishedToKb, true), eq(thread.doNotPublish, false));
     }
     if (excludeThreadId) conditions.push(ne(thread.threadId, excludeThreadId));
 
@@ -134,6 +143,8 @@ export interface KeywordSearchOptions {
   solvedOnly?: boolean;
   /** Skip threads folded as a duplicate (on by default) — see SemanticSearchOptions. */
   canonicalOnly?: boolean;
+  /** Only threads on the public knowledge base — see SemanticSearchOptions. */
+  publishedOnly?: boolean;
 }
 
 /**
@@ -144,7 +155,15 @@ export async function keywordSearch(
   db: Database,
   opts: KeywordSearchOptions,
 ): Promise<SearchMatch[]> {
-  const { guildId, query, limit = 5, excludeThreadId, solvedOnly = true, canonicalOnly = true } = opts;
+  const {
+    guildId,
+    query,
+    limit = 5,
+    excludeThreadId,
+    solvedOnly = true,
+    canonicalOnly = true,
+    publishedOnly = false,
+  } = opts;
 
   const document = sql`to_tsvector('english', ${thread.title} || ' ' || ${thread.questionBody} || ' ' || coalesce(${thread.acceptedAnswerText}, ''))`;
   const tsquery = sql`websearch_to_tsquery('english', ${query})`;
@@ -154,6 +173,9 @@ export async function keywordSearch(
   if (solvedOnly) conditions.push(eq(thread.status, 'solved'));
   if (canonicalOnly) {
     conditions.push(isNull(thread.duplicateOfThreadId), eq(thread.markedDuplicate, false));
+  }
+  if (publishedOnly) {
+    conditions.push(eq(thread.publishedToKb, true), eq(thread.doNotPublish, false));
   }
   if (excludeThreadId) conditions.push(ne(thread.threadId, excludeThreadId));
 
@@ -269,6 +291,7 @@ export async function hybridSearch(
       excludeThreadId: semanticOpts.excludeThreadId,
       solvedOnly: semanticOpts.solvedOnly ?? true,
       canonicalOnly: semanticOpts.canonicalOnly ?? true,
+      publishedOnly: semanticOpts.publishedOnly ?? false,
     }),
   ]);
   return fuseMatches(semantic, keyword, { limit, minSimilarity, keywordBoost, includeKeywordOnly });

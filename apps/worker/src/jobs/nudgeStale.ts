@@ -40,6 +40,8 @@ export async function handleNudgeStale(job: NudgeStaleJob): Promise<void> {
         await postMessage(
           t.threadId,
           `${mention}⏳ ${title}has been waiting ${cfg.nudgeAfterHours}h without a solution — anyone able to help?`,
+          // Only the configured helper role may be pinged; the title is member-written.
+          cfg.nudgeHelperRoleId ? [cfg.nudgeHelperRoleId] : [],
         );
         await markThreadNudged(db, t.threadRowId);
       } catch (err) {
