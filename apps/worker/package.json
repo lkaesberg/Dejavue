@@ -17,6 +17,6 @@
     "@dejavue/queue": "workspace:*",
     "discord.js": "^14.26.4",
     "dotenv": "^17.4.2",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.5"
   }
 }
