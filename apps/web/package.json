@@ -19,7 +19,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
     "@huggingface/transformers": "^4.2.0",
-    "astro": "^7.2.9",
+    "astro": "^7.3.8",
     "openai": "^6.42.0",
     "pg-boss": "^12.19.1",
     "posthog-js": "^1.297.0"
