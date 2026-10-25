@@ -1,7 +1,7 @@
 # Dev-container image: plain Node 22 with pnpm available via corepack.
 # corepack enable writes to /usr/local/bin, so it must run at build time as
 # root — the container itself runs as the unprivileged `node` user.
-FROM node:22.23.4
+FROM node:24.22.1
 
 RUN corepack enable
 

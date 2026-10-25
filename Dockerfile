@@ -1,6 +1,6 @@
 # Shared image for bot / worker / web / migrate. The service command selects
 # which app to run (see docker-compose.yml).
-FROM node:22.23.4
+FROM node:24.22.1
 
 # pnpm via corepack (version pinned by package.json "packageManager")
 RUN corepack enable
