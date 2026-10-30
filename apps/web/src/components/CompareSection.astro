@@ -1,0 +1,622 @@
+---
+// "Dejavue vs. the alternatives" on the marketing home: the problem, why the usual
+// alternatives fall short, what Dejavue does, then the comparison table.
+//
+// Every competitor cell is sourced in docs/POSITIONING.md §9 (as of 2026-10-30). This is
+// comparative advertising (§6 UWG): keep each cell objective and verifiable, no
+// adjectives about competitors, and re-check the sources before changing a cell. If a
+// claim can't be verified any more, use mark 'none' ("not listed") rather than guess.
+// Logos live in public/competitors/ (never hotlinked); trademarks belong to their owners.
+import Echo from './Echo.astro';
+
+type Mark = 'yes' | 'partial' | 'no' | 'none' | 'text';
+interface Cell {
+  mark: Mark;
+  note: string;
+}
+interface Row {
+  label: string;
+  /** Same order as `products`: Dejavue, Answer Overflow, Kapa.ai, Discord. */
+  cells: [Cell, Cell, Cell, Cell];
+}
+interface Product {
+  name: string;
+  sub: string;
+  /** Local logo path; null renders the Dejavue Echo mark. */
+  logo: string | null;
+  ours?: boolean;
+}
+
+const products: Product[] = [
+  { name: 'Dejavue', sub: 'Discord bot', logo: null, ours: true },
+  { name: 'Answer Overflow', sub: 'Threads as web pages', logo: '/competitors/answer-overflow.png' },
+  { name: 'Kapa.ai', sub: 'AI assistant for docs', logo: '/competitors/kapa.png' },
+  { name: 'Discord forums', sub: 'Built-in search & tags', logo: '/competitors/discord.svg' },
+];
+
+const rows: Row[] = [
+  {
+    label: 'Replies to a repeat question with the earlier answer',
+    cells: [
+      { mark: 'yes', note: 'Automatically, with one-click close' },
+      { mark: 'partial', note: 'On request, via a “View Similar Threads” button' },
+      { mark: 'partial', note: 'AI answer from your indexed sources' },
+      { mark: 'no', note: 'Members search post titles themselves' },
+    ],
+  },
+  {
+    label: 'Mark-solved workflow with solved tags',
+    cells: [
+      { mark: 'yes', note: 'Button, form or right-click; tags swap automatically' },
+      { mark: 'yes', note: '“Mark Solution” command and solved tag' },
+      { mark: 'none', note: 'Not listed' },
+      { mark: 'partial', note: 'Tags and closing, by hand' },
+    ],
+  },
+  {
+    label: 'Covers regular text channels, not only forums',
+    cells: [
+      { mark: 'yes', note: 'Splits the chat into conversations' },
+      { mark: 'partial', note: 'Threads only; can open one per message' },
+      { mark: 'no', note: 'Imports Discord forum channels only' },
+      { mark: 'partial', note: 'Keyword message search' },
+    ],
+  },
+  {
+    label: 'Public help site that Google can index',
+    cells: [
+      { mark: 'yes', note: 'Free subdomain; own domain €29.99 once' },
+      { mark: 'yes', note: 'Hosted by Answer Overflow; own domain $250/mo' },
+      { mark: 'no', note: 'Answers via widget, bots and API' },
+      { mark: 'no', note: 'Visible to server members only' },
+    ],
+  },
+  {
+    label: 'Hides members’ Discord names on public pages',
+    cells: [
+      { mark: 'yes', note: 'Always, as aliases like “Helper 1”' },
+      { mark: 'partial', note: 'Optional setting, off by default' },
+      { mark: 'none', note: 'No public pages' },
+      { mark: 'none', note: 'No public pages' },
+    ],
+  },
+  {
+    label: 'Open source and self-hostable',
+    cells: [
+      { mark: 'yes', note: 'AGPL-3.0; every feature when self-hosted' },
+      { mark: 'partial', note: 'MIT-licensed code; self-hosting planned' },
+      { mark: 'none', note: 'Hosted service, EU or US region' },
+      { mark: 'none', note: 'Part of Discord' },
+    ],
+  },
+  {
+    label: 'Price',
+    cells: [
+      { mark: 'text', note: 'Free plan; ad-free from €4.99/mo per server' },
+      { mark: 'text', note: 'Free with ads; Advanced plan $250/mo' },
+      { mark: 'text', note: '14-day trial, then usage-based; open-source program' },
+      { mark: 'text', note: 'Included with Discord' },
+    ],
+  },
+];
+
+// Screen-reader text for the marks, which are icons. 'none' (the dash) needs none: its
+// note already says why ("Not listed", "No public pages").
+const srMark: Record<Mark, string> = {
+  yes: 'Yes.',
+  partial: 'Partly.',
+  no: 'No.',
+  none: '',
+  text: '',
+};
+
+// Shape, not just colour, tells the marks apart (check, half-filled circle, cross, dash).
+const markIcon: Record<Exclude<Mark, 'text'>, string> = {
+  yes: '<svg viewBox="0 0 20 20" width="100%" height="100%"><circle cx="10" cy="10" r="10" fill="rgba(45,212,191,0.16)"/><path d="M6 10.4l2.6 2.6L14.2 7.4" fill="none" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  partial:
+    '<svg viewBox="0 0 20 20" width="100%" height="100%"><circle cx="10" cy="10" r="8.25" fill="none" stroke="#A78BFA" stroke-width="1.5"/><path d="M10 4.5a5.5 5.5 0 0 1 0 11z" fill="#A78BFA"/></svg>',
+  no: '<svg viewBox="0 0 20 20" width="100%" height="100%"><circle cx="10" cy="10" r="10" fill="rgba(244,245,255,0.06)"/><path d="M7 7l6 6M13 7l-6 6" fill="none" stroke="#6F7596" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  none: '<svg viewBox="0 0 20 20" width="100%" height="100%"><path d="M5.5 10h9" stroke="#6F7596" stroke-width="1.8" stroke-linecap="round"/></svg>',
+};
+
+// The three alternatives most servers lean on today, in the story above the table.
+const today = [
+  {
+    name: 'Discord search',
+    logo: '/competitors/discord.svg',
+    text: 'works only if members search before they post, and forum search matches post titles.',
+  },
+  {
+    name: 'Answer Overflow',
+    logo: '/competitors/answer-overflow.png',
+    text: 'turns your threads into web pages for Google. In Discord, it lists similar threads when someone clicks a button.',
+  },
+  {
+    name: 'Kapa.ai',
+    logo: '/competitors/kapa.png',
+    text: 'answers from your docs with AI. After a 14-day trial it is priced by usage.',
+  },
+];
+---
+
+<section id="compare" class="compare" aria-labelledby="compare-title">
+  <div class="compare__inner">
+    <div class="compare__head">
+      <div class="compare__eyebrow">Why Dejavue</div>
+      <h2 id="compare-title" class="compare__title">The answer exists. Someone types it again anyway.</h2>
+      <p class="compare__lede">In a busy help channel the same questions come back every week. A moderator digs up the old thread or writes the answer from scratch. Volunteers lose evenings to it, and support teams pay for it in hours.</p>
+    </div>
+
+    <div class="compare__story">
+      <div class="compare__card">
+        <h3 class="compare__card-title">What servers use today</h3>
+        <ul class="compare__today">
+          {today.map((t) => (
+            <li>
+              <img src={t.logo} alt="" width="22" height="22" loading="lazy" decoding="async" class="compare__today-logo" />
+              <span><strong>{t.name}</strong> {t.text}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div class="compare__card compare__card--ours">
+        <h3 class="compare__card-title">What Dejavue does</h3>
+        <ul class="compare__ours">
+          <li><span class="compare__tick" aria-hidden="true">✓</span>Checks every new post in your help forums against the threads you already solved.</li>
+          <li><span class="compare__tick" aria-hidden="true">✓</span>Replies with the match a few seconds later. One click posts that answer and closes the question.</li>
+          <li><span class="compare__tick" aria-hidden="true">✓</span>Files each solved thread for search and your public help site, so the next repeat gets caught too.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="compare__wrap">
+      <table class="compare__table">
+        <caption class="compare__sr">Dejavue compared with Answer Overflow, Kapa.ai and Discord's built-in forum search and tags</caption>
+        <thead>
+          <tr>
+            <td class="compare__corner"></td>
+            {products.map((p) => (
+              <th scope="col" class:list={['compare__col', { 'compare__col--ours': p.ours }]}>
+                <span class="compare__brand">
+                  {p.logo ? (
+                    <img src={p.logo} alt={p.name} width="28" height="28" loading="lazy" decoding="async" class="compare__logo" />
+                  ) : (
+                    <Echo tile="gradient" size={28} style="border-radius:7px; flex-shrink:0;" />
+                  )}
+                  <span class="compare__brand-text">
+                    {/* With a logo, the img alt already names the product for screen readers. */}
+                    <span class="compare__brand-name" aria-hidden={p.logo ? 'true' : undefined}>{p.name}</span>
+                    <span class="compare__brand-sub">{p.sub}</span>
+                  </span>
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr>
+              <th scope="row" class="compare__label">{r.label}</th>
+              {r.cells.map((c, i) => {
+                const p = products[i]!;
+                return (
+                  <td class:list={['compare__cell', { 'compare__cell--ours': p.ours }]}>
+                    <span class="compare__cell-name">
+                      {p.logo ? (
+                        <img src={p.logo} alt="" width="18" height="18" loading="lazy" decoding="async" class="compare__cell-logo" />
+                      ) : (
+                        <Echo tile="gradient" size={18} style="border-radius:5px; flex-shrink:0;" />
+                      )}
+                      {p.name}
+                    </span>
+                    <span class="compare__value">
+                      {c.mark !== 'text' && (
+                        <span class="compare__mark" aria-hidden="true" set:html={markIcon[c.mark]} />
+                      )}
+                      <span class="compare__note">
+                        {srMark[c.mark] && <span class="compare__sr">{srMark[c.mark]} </span>}
+                        {c.note}
+                      </span>
+                    </span>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    {/* The legend explains the icons to sighted readers; screen readers get the words in each cell. */}
+    <p class="compare__legend" aria-hidden="true">
+      <span><span class="compare__legend-mark" set:html={markIcon.yes} />Yes</span>
+      <span><span class="compare__legend-mark" set:html={markIcon.partial} />Partly</span>
+      <span><span class="compare__legend-mark" set:html={markIcon.no} />No</span>
+      <span><span class="compare__legend-mark" set:html={markIcon.none} />Not listed or not applicable</span>
+    </p>
+    <p class="compare__fine">
+      Comparison based on each vendor's public website, documentation and published source code as of October 2026. Trademarks and logos belong to their owners. Spotted a mistake? <a href="mailto:contact@wksolutions.de?subject=Dejavue%20comparison">contact@wksolutions.de</a>
+    </p>
+  </div>
+</section>
+
+<style>
+  .compare {
+    padding: clamp(48px, 8vw, 80px) clamp(16px, 4vw, 32px);
+  }
+
+  .compare__inner {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .compare__head {
+    text-align: center;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+
+  .compare__eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #a78bfa;
+    font-weight: 500;
+  }
+
+  .compare__title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: clamp(28px, 5vw, 38px);
+    letter-spacing: -0.03em;
+    line-height: 1.12;
+    margin: 14px 0 0;
+  }
+
+  .compare__lede {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #9aa0c3;
+    margin: 16px 0 0;
+  }
+
+  /* ---- Story: today's alternatives vs. Dejavue ---- */
+  .compare__story {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 40px;
+  }
+
+  .compare__card {
+    background: rgba(27, 29, 51, 0.55);
+    border: 1px solid rgba(244, 245, 255, 0.1);
+    border-radius: 18px;
+    padding: 24px;
+  }
+
+  .compare__card--ours {
+    background: linear-gradient(180deg, rgba(79, 70, 229, 0.2), rgba(27, 29, 51, 0.6));
+    border-color: rgba(167, 139, 250, 0.4);
+  }
+
+  .compare__card-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 17px;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  .compare__today,
+  .compare__ours {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .compare__today li,
+  .compare__ours li {
+    display: flex;
+    gap: 11px;
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+
+  .compare__today li {
+    color: #9aa0c3;
+  }
+
+  .compare__today strong {
+    color: #dbdee1;
+    font-weight: 600;
+  }
+
+  .compare__today-logo {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .compare__ours li {
+    color: #dbdee1;
+  }
+
+  .compare__tick {
+    color: #2dd4bf;
+    flex-shrink: 0;
+  }
+
+  /* ---- Table ---- */
+  .compare__wrap {
+    margin-top: 24px;
+    overflow-x: auto;
+    border: 1px solid rgba(244, 245, 255, 0.08);
+    border-radius: 20px;
+    background: rgba(27, 29, 51, 0.45);
+  }
+
+  .compare__table {
+    width: 100%;
+    min-width: 680px;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+
+  .compare__corner {
+    width: 22%;
+  }
+
+  .compare__col {
+    padding: 22px 16px 18px;
+    text-align: left;
+    vertical-align: bottom;
+    font-weight: 400;
+    border-bottom: 1px solid rgba(244, 245, 255, 0.08);
+  }
+
+  .compare__col--ours,
+  .compare__cell--ours {
+    background: rgba(79, 70, 229, 0.14);
+    box-shadow:
+      inset 1px 0 0 rgba(167, 139, 250, 0.35),
+      inset -1px 0 0 rgba(167, 139, 250, 0.35);
+  }
+
+  .compare__col--ours {
+    background: linear-gradient(180deg, rgba(79, 70, 229, 0.3), rgba(79, 70, 229, 0.14));
+  }
+
+  .compare__brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .compare__logo {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    flex-shrink: 0;
+  }
+
+  .compare__brand-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .compare__brand-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    color: #f4f5ff;
+  }
+
+  .compare__brand-sub {
+    font-size: 12px;
+    color: #6f7596;
+    margin-top: 2px;
+  }
+
+  .compare__label {
+    padding: 18px 20px;
+    text-align: left;
+    vertical-align: top;
+    font-weight: 500;
+    font-size: 14.5px;
+    color: #f4f5ff;
+  }
+
+  .compare__cell {
+    padding: 18px 16px;
+    vertical-align: top;
+    color: #9aa0c3;
+  }
+
+  .compare__cell--ours {
+    color: #dbdee1;
+  }
+
+  tbody tr + tr .compare__label,
+  tbody tr + tr .compare__cell {
+    border-top: 1px solid rgba(244, 245, 255, 0.07);
+  }
+
+  .compare__cell-name {
+    display: none;
+  }
+
+  .compare__value {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+  }
+
+  .compare__mark {
+    display: block;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+  }
+
+  .compare__note {
+    min-width: 0;
+    padding-top: 1px;
+    /* Domains like "answeroverflow.com" must not push a narrow cell wider. */
+    overflow-wrap: anywhere;
+  }
+
+  .compare__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin: 16px 0 0;
+    font-size: 12.5px;
+    color: #6f7596;
+  }
+
+  .compare__legend > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .compare__legend-mark {
+    display: block;
+    width: 14px;
+    height: 14px;
+  }
+
+  .compare__fine {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #6f7596;
+  }
+
+  .compare__fine a {
+    color: #9aa0c3;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .compare__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Mid widths: stack each header's logo above its name so the columns stay readable. */
+  @media (max-width: 1080px) {
+    .compare__brand {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+  }
+
+  /* Tablets and phones: the story stacks and the table collapses into one card per
+     criterion. Each cell then shows its product name itself, because the column
+     headers are hidden. */
+  @media (max-width: 900px) {
+    .compare__story {
+      grid-template-columns: 1fr;
+    }
+
+    .compare__wrap {
+      overflow: visible;
+      border: none;
+      border-radius: 0;
+      background: none;
+    }
+
+    .compare__table,
+    .compare__table tbody,
+    .compare__table tr,
+    .compare__table th,
+    .compare__table td {
+      display: block;
+      width: auto;
+      min-width: 0;
+    }
+
+    .compare__table thead {
+      display: none;
+    }
+
+    .compare__table tr {
+      background: rgba(27, 29, 51, 0.55);
+      border: 1px solid rgba(244, 245, 255, 0.1);
+      border-radius: 18px;
+      padding: 6px;
+    }
+
+    .compare__table tr + tr {
+      margin-top: 12px;
+    }
+
+    tbody tr + tr .compare__label,
+    tbody tr + tr .compare__cell {
+      border-top: none;
+    }
+
+    .compare__label {
+      padding: 12px 12px 10px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: -0.01em;
+    }
+
+    /* `.compare__table` prefix: outranks the `display: block` reset above. */
+    .compare__table .compare__cell {
+      display: grid;
+      grid-template-columns: 7.25rem minmax(0, 1fr);
+      align-items: start;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+    }
+
+    .compare__cell + .compare__cell {
+      margin-top: 2px;
+    }
+
+    .compare__table .compare__cell--ours {
+      box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35);
+    }
+
+    .compare__cell-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-weight: 500;
+      color: #dbdee1;
+    }
+
+    .compare__cell-logo {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      flex-shrink: 0;
+    }
+  }
+</style>
