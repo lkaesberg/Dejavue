@@ -8,9 +8,10 @@ RUN corepack enable
 WORKDIR /app
 
 # Install with dev deps (tsx + astro are needed to run/build) BEFORE NODE_ENV
-# is set to production, so pnpm doesn't prune them.
+# is set to production, so pnpm doesn't prune them. --frozen-lockfile (as in CI)
+# installs exactly what pnpm-lock.yaml pins and fails if it drifts from package.json.
 COPY . .
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # Build the Astro web app (bot + worker run via tsx, no build step needed).
 RUN pnpm --filter @dejavue/web build
