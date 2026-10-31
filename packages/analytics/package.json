@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@dejavue/core": "workspace:*",
-    "posthog-node": "^4.18.0"
+    "posthog-node": "^5.57.2"
   }
 }
