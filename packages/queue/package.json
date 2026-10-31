@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@dejavue/core": "workspace:*",
-    "pg-boss": "^12.19.1"
+    "pg-boss": "^12.38.0"
   }
 }
