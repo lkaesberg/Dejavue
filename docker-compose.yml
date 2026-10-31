@@ -28,8 +28,10 @@ services:
       POSTGRES_USER: dejavue
       POSTGRES_PASSWORD: dejavue
       POSTGRES_DB: dejavue
+    # Loopback only: Docker's port rules bypass host firewalls, and this
+    # password is the public default above.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - dejavue_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -94,7 +96,7 @@ services:
       # pino-pretty isn't bundled into the Astro SSR server; keep JSON logs here.
       LOG_PRETTY: "0"
     ports:
-      - "4321:4321"
+      - "127.0.0.1:4321:4321"
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:4321/health >/dev/null || exit 1']
       interval: 30s
