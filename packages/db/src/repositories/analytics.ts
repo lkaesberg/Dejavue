@@ -1,6 +1,6 @@
 import { and, eq, gte, isNotNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../client';
-import { entitlement, generationEvent, guildConfig, thread } from '../schema';
+import { entitlement, generationEvent, thread } from '../schema';
 
 export interface ResolutionStats {
   total: number;
@@ -65,11 +65,12 @@ export async function topHelpers(
 // ---------------------------------------------------------------------------
 // Operator-facing rollup (the daily stats_snapshot event). Unlike the functions
 // above — which serve a guild its OWN numbers — this aggregates across the whole
-// instance, so it is the only thing here that is not guild-scoped.
+// instance, so it is the only thing here that is not guild-scoped. The server count is
+// not here: guild_config rows outlive the bot leaving and are only created on first
+// use, so the worker asks Discord for it instead.
 // ---------------------------------------------------------------------------
 
 export interface InstanceStats {
-  guildsInstalled: number;
   threadsIndexed: number;
   threadsSolved: number;
   messagesIndexed: number;
@@ -83,8 +84,7 @@ export interface InstanceStats {
 export async function instanceStats(db: Database): Promise<InstanceStats> {
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [[guilds], [threads], [msgs], skuRows, [embed], [credits]] = await Promise.all([
-    db.select({ n: sql<number>`count(*)::int` }).from(guildConfig),
+  const [[threads], [msgs], skuRows, [embed], [credits]] = await Promise.all([
     db
       .select({
         total: sql<number>`count(*)::int`,
@@ -118,7 +118,6 @@ export async function instanceStats(db: Database): Promise<InstanceStats> {
   ]);
 
   return {
-    guildsInstalled: guilds?.n ?? 0,
     threadsIndexed: threads?.total ?? 0,
     threadsSolved: threads?.solved ?? 0,
     messagesIndexed: msgs?.n ?? 0,

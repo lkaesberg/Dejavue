@@ -78,6 +78,7 @@ export const ALLOWED_PROPS = new Set([
   'guilds_plus',
   'guilds_pro',
   'guilds_max',
+  'members_total',
   'threads_indexed',
   'messages_indexed',
   'threads_solved',

@@ -19,6 +19,31 @@ export interface RawThread {
   applied_tags?: string[];
 }
 
+export interface RawBotGuild {
+  id: string;
+  approximate_member_count?: number;
+}
+
+/** Most guilds `/users/@me/guilds` returns per page. */
+const GUILD_PAGE = 200;
+
+/**
+ * Every server the bot is in, paged by ascending id. `with_counts` adds Discord's
+ * approximate member count, so this needs neither the gateway nor the members intent.
+ */
+export async function fetchBotGuilds(): Promise<RawBotGuild[]> {
+  const guilds: RawBotGuild[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const query = new URLSearchParams({ limit: String(GUILD_PAGE), with_counts: 'true' });
+    if (after) query.set('after', after);
+    const page = (await rest().get('/users/@me/guilds', { query })) as RawBotGuild[];
+    guilds.push(...page);
+    after = page.at(-1)?.id;
+    if (page.length < GUILD_PAGE || !after) return guilds;
+  }
+}
+
 export async function fetchActiveGuildThreads(guildId: string): Promise<RawThread[]> {
   const res = (await rest().get(`/guilds/${guildId}/threads/active`)) as { threads?: RawThread[] };
   return res.threads ?? [];
