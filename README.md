@@ -342,6 +342,27 @@ CPU embedding model is cached in a named volume. The web app listens on port **4
 docker compose exec bot pnpm --filter @dejavue/bot register
 ```
 
+#### 5. Encrypt the database at rest (optional)
+
+Postgres has no built-in encryption, so `scripts/encrypt-db-volume.sh` encrypts the storage under it,
+the way managed database providers do. It moves the Postgres volume into a LUKS2 container
+mounted at the volume's own folder, so Docker, Coolify and the compose files keep using the same
+volume and the official pgvector image is unchanged. It works for this compose file and for
+Coolify alike (run it in Coolify's server terminal).
+
+```bash
+sudo bash scripts/encrypt-db-volume.sh setup     # asks for a passphrase, then encrypts
+sudo bash scripts/encrypt-db-volume.sh status
+sudo bash scripts/encrypt-db-volume.sh cleanup   # once verified: delete the unencrypted copies
+```
+
+Setup asks for a passphrase. Paste one from your password manager, or let the script generate
+one and save it there; it asks you to paste it back before changing anything. The same
+passphrase is stored in a key file on the server so the volume unlocks by itself at boot. Your
+password-manager copy is the way back in if that file is ever lost. Dejavue is offline for the
+copy, usually under a minute. Setup checks that every table has the same row count afterwards,
+and `rollback` undoes it until you run `cleanup`. Needs root, systemd and a Linux host.
+
 ---
 
 ### Manual Installation
