@@ -5,8 +5,8 @@ import { getEnv } from '@dejavue/core';
 // linked prominently rather than buried in the footer.
 export const REPO_URL = 'https://github.com/lkaesberg/Dejavue';
 
-/** Invite to Dejavue's own support server (the platform's, not a tenant's). */
-export const SUPPORT_URL = 'https://discord.gg/aGC2RGwbHj';
+// Shared with the bot, which links it from the welcome DM.
+export { SUPPORT_URL } from '@dejavue/core';
 
 const INSTALL_PERMS = [
   1024n, // View Channels

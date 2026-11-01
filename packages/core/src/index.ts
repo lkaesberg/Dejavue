@@ -13,3 +13,4 @@ export * from './passphrase';
 export * from './media';
 export * from './segment';
 export * from './progress';
+export * from './links';

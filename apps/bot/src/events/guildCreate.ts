@@ -1,20 +1,16 @@
 import { capture } from '@dejavue/analytics';
 import {
-  ActionRowBuilder,
   AuditLogEvent,
-  ButtonBuilder,
-  ButtonStyle,
   ChannelType,
-  EmbedBuilder,
   type Guild,
   type GuildBasedChannel,
   PermissionFlagsBits,
   type TextChannel,
   type User,
 } from 'discord.js';
-import { childLogger, getEnv } from '@dejavue/core';
+import { childLogger } from '@dejavue/core';
 import { getDb, markGuildsPresent } from '@dejavue/db';
-import { COLOR } from '../lib/embeds';
+import { arrivalNotice, setupGuide } from '../lib/welcome';
 
 const log = childLogger({ mod: 'event:guildCreate' });
 
@@ -80,53 +76,8 @@ async function inviterOf(guild: Guild): Promise<Installer | null> {
 
 /** The walkthrough. Returns false when the DM couldn't be delivered. */
 async function sendSetupDm(guild: Guild, user: Installer): Promise<boolean> {
-  const embed = new EmbedBuilder()
-    .setColor(COLOR)
-    .setTitle(`👋 Thanks for adding Dejavue to ${guild.name}`)
-    .setDescription(
-      'I catch duplicate questions in your help channels and turn solved threads into a searchable knowledge base — inside Discord, and on a public website if you want one.',
-    )
-    .addFields(
-      {
-        name: '1️⃣ Add a channel',
-        value:
-          '`/dejavue setup #your-help-forum`\nFor forums I create the `solved` / `unsolved` tags and start importing past threads straight away. Text and announcement channels work too — they get indexed as searchable content.',
-      },
-      {
-        name: '2️⃣ Watch it land',
-        value:
-          '`/dejavue dashboard`\nEverything I am watching, how far each import has got, and buttons through to the rest. This is the screen to come back to.',
-      },
-      {
-        name: '3️⃣ Tune what I do on my own',
-        value:
-          '`/dejavue settings`\nDuplicate sensitivity, stale-question nudges and the off-topic guard — one page each, every setting explaining what it does and what your members will see.',
-      },
-      {
-        name: '4️⃣ Publish it (optional)',
-        value: '`/dejavue website`\nTurn the archive into a public, searchable site with its own address.',
-      },
-      {
-        name: '💡 Just exploring?',
-        value:
-          'Run `/dejavue dashboard` and hit **Create demo** — I build an example forum you can delete when you are done.',
-      },
-      {
-        name: '🔑 Permissions I need',
-        value:
-          "In your help channels: *View Channel, Send Messages in Threads, Embed Links, Read Message History, Manage Threads* and *Manage Channels*. Manage Channels is what lets me create and swap the `solved` / `unsolved` tags. `/dejavue setup` tells you if any are missing.",
-      },
-    )
-    .setFooter({ text: 'Powered by Dejavue' });
-
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setLabel('Docs & website').setEmoji('🌐').setStyle(ButtonStyle.Link).setURL(getEnv().KB_PUBLIC_URL),
-  );
-
   try {
-    // Link buttons only: a DM interaction carries no guild, so none of the hub
-    // components could do anything here.
-    await user.send({ embeds: [embed], components: [row] });
+    await user.send(setupGuide(guild.name));
     return true;
   } catch (err) {
     const code = (err as { code?: number }).code;
@@ -141,34 +92,12 @@ async function sendSetupDm(guild: Guild, user: Installer): Promise<boolean> {
 
 /**
  * The public note. Short when the installer already has the walkthrough in their
- * DMs, the full thing when they don't — so nobody ends up with no instructions.
+ * DMs, the full guide when they don't — so nobody ends up with no instructions.
  */
 async function postChannelNotice(guild: Guild, dmedTo: Installer | null): Promise<void> {
   const channel = welcomeChannel(guild);
   if (!channel) return;
-  const embed = new EmbedBuilder().setColor(COLOR).setFooter({ text: 'Powered by Dejavue' });
-
-  if (dmedTo) {
-    embed
-      .setTitle('👋 Dejavue is here')
-      .setDescription(
-        `I catch duplicate questions and turn solved threads into a searchable knowledge base.\n\nI've sent <@${dmedTo.id}> the setup steps — any admin can also run \`/dejavue help\`, or jump straight to \`/dejavue setup #your-help-forum\`.`,
-      );
-  } else {
-    embed.setTitle('👋 Thanks for adding Dejavue!').setDescription(
-      [
-        'I catch duplicate questions in your help forums and turn solved threads into a searchable knowledge base.',
-        '',
-        '**Get started** → `/dejavue setup #your-help-forum` to add a channel.',
-        '**See what I am watching** → `/dejavue dashboard`.',
-        '**Just exploring?** Run `/dejavue dashboard` and hit **Create demo** for an example forum to play with.',
-        '**Everything else** → `/dejavue help`.',
-        '',
-        "**Permissions I need** in your help channels so I can post prompts, tag solved posts, and archive threads: *View Channel, Send Messages in Threads, Embed Links, Read Message History, Manage Threads,* and *Manage Channels*. `/dejavue setup` tells you if any are missing.",
-      ].join('\n'),
-    );
-  }
-  await channel.send({ embeds: [embed] });
+  await channel.send(dmedTo ? arrivalNotice(dmedTo.id) : setupGuide(guild.name, { inChannel: true }));
 }
 
 /** The system channel if we can post there, else the first text channel we can post in. */
