@@ -83,6 +83,11 @@ const EnvSchema = z.object({
   // (with EMBEDDING_API_KEY) to call OpenAI directly instead.
   EMBEDDING_BASE_URL: z.string().optional(),
   EMBEDDING_API_KEY: z.string().optional(),
+  // Local backend only: where another process serves the model (the worker's
+  // http://worker:8090). The local model takes ~1.6 GB per process, so the bot and web
+  // set this and send their texts there instead of each loading a copy. Never set it
+  // on the worker itself — that is the process that holds the model.
+  EMBEDDING_SERVICE_URL: z.string().optional(),
   // Hard ceiling on how many chunks a single thread is split into. 0 = unlimited
   // (the default): every message in the thread is embedded. Setting a positive
   // value keeps the canonical Q&A chunk and the accepted-answer chunk, then keeps

@@ -52,9 +52,12 @@ services:
   bot:
     <<: *app
     command: ["pnpm", "--filter", "@dejavue/bot", "start"]
-    # Persist the downloaded CPU embedding model across restarts.
-    volumes:
-      - dejavue_models:/app/.models
+    # Service `environment` replaces the anchor's, so repeat what's needed.
+    environment:
+      DATABASE_URL: postgres://dejavue:dejavue@postgres:5432/dejavue
+      NODE_ENV: production
+      # Only the worker loads the local embedding model (~1.6 GB); the bot asks it.
+      EMBEDDING_SERVICE_URL: http://worker:8090
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:8091/health || exit 1']
       interval: 30s
@@ -70,6 +73,8 @@ services:
   worker:
     <<: *app
     command: ["pnpm", "--filter", "@dejavue/worker", "start"]
+    # The one process that loads the local embedding model; it also serves POST /embed
+    # on :8090 to the bot and web. The volume keeps the downloaded model across restarts.
     volumes:
       - dejavue_models:/app/.models
     healthcheck:
@@ -95,6 +100,8 @@ services:
       PORT: "4321"
       # pino-pretty isn't bundled into the Astro SSR server; keep JSON logs here.
       LOG_PRETTY: "0"
+      # Semantic search embeds queries through the worker instead of loading the model.
+      EMBEDDING_SERVICE_URL: http://worker:8090
     ports:
       - "127.0.0.1:4321:4321"
     healthcheck:

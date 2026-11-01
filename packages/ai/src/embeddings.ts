@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   AutoModel,
   AutoTokenizer,
@@ -539,6 +540,22 @@ export interface EmbedResult {
  * signal there is — nothing else in the system knows what indexing costs.
  */
 export async function embedBatch(texts: string[], opts: EmbedOptions): Promise<EmbedResult> {
+  return runEmbed(texts, opts, getEnv().EMBEDDING_SERVICE_URL);
+}
+
+/**
+ * The model-holding side of the embedding service (the worker's POST /embed): always runs
+ * the local model, whatever EMBEDDING_SERVICE_URL says, so it can never call itself.
+ */
+export async function embedBatchLocal(texts: string[], opts: EmbedOptions): Promise<EmbedResult> {
+  return runEmbed(texts, opts, undefined);
+}
+
+async function runEmbed(
+  texts: string[],
+  opts: EmbedOptions,
+  serviceUrl: string | undefined,
+): Promise<EmbedResult> {
   const info = resolveModel(opts.model);
   if (texts.length === 0) return { vectors: [], tokens: 0, modelId: info.id };
 
@@ -546,6 +563,8 @@ export async function embedBatch(texts: string[], opts: EmbedOptions): Promise<E
   let tokens: number;
   if (info.provider === 'openrouter') {
     ({ vectors, tokens } = await embedViaApi(texts, info.apiModel as string, info.dim));
+  } else if (serviceUrl) {
+    ({ vectors, tokens } = await embedViaService(serviceUrl, texts, opts, info.id));
   } else {
     const prefix =
       opts.mode === 'query'
@@ -575,6 +594,64 @@ export async function embedBatch(texts: string[], opts: EmbedOptions): Promise<E
     }
   }
   return { vectors, tokens, modelId: info.id };
+}
+
+// ---------------------------------------------------------------------------
+// Embedding service: one process (the worker) holds the local model and the others ask
+// it. The model costs ~1.6 GB of RAM per process, which the web container's limit can't
+// fit at all and which the bot would otherwise pay a second time.
+// ---------------------------------------------------------------------------
+
+/** Most texts one service request may carry — queries come one at a time. */
+export const EMBED_SERVICE_MAX_TEXTS = 64;
+
+/**
+ * Shared secret for the service, derived from the bot token every Dejavue process already
+ * has, so it needs no setting of its own. The endpoint is only on the stack's internal
+ * network; this keeps anything else that can reach it from burning the worker's CPU.
+ */
+export function embedServiceToken(): string {
+  return createHmac('sha256', requireEnv('DISCORD_TOKEN')).update('dejavue-embedding-service').digest('hex');
+}
+
+/** Constant-time check of an Authorization header against {@link embedServiceToken}. */
+export function isEmbedServiceAuthorized(header: string | undefined): boolean {
+  const expected = Buffer.from(`Bearer ${embedServiceToken()}`);
+  const given = Buffer.from(header ?? '');
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+async function embedViaService(
+  url: string,
+  texts: string[],
+  opts: EmbedOptions,
+  expectedModelId: string,
+): Promise<{ vectors: number[][]; tokens: number }> {
+  const vectors: number[][] = [];
+  let tokens = 0;
+  for (let i = 0; i < texts.length; i += EMBED_SERVICE_MAX_TEXTS) {
+    const res = await fetch(new URL('/embed', url), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${embedServiceToken()}` },
+      body: JSON.stringify({
+        texts: texts.slice(i, i + EMBED_SERVICE_MAX_TEXTS),
+        mode: opts.mode,
+        model: opts.model,
+      }),
+      // The worker loads the model on its first request, which can take a while.
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) throw new Error(`embedding service at ${url} answered ${res.status}`);
+    const body = (await res.json()) as EmbedResult;
+    if (body.modelId !== expectedModelId) {
+      throw new Error(
+        `embedding service used ${body.modelId}, expected ${expectedModelId} — check EMBEDDING_MODEL`,
+      );
+    }
+    vectors.push(...body.vectors);
+    tokens += body.tokens;
+  }
+  return { vectors, tokens };
 }
 
 /** Embed a batch of texts into normalized vectors using the active provider. */
@@ -652,8 +729,11 @@ export async function embedQueryCached(text: string, opts?: { model?: string }):
   return vector;
 }
 
-/** Eagerly warm the model so the first real request isn't slow (local only). */
+/**
+ * Eagerly load the local model in THIS process so the first real request isn't slow —
+ * meant for the process that holds it (the worker). API providers: nothing to preload.
+ */
 export async function warmup(model?: string): Promise<void> {
-  if (resolveModel(model).provider !== 'local') return; // API providers: nothing to preload
-  await embed(['warmup'], { mode: 'query', model });
+  if (resolveModel(model).provider !== 'local') return;
+  await embedBatchLocal(['warmup'], { mode: 'query', model });
 }

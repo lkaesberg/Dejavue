@@ -127,9 +127,10 @@ services:
   bot:
     <<: *app
     command: ['pnpm', '--filter', '@dejavue/bot', 'start']
-    # Persist the downloaded CPU embedding model across restarts.
-    volumes:
-      - dejavue_models:/app/.models
+    environment:
+      <<: *env
+      # Only the worker loads the local embedding model (~1.6 GB); the bot asks it.
+      EMBEDDING_SERVICE_URL: http://worker:8090
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:8091/health || exit 1']
       interval: 30s
@@ -141,8 +142,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    # bot and worker run the local embedding model and have peaked at ~1.7 GB
-    # (usually ~250 MB), so they get generous headroom.
+    # The bot no longer runs the embedding model (it asks the worker), but keeps its
+    # headroom until its own peak is measured without it.
     deploy:
       resources:
         limits:
@@ -151,6 +152,9 @@ services:
   worker:
     <<: *app
     command: ['pnpm', '--filter', '@dejavue/worker', 'start']
+    # The one process that runs the local embedding model: it embeds threads for its jobs
+    # and serves POST /embed on :8090 to the bot and web. The volume keeps the downloaded
+    # model across restarts. Loaded it measures ~1.6 GB, hence the headroom below.
     volumes:
       - dejavue_models:/app/.models
     healthcheck:
@@ -176,14 +180,11 @@ services:
       <<: *env
       HOST: '0.0.0.0'
       PORT: '4321'
+      # Semantic KB search and the MCP endpoint embed queries through the worker. Loading
+      # the model here (~1.6 GB) blew through the 512M limit below and took the site down.
+      EMBEDDING_SERVICE_URL: http://worker:8090
     expose:
       - '4321'
-    # The web app embeds search queries too (KB search + the MCP endpoint), so under
-    # EMBEDDING_PROVIDER=local it needs the same model cache as bot/worker — otherwise
-    # it re-downloads the ONNX weights into the container on the first search after
-    # every deploy, and that cold start lands on a visitor.
-    volumes:
-      - dejavue_models:/app/.models
     # The HostRegexp below is written out literally, NOT as ${KB_BASE_DOMAIN_REGEX}.
     # Coolify deploys this app with "escape special characters in labels" on, which
     # rewrites every `$` in a label to `$$`. Compose then reads `$$` as a literal `$`,

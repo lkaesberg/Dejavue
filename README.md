@@ -446,6 +446,7 @@ installs dependencies, and runs migrations automatically (ports 4321/5432/8090 f
 | `TRUSTED_PROXY_HOPS` | How many reverse proxies sit in front, each appending to `X-Forwarded-For`. Decides which entry is trustworthy for rate-limit keys. `0` (default) ignores the header and uses the socket peer — correct for a directly exposed app. Traefik alone = `1`; Cloudflare + Traefik = `2`. Setting it **too high** is the dangerous direction |
 | `EMBEDDING_PROVIDER` | `local` (default, free CPU) or `openrouter` |
 | `EMBEDDING_MODEL` | Embedding model id — see the table below |
+| `EMBEDDING_SERVICE_URL` | *(Local provider)* Set on bot and web only, to `http://worker:8090`: they ask the worker to embed instead of each loading the ~1.6 GB model. Both compose files set it |
 | `QUOTA_CREDITS_PLUS` / `_PRO` / `_MAX` | Monthly AI credits per tier (250 / 2,500 / 12,000) |
 | `QUOTA_EMBED_TOKENS_FREE` / `_PLUS` / `_PRO` / `_MAX` | Monthly embedding-token ceiling per tier. A runaway guard, not the product limit (indexed messages is) — fail-closed on Free, alert-only on paid |
 | `EMBED_MAX_CHUNKS_PER_THREAD` | Max chunks a single thread is split into. `0` (default) = unlimited, i.e. every message is embedded |

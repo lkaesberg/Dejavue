@@ -1,3 +1,4 @@
+import { warmup } from '@dejavue/ai';
 import { shutdownAnalytics } from '@dejavue/analytics';
 import '@dejavue/core/env-preload';
 import { createServer, type Server } from 'node:http';
@@ -30,6 +31,7 @@ import { handleRegenFaq } from './jobs/regenFaq';
 import { handleReindexChannel } from './jobs/reindexChannel';
 import { handleRevalidateKb } from './jobs/revalidateKb';
 import { handleSummarizeThread } from './jobs/summarizeThread';
+import { handleEmbedRequest } from './lib/embedService';
 
 const log = logger();
 installCrashHandlers('worker');
@@ -42,13 +44,18 @@ installCrashHandlers('worker');
 const CHANNEL_JOB_CONCURRENCY = getEnv().CHANNEL_JOB_CONCURRENCY;
 
 /**
- * Liveness endpoint for deploy orchestration: 200 when the DB is reachable.
+ * Liveness endpoint for deploy orchestration: 200 when the DB is reachable. The same
+ * internal server carries the embedding service (POST /embed) the bot and web call.
  * Best effort — a taken port (e.g. a second local worker next to the Docker
  * one) must not crash job processing, so listen errors only log a warning.
  */
 function startHealthServer(): Server {
   const port = Number(process.env.HEALTH_PORT ?? 8090);
   const server = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/embed') {
+      void handleEmbedRequest(req, res);
+      return;
+    }
     if (req.url !== '/health') {
       res.writeHead(404).end();
       return;
@@ -98,6 +105,9 @@ async function main(): Promise<void> {
   await schedule(QUEUES.GUILD_RETENTION, '30 3 * * *');
 
   health = startHealthServer();
+  // The bot and web embed through this process (POST /embed), so load the local model
+  // now rather than making the first duplicate check or website search wait for it.
+  void warmup().catch((err) => log.warn({ err }, 'embedding model warmup failed'));
   log.info('Dejavue worker started');
   notifyAsync({ level: 'success', title: '✅ Worker online' });
 }
