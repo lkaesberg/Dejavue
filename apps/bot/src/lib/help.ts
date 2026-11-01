@@ -1,5 +1,5 @@
 import { type BaseMessageOptions, EmbedBuilder } from 'discord.js';
-import { commandDescription, SUBCOMMANDS } from './commandCopy';
+import { type Audience, commandDescription, SUBCOMMANDS } from './commandCopy';
 import { COLOR } from './embeds';
 import { assertRowBudget, type HubCtx, navRow } from './hubNav';
 import { RESOLVE_PERMISSION_HINT } from './permissions';
@@ -11,12 +11,16 @@ import { RESOLVE_PERMISSION_HINT } from './permissions';
  * how this page previously came to claim the settings hub was Plus-only — it
  * was a second hand-written copy of the builder's descriptions, and it drifted.
  * Nothing in the settings hub is gated by plan.
+ *
+ * The commands are split by audience into two fields. One field holding all of them
+ * outgrew Discord's 1,024-character field limit, and EmbedBuilder threw on every
+ * open of this page — `help.test.ts` now builds it for both audiences.
  */
 export function renderHelp(ctx: HubCtx): BaseMessageOptions {
-  const commands = SUBCOMMANDS.map((c) => {
-    const who = c.who === 'admin' ? ' _(needs the **Manage Server** permission)_' : '';
-    return `\`/dejavue ${c.name}\`${who}\n${c.help}`;
-  }).join('\n\n');
+  const commandsFor = (who: Audience) =>
+    SUBCOMMANDS.filter((c) => c.who === who)
+      .map((c) => `\`/dejavue ${c.name}\`\n${c.help}`)
+      .join('\n\n');
 
   const embed = new EmbedBuilder()
     .setColor(COLOR)
@@ -41,7 +45,8 @@ export function renderHelp(ctx: HubCtx): BaseMessageOptions {
           RESOLVE_PERMISSION_HINT,
         ].join('\n'),
       },
-      { name: '📝 Commands', value: commands },
+      { name: '🙋 Commands for everyone', value: commandsFor('anyone') },
+      { name: '🛠️ Commands for admins — need the Manage Server permission', value: commandsFor('admin') },
       {
         name: '💡 Just exploring?',
         value: 'Open `/dejavue dashboard` and hit **Create demo** — I build an example forum you can delete when you are done.',
