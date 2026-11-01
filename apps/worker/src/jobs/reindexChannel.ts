@@ -14,6 +14,7 @@ import {
   countIndexedMessagesInChannel,
   deleteThreadsByDiscordIds,
   failReindex,
+  forgetDeletedChannel,
   getDb,
   getGuildConfig,
   getReindexJob,
@@ -40,6 +41,7 @@ import {
   type ReindexChannelJob,
 } from '@dejavue/queue';
 import {
+  channelExists,
   fetchActiveGuildThreads,
   fetchArchivedPublicThreads,
   fetchChannelInfo,
@@ -80,6 +82,21 @@ export async function handleReindexChannel(job: ReindexChannelJob): Promise<void
     if (rj.kind === 'forum') await reindexForum(rj, cfg, live, label);
     else await reindexTracked(rj, cfg, live, label);
   } catch (err) {
+    // The channel itself was deleted — usually while the bot was offline, so its
+    // channelDelete handler never ran. Retrying could never succeed: stop watching it and
+    // drop its archive, as that handler would have, and say so instead of "hit a snag".
+    if ((await channelExists(rj.channelId)) === false) {
+      const removed = await forgetDeletedChannel(db, rj.guildId, rj.channelId);
+      await updateReindexJob(db, rj.id, { status: 'completed', phase: 'done', removed });
+      log.info(
+        { jobId: rj.id, channelId: rj.channelId, removed },
+        'reindex target was deleted; stopped watching it',
+      );
+      await live?.finalize(
+        reindexProgressEmbed({ channelLabel: label, kind: rj.kind, phase: 'gone', removed }),
+      );
+      return;
+    }
     log.error({ err, jobId: rj.id }, 'reindex failed');
     await updateReindexJob(db, rj.id, { status: 'failed' });
     // failReindex (not markChannelStale): the channel is in 'reindexing' from setReindexing,

@@ -1,4 +1,4 @@
-import { REST } from 'discord.js';
+import { DiscordAPIError, REST } from 'discord.js';
 import { requireEnv } from '@dejavue/core';
 
 // REST-only Discord access for the worker (no gateway). Used by backfill to
@@ -76,6 +76,27 @@ export async function fetchStarterMessage(threadId: string): Promise<RawMessage 
     return (await rest().get(`/channels/${threadId}/messages/${threadId}`)) as RawMessage;
   } catch {
     return null;
+  }
+}
+
+/** Discord's "Unknown Channel" — the channel or thread doesn't exist (any more). */
+const UNKNOWN_CHANNEL = 10003;
+
+export function isUnknownChannel(err: unknown): boolean {
+  return err instanceof DiscordAPIError && Number(err.code) === UNKNOWN_CHANNEL;
+}
+
+/**
+ * Whether a channel still exists. Only Discord's definitive "Unknown Channel" counts as
+ * gone; any other failure (missing access, rate limit, network) is `null`, and callers
+ * must never delete on it — the same rule the bot's deletion reconcile follows.
+ */
+export async function channelExists(channelId: string): Promise<boolean | null> {
+  try {
+    await rest().get(`/channels/${channelId}`);
+    return true;
+  } catch (err) {
+    return isUnknownChannel(err) ? false : null;
   }
 }
 

@@ -1,13 +1,6 @@
 import { ChannelType, type DMChannel, type GuildChannel } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import {
-  deleteChannelSync,
-  deleteChannelTopic,
-  deleteThreadsByChannel,
-  getDb,
-  getGuildConfig,
-  updateGuildConfig,
-} from '@dejavue/db';
+import { forgetDeletedChannel, getDb, getGuildConfig } from '@dejavue/db';
 
 const log = childLogger({ mod: 'event:channelDelete' });
 
@@ -26,29 +19,11 @@ export async function onChannelDelete(channel: DMChannel | GuildChannel): Promis
   try {
     const db = getDb();
     const cfg = await getGuildConfig(db, guildId);
-    const tracked = !!cfg?.trackedChannelIds.includes(channel.id);
-    const monitoredForum = !!cfg?.forumChannelIds.includes(channel.id);
     // Only purge content for channels we actually monitor (untracking an existing
     // channel keeps its archived answers — same semantics as removing it from the setup hub).
-    if (isText && !tracked) return;
+    if (isText && !cfg?.trackedChannelIds.includes(channel.id)) return;
 
-    const removed = await deleteThreadsByChannel(db, guildId, channel.id);
-    await deleteChannelTopic(db, guildId, channel.id).catch(() => undefined);
-    await deleteChannelSync(db, guildId, channel.id).catch(() => undefined);
-
-    if (monitoredForum) {
-      const channelModes = { ...(cfg?.channelModes ?? {}) };
-      delete channelModes[channel.id];
-      await updateGuildConfig(db, guildId, {
-        forumChannelIds: (cfg?.forumChannelIds ?? []).filter((id) => id !== channel.id),
-        channelModes,
-      });
-    }
-    if (tracked) {
-      await updateGuildConfig(db, guildId, {
-        trackedChannelIds: (cfg?.trackedChannelIds ?? []).filter((id) => id !== channel.id),
-      });
-    }
+    const removed = await forgetDeletedChannel(db, guildId, channel.id);
     if (removed > 0) {
       log.info({ channelId: channel.id, guildId, removed }, 'purged deleted channel');
     }

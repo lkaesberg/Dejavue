@@ -30,6 +30,17 @@ describe('reindexProgressEmbed', () => {
     expect(e.title).toContain('Catching up');
   });
 
+  it('says a deleted channel was dropped, without the unresolvable mention', () => {
+    const e = reindexProgressEmbed({ channelLabel: '<#123>', kind: 'forum', phase: 'gone', removed: 4 });
+    expect(e.title).toContain('no longer exists');
+    expect(e.title).not.toContain('<#123>');
+    expect(e.description).toContain('stopped watching it');
+    expect(e.description).toContain('4 archived posts');
+    expect(e.description).not.toContain('rescan');
+    const none = reindexProgressEmbed({ channelLabel: '<#123>', kind: 'forum', phase: 'gone' });
+    expect(none.description).not.toContain('archived');
+  });
+
   it('renders a retryable failure', () => {
     const e = reindexProgressEmbed({ channelLabel: '#x', kind: 'forum', phase: 'failed', error: 'boom' });
     expect(e.description).toContain('boom');

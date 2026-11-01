@@ -1,6 +1,9 @@
 import { eq } from 'drizzle-orm';
 import type { Database } from '../client';
 import { guildConfig, type GuildConfig, type NewGuildConfig } from '../schema';
+import { deleteChannelSync } from './channelSync';
+import { deleteChannelTopic } from './channelTopics';
+import { deleteThreadsByChannel } from './threads';
 
 export type ChannelMode = 'question' | 'knowledge';
 
@@ -66,6 +69,36 @@ export async function ensureGuildConfig(db: Database, guildId: string): Promise<
   const existing = await getGuildConfig(db, guildId);
   if (!existing) throw new Error(`failed to ensure guild config for ${guildId}`);
   return existing;
+}
+
+/**
+ * A channel was deleted in Discord: drop its archived threads (embeddings cascade), its
+ * sync and topic state, and stop watching it. Shared by the bot's channelDelete handler
+ * and the worker's rescan, which is the first to notice when the channel went while the
+ * bot was offline. Returns how many threads were removed.
+ */
+export async function forgetDeletedChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+): Promise<number> {
+  const removed = await deleteThreadsByChannel(db, guildId, channelId);
+  await deleteChannelTopic(db, guildId, channelId);
+  await deleteChannelSync(db, guildId, channelId);
+  const cfg = await getGuildConfig(db, guildId);
+  if (cfg && (cfg.forumChannelIds.includes(channelId) || cfg.trackedChannelIds.includes(channelId))) {
+    const channelModes = { ...cfg.channelModes };
+    delete channelModes[channelId];
+    const channelGuidelines = { ...cfg.channelGuidelines };
+    delete channelGuidelines[channelId];
+    await updateGuildConfig(db, guildId, {
+      forumChannelIds: cfg.forumChannelIds.filter((id) => id !== channelId),
+      trackedChannelIds: cfg.trackedChannelIds.filter((id) => id !== channelId),
+      channelModes,
+      channelGuidelines,
+    });
+  }
+  return removed;
 }
 
 export async function updateGuildConfig(

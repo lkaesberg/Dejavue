@@ -25,7 +25,8 @@ export function renderProgressBar(done: number, total: number, width = 12): stri
   return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.round(pct * 100)}%`;
 }
 
-export type ReindexPhase = 'queued' | 'listing' | 'indexing' | 'pruning' | 'done' | 'failed';
+/** 'gone': the channel was deleted in Discord, so the rescan stopped watching it instead. */
+export type ReindexPhase = 'queued' | 'listing' | 'indexing' | 'pruning' | 'done' | 'failed' | 'gone';
 
 export interface ReindexProgressState {
   channelLabel: string; // e.g. "#general" — caller formats the mention/name
@@ -81,6 +82,18 @@ export function reindexProgressEmbed(s: ReindexProgressState): ProgressEmbed {
       }
       parts.push('Up to date ✅');
       return { title: `✅ ${s.channelLabel} is up to date`, description: parts.join(' '), color: COLOR_DONE };
+    }
+    case 'gone': {
+      // A mention of a deleted channel renders as "#unknown", so the label isn't used here.
+      const removed = s.removed ?? 0;
+      return {
+        title: '📭 That channel no longer exists',
+        description:
+          removed > 0
+            ? `It was deleted in Discord, so I stopped watching it and removed its ${removed.toLocaleString()} archived ${unit} from search and the website.`
+            : 'It was deleted in Discord, so I stopped watching it.',
+        color: COLOR_DONE,
+      };
     }
     case 'failed':
       return {
