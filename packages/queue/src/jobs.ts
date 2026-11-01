@@ -22,6 +22,8 @@ export const QUEUES = {
   REINDEX_CHANNEL: 'reindex-channel',
   /** Daily instance-wide rollup emitted to product analytics. */
   STATS_SNAPSHOT: 'stats-snapshot',
+  /** Daily: mark servers the bot left, purge their content after the grace period. */
+  GUILD_RETENTION: 'guild-retention',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

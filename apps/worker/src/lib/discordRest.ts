@@ -14,6 +14,8 @@ function rest(): REST {
 export interface RawThread {
   id: string;
   name: string;
+  /** Who started the thread — for a forum post, the asker. */
+  owner_id?: string;
   parent_id?: string;
   thread_metadata?: { archive_timestamp?: string };
   applied_tags?: string[];

@@ -19,6 +19,7 @@ import {
   getReindexJob,
   getThreadByDiscordId,
   type GuildConfig,
+  isOptedOut,
   listThreadIdsByChannel,
   type ReindexJob,
   semanticSearch,
@@ -30,6 +31,7 @@ import {
   updateChannelName,
   updateReindexJob,
   upsertThread,
+  withoutOptedOut,
 } from '@dejavue/db';
 import {
   enqueueIngestAttachment,
@@ -153,6 +155,11 @@ async function reindexForum(
     if (indexed >= limits.indexCap) break;
     try {
       const starter = await fetchStarterMessage(t.id);
+      // A post by a member who opted out (`/dejavue privacy`) is never re-indexed.
+      if (await isOptedOut(db, starter?.author?.id ?? t.owner_id)) {
+        processed.add(t.id);
+        continue;
+      }
       const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
       const row = await upsertThread(db, {
         guildId: rj.guildId,
@@ -317,8 +324,10 @@ async function pageAllMessages(
     // Stop only on a short/empty page (the true last page) — never mid-history.
     if (!before || batch.length < 100) break;
   }
-  msgs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return { msgs, images, pages };
+  // Members who opted out (`/dejavue privacy`) are left out, along with their images.
+  const kept = await withoutOptedOut(getDb(), msgs, images);
+  kept.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return { msgs: kept.messages, images: kept.images, pages };
 }
 
 /** Every thread (active + archived) that lives under a channel. */
@@ -437,6 +446,8 @@ async function reindexTracked(
 
   // 2b. Each thread inside the channel → one entry (its whole conversation).
   for (const t of threads) {
+    // A thread started by a member who opted out is not rebuilt, so the prune drops it.
+    if (await isOptedOut(db, t.owner_id)) continue;
     const tm = await pageAllMessages(t.id).catch(() => ({ msgs: [] as SegMsg[], images: [] as IngestAttachmentItem[], pages: 0 }));
     if (tm.images.length) await enqueueIngestAttachment({ guildId: rj.guildId, items: tm.images }).catch(() => undefined);
     const transcript: TranscriptMessage[] = tm.msgs.map(({ messageId, ...rest }) => ({ id: messageId, ...rest }));

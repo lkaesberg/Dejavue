@@ -171,6 +171,7 @@ Every admin screen links to every other one, so `/dejavue dashboard` is enough t
 | `/dejavue settings` | Duplicate detection, stale-question nudges, the off-topic guard and cleanup | admin |
 | `/dejavue website` | Your public knowledge-base site — name, address, theme, privacy and imprint | admin |
 | `/dejavue rescan [channel]` | Re-read a channel's full history and drop posts that were deleted | admin |
+| `/dejavue privacy` | Opt out of having your messages archived, in every server | anyone |
 | `/dejavue help` | What Dejavue does, and every command explained | anyone |
 | **Mark as Answer** (right-click a message → Apps) | Mark that reply as the accepted answer | OP/mod/admin |
 
@@ -506,10 +507,15 @@ yourself.
 - **Free-tier knowledge bases show one ad** from a cookieless, non-behavioural network. Because the
   request discloses the reader's IP to that provider, it is **opt-in**: nothing loads until the
   reader agrees, and declining shows an in-house promo instead. Paid plans have no ads at all.
+- **Any member can opt out.** `/dejavue privacy` stops Dejavue from storing anything they post, in
+  every server, and deletes what it already had of theirs.
+- **Removing the bot removes the data.** The public knowledge base goes offline at once; the server's
+  content is deleted 30 days later, and adding the bot back before then restores it.
 - **No user accounts** on the website or the knowledge bases.
 - **Payments happen entirely inside Discord** — we never see payment details.
 - **AI is the only third-party processor**, used only when AI features are enabled, and can be turned
-  off entirely (see the offline note above).
+  off entirely (see the offline note above). Requests ask OpenRouter for providers that neither store
+  nor train on the data (`data_collection: deny`).
 
 Full details: [Privacy Policy](https://dejavue.app/privacy) · [Terms](https://dejavue.app/terms)
 

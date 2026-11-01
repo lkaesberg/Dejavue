@@ -69,6 +69,12 @@ export const SUBCOMMANDS = [
     help: "Catch up on anything posted while I was away, and forget threads that no longer exist.",
   },
   {
+    name: 'privacy',
+    desc: 'Opt out of having your messages archived, in every server',
+    who: 'anyone',
+    help: 'Stop Dejavue from storing your messages anywhere and delete what it already has — or opt back in.',
+  },
+  {
     name: 'help',
     desc: 'What Dejavue does, and every command explained',
     who: 'anyone',

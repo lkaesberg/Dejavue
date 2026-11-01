@@ -11,6 +11,7 @@ import {
   getDb,
   getGuildConfig,
   getThreadByDiscordId,
+  isOptedOut,
   listEmbeddedThreadIdsInChannel,
   markChannelStale,
   markEntitlementConsumed,
@@ -170,6 +171,11 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
       }
       try {
         const starter = await fetchStarterMessage(t.id);
+        // A post by a member who opted out (`/dejavue privacy`) is never imported.
+        if (await isOptedOut(db, starter?.author?.id ?? t.owner_id)) {
+          processed.add(t.id);
+          continue;
+        }
         const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
         const row = await upsertThread(db, {
           guildId: bf.guildId,

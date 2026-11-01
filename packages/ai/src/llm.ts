@@ -22,6 +22,14 @@ function client(): OpenAI {
   return _client;
 }
 
+/**
+ * OpenRouter provider routing: only send requests to providers that neither retain nor
+ * train on prompts. The privacy policy and Discord's intent review both promise that
+ * community content is never used for training, so this is set on every request rather
+ * than left to the OpenRouter account setting.
+ */
+export const OPENROUTER_PRIVACY = { provider: { data_collection: 'deny' } } as const;
+
 export interface ChatResult {
   text: string;
   promptTokens: number;
@@ -49,6 +57,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     ],
     max_tokens: opts.maxTokens ?? 700,
     temperature: opts.temperature ?? 0.3,
+    ...OPENROUTER_PRIVACY,
   });
   const choice = resp.choices[0];
   return {
@@ -79,6 +88,7 @@ export async function chatStream(
     temperature: opts.temperature ?? 0.3,
     stream: true,
     stream_options: { include_usage: true },
+    ...OPENROUTER_PRIVACY,
   });
   let text = '';
   let promptTokens = 0;

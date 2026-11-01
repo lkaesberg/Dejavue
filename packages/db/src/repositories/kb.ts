@@ -20,16 +20,19 @@ function snippetFrom(parts: { summary?: string | null; answer?: string | null; q
   return body.length > 180 ? `${body.slice(0, 180)}…` : body;
 }
 
+/** A KB is served only while publishing is on and the bot is still in the server. */
+const kbLive = and(eq(guildConfig.kbPublishOptIn, true), isNull(guildConfig.removedAt));
+
 export async function listGuildsWithKb(db: Database): Promise<GuildConfig[]> {
-  return db.select().from(guildConfig).where(eq(guildConfig.kbPublishOptIn, true));
+  return db.select().from(guildConfig).where(kbLive);
 }
 
-/** Resolve a guild by its KB subdomain slug (only if publishing is opted in). */
+/** Resolve a guild by its KB subdomain slug (only if its KB is live). */
 export async function getGuildBySlug(db: Database, slug: string): Promise<GuildConfig | undefined> {
   const [row] = await db
     .select()
     .from(guildConfig)
-    .where(and(eq(guildConfig.kbSlug, slug), eq(guildConfig.kbPublishOptIn, true)))
+    .where(and(eq(guildConfig.kbSlug, slug), kbLive))
     .limit(1);
   return row;
 }
@@ -48,7 +51,7 @@ export async function isSlugTaken(
   return Boolean(row);
 }
 
-/** Resolve a guild by its custom domain (one-time purchase), if publishing is opted in. */
+/** Resolve a guild by its custom domain (one-time purchase), if its KB is live. */
 export async function getGuildByCustomDomain(
   db: Database,
   host: string,
@@ -56,7 +59,7 @@ export async function getGuildByCustomDomain(
   const [row] = await db
     .select()
     .from(guildConfig)
-    .where(and(eq(guildConfig.customDomain, host), eq(guildConfig.kbPublishOptIn, true)))
+    .where(and(eq(guildConfig.customDomain, host), kbLive))
     .limit(1);
   return row;
 }

@@ -9,7 +9,7 @@ import {
   type ThreadChannel,
 } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { getDb, getThreadByDiscordId, setDuplicateOf, upsertThread } from '@dejavue/db';
+import { getDb, getThreadByDiscordId, isOptedOut, setDuplicateOf, upsertThread } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
 import {
   ACCEPT_BUTTON_PREFIX,
@@ -51,6 +51,7 @@ import {
   getStarterText,
 } from '../lib/forum';
 import { canResolveThread, isThreadAsker, NO_PERMISSION_MESSAGE } from '../lib/permissions';
+import { handlePrivacyButton, isPrivacyInteraction } from '../lib/privacy';
 import { eph, safeReply } from '../lib/reply';
 import { closeThread, solveThread } from '../lib/solve';
 import { contextByName, slashByName } from '../commands/registry';
@@ -200,16 +201,19 @@ async function moveQuestion(
   // Discord makes *the bot* the owner of a post it creates, so record the real asker:
   // it drives "only the OP can resolve this" and the KB's attribution. threadCreate's
   // ensureThreadRow either hasn't run yet (we insert) or already did (we correct it).
-  await upsertThread(db, {
-    guildId,
-    channelId: forum.id,
-    channelName: forum.name,
-    threadId: created.id,
-    title: created.name,
-    questionBody: question,
-    opUserId: askerId,
-    status: 'open',
-  }).catch((err) => log.warn({ err, threadId: created.id }, 'move: failed to record asker'));
+  // An asker who opted out (`/dejavue privacy`) is never recorded.
+  if (!(await isOptedOut(db, askerId))) {
+    await upsertThread(db, {
+      guildId,
+      channelId: forum.id,
+      channelName: forum.name,
+      threadId: created.id,
+      title: created.name,
+      questionBody: question,
+      opUserId: askerId,
+      status: 'open',
+    }).catch((err) => log.warn({ err, threadId: created.id }, 'move: failed to record asker'));
+  }
 
   // The original is now a pointer at the moved post: fold it so it stays out of
   // search, the KB and the stale-question nudges.
@@ -325,9 +329,11 @@ export async function onInteraction(interaction: Interaction): Promise<void> {
     } else if (interaction.isMessageContextMenuCommand()) {
       await contextByName.get(interaction.commandName)?.execute(interaction);
     } else if (interaction.isButton()) {
-      // Nav first: handleHubButton admin-gates everything it doesn't recognise
+      // A member's own opt-out first: it belongs to no hub and must never be admin-gated.
+      if (isPrivacyInteraction(interaction.customId)) await handlePrivacyButton(interaction);
+      // Nav next: handleHubButton admin-gates everything it doesn't recognise
       // early, and Insights/Help are open to every member.
-      if (isNavInteraction(interaction.customId)) await handleNavButton(interaction);
+      else if (isNavInteraction(interaction.customId)) await handleNavButton(interaction);
       // Hubs (website / settings / dashboard / insights) run anywhere, so route them next.
       else if (isCustomizeInteraction(interaction.customId)) await handleCustomizeButton(interaction);
       else if (isHubInteraction(interaction.customId)) await handleHubButton(interaction);

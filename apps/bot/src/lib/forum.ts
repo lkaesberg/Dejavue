@@ -4,7 +4,7 @@ import {
   type GuildForumTagData,
   type ThreadChannel,
 } from 'discord.js';
-import type { TranscriptMessage } from '@dejavue/db';
+import { getDb, type TranscriptMessage, withoutOptedOut } from '@dejavue/db';
 import type { IngestAttachmentItem } from '@dejavue/queue';
 import { mapAttachments, queueImageRehost } from './attachments';
 
@@ -249,8 +249,10 @@ export async function fetchTranscript(
   } catch {
     /* best effort */
   }
-  collected.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // Members who ran `/dejavue privacy` are left out, along with their images.
+  const kept = await withoutOptedOut(getDb(), collected, images);
+  kept.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   // Re-host images while their Discord urls are fresh (deduped in the worker).
-  await queueImageRehost(thread.guildId, images);
-  return collected.slice(0, max);
+  await queueImageRehost(thread.guildId, kept.images);
+  return kept.messages.slice(0, max);
 }

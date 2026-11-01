@@ -13,6 +13,7 @@ import {
   type User,
 } from 'discord.js';
 import { childLogger, getEnv } from '@dejavue/core';
+import { getDb, markGuildsPresent } from '@dejavue/db';
 import { COLOR } from '../lib/embeds';
 
 const log = childLogger({ mod: 'event:guildCreate' });
@@ -40,6 +41,10 @@ type Installer = Pick<User, 'id' | 'send'>;
  */
 export async function onGuildCreate(guild: Guild): Promise<void> {
   capture('guild_joined', guild.id, { member_count: guild.memberCount });
+  // Re-added within the grace period: cancel the pending purge and bring the KB back.
+  await markGuildsPresent(getDb(), [guild.id]).catch((err) =>
+    log.warn({ err, guildId: guild.id }, 'failed to restore removed server'),
+  );
   try {
     const installer = await inviterOf(guild);
     const dmSent = installer ? await sendSetupDm(guild, installer) : false;

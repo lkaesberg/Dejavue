@@ -50,6 +50,8 @@ export const QUEUE_POLICIES: Record<QueueName, QueuePolicy> = {
   // The rollup emits a single event at the very end, so a retry after a failed run is
   // a clean re-run rather than a duplicate data point.
   [QUEUES.STATS_SNAPSHOT]: DEFAULT_POLICY,
+  // Idempotent: marks converge on Discord's list and each purge re-checks its server.
+  [QUEUES.GUILD_RETENTION]: DEFAULT_POLICY,
 };
 
 async function ensureQueues(boss: PgBoss): Promise<void> {

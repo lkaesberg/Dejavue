@@ -14,7 +14,7 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
   heading="Privacy Policy"
   sub="How dejavue handles personal data on this website, in the Discord bot, and on the hosted knowledge bases. Auf Anfrage stellen wir diese Datenschutzerklärung gern auch auf Deutsch bereit."
   active="privacy"
-  updated="22 September 2026"
+  updated="1 November 2026"
 >
   <h2>1. Controller</h2>
   <p>
@@ -104,6 +104,14 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
     <a href="mailto:contact@wksolutions.de">contact@wksolutions.de</a> — we will assist and can unpublish content
     directly.
   </p>
+  <p>
+    <strong>Opting out:</strong> any Discord user can run <code>/dejavue privacy</code> in a server that has the bot
+    and opt out. From then on dejavue stores nothing you post, in any server: your posts are not checked for
+    duplicates or archived, and your replies are left out of other people’s threads. Opting out also deletes what
+    was already stored — posts you started, your messages, attachments and accepted answers in other threads, and
+    the summaries and FAQ entries derived from them. Only your numeric user ID is kept, so that the opt-out can be
+    honoured; opting back in deletes it.
+  </p>
 
   <h2>6. Search and AI features</h2>
   <p>
@@ -115,7 +123,8 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
     Some features are AI-generated at the operator’s request: drafted answers to duplicate questions, thread
     summaries, topic clustering, and auto-generated FAQs. For these, the relevant question and thread text is
     transmitted to <strong>OpenRouter, Inc.</strong> (USA), which routes it to the configured AI model for
-    processing. What is sent is the community content being summarized or answered — never data about you as a
+    processing. Every request instructs OpenRouter to use only model providers that neither store the data nor
+    use it to train models, and dejavue itself never uses community content for training. What is sent is the community content being summarized or answered — never data about you as a
     visitor (no IP addresses, cookies, or identifiers are included). AI usage is metered per Discord server as
     anonymous token counts (“AI credits”); no per-person usage records are kept. Legal bases: the operator’s
     instructions for content they publish (Art. 28 GDPR) and our legitimate interest in providing the contracted
@@ -163,7 +172,8 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
   <h2>11. Retention</h2>
   <ul>
     <li><strong>Server logs:</strong> kept short-term for security purposes, then deleted or anonymized.</li>
-    <li><strong>Knowledge-base content and derived data</strong> (embeddings, summaries, re-hosted attachments): kept as long as the operator keeps it published; removed when the operator unpublishes or deletes it or removes the bot from the server.</li>
+    <li><strong>Knowledge-base content and derived data</strong> (embeddings, summaries, re-hosted attachments): kept while the bot is in the server. Unpublishing a thread takes it off the public site; deleting it in Discord deletes it here too. When the bot is removed from a server, its public knowledge base goes offline immediately and all of the server’s content and derived data are deleted 30 days later — adding the bot back within those 30 days restores it.</li>
+    <li><strong>Content of a member who opts out</strong> (section 5): deleted immediately; only the numeric user ID is kept while the opt-out stands.</li>
     <li><strong>Unlock cookie:</strong> expires after 30 days, or immediately when the operator changes the passphrase.</li>
     <li><strong>Entitlement and credit records:</strong> kept while the server uses the service and thereafter only as long as legal obligations require.</li>
   </ul>
@@ -178,7 +188,8 @@ import SiteLegal from '../../layouts/SiteLegal.astro';
     <li><strong>object</strong> to processing based on legitimate interests (Art. 21 GDPR).</li>
   </ul>
   <p>
-    To exercise these rights, email <a href="mailto:contact@wksolutions.de">contact@wksolutions.de</a>. For
+    You can opt out of dejavue yourself at any time with <code>/dejavue privacy</code> (section 5). To exercise
+    these rights, email <a href="mailto:contact@wksolutions.de">contact@wksolutions.de</a>. For
     content inside a knowledge base you can also contact its operator directly (see the knowledge base’s imprint);
     we forward requests we receive and assist the operator in fulfilling them. You also have the right to lodge a
     complaint with a data-protection supervisory authority (Art. 77 GDPR). The authority responsible for us is: Die

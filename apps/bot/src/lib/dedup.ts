@@ -12,6 +12,7 @@ import {
   getThreadsByRowIds,
   type GuildConfig,
   hybridSearch,
+  isOptedOut,
   keywordSearch,
   listChannelTopicChannelIds,
   type SearchMatch,
@@ -259,8 +260,9 @@ async function runDedup(thread: ThreadChannel, placeholder: Placeholder): Promis
     await discardPlaceholder(placeholder);
     return;
   }
-  // Knowledge channels are a pure archive — never post duplicate reminders.
-  if (forum && channelMode(cfg, forum.id) === 'knowledge') {
+  // Knowledge channels are a pure archive — never post duplicate reminders. A post by
+  // a member who opted out is never read for a duplicate check either.
+  if ((forum && channelMode(cfg, forum.id) === 'knowledge') || (await isOptedOut(db, thread.ownerId))) {
     await discardPlaceholder(placeholder);
     return;
   }

@@ -9,6 +9,7 @@ import {
 } from '@huggingface/transformers';
 import OpenAI from 'openai';
 import { childLogger, getEnv, requireEnv } from '@dejavue/core';
+import { OPENROUTER_PRIVACY } from './llm';
 
 const log = childLogger({ mod: 'ai:embeddings' });
 
@@ -282,7 +283,16 @@ async function embedViaApi(
 ): Promise<{ vectors: number[][]; tokens: number }> {
   // Empty strings are rejected by the API; substitute a single space.
   const input = texts.map((t) => (t ?? '').slice(0, MAX_CHARS) || ' ');
-  const resp = await apiClient().embeddings.create({ model, input, dimensions: dim });
+  // The routing field is OpenRouter's own; OpenAI rejects unknown body fields, so send it
+  // only when the base URL is OpenRouter.
+  const baseUrl = getEnv().EMBEDDING_BASE_URL;
+  const viaOpenRouter = !baseUrl || baseUrl.includes('openrouter.ai');
+  const resp = await apiClient().embeddings.create({
+    model,
+    input,
+    dimensions: dim,
+    ...(viaOpenRouter ? OPENROUTER_PRIVACY : {}),
+  });
   const vectors = [...resp.data]
     .sort((a, b) => a.index - b.index)
     .map((d) => l2normalize(d.embedding as number[]));

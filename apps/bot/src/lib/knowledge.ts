@@ -6,6 +6,7 @@ import {
   ensureGuildConfig,
   getDb,
   getThreadByDiscordId,
+  isOptedOut,
   markChannelStale,
   setPublished,
   setThreadLabels,
@@ -48,6 +49,9 @@ async function archiveKnowledgeThread(thread: ThreadChannel): Promise<void> {
   const cfg = await ensureGuildConfig(db, guildId);
   // The channel's mode could have changed during the debounce window.
   if (channelMode(cfg, forum.id) !== 'knowledge') return;
+
+  // A post by a member who opted out (`/dejavue privacy`) isn't archived at all.
+  if (await isOptedOut(db, thread.ownerId)) return;
 
   const existing = await getThreadByDiscordId(db, guildId, thread.id);
   // Stop indexing NEW threads once at the unified index cap (existing keep updating).

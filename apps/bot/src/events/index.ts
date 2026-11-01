@@ -1,5 +1,6 @@
 import { type Client, Events } from 'discord.js';
 import { logger, notifyAsync } from '@dejavue/core';
+import { getDb, markGuildsPresent } from '@dejavue/db';
 import { registerCommands } from '../commands/registry';
 import { channelFitReconcile } from '../lib/channelFit';
 import { kbStartupReconcile } from '../lib/kbReconcile';
@@ -52,6 +53,12 @@ export function registerEvents(client: Client): void {
     } else {
       logger().warn('no application id on ready; skipping command registration');
     }
+
+    // A server that removed and re-added the bot while it was offline gets no
+    // guildCreate (READY lists it as a known guild), so cancel pending removals here.
+    void markGuildsPresent(getDb(), [...c.guilds.cache.keys()]).catch((err) =>
+      logger().warn({ err }, 'startup removal reconcile failed'),
+    );
 
     // Heal any entitlement drift on startup, then hourly.
     void reconcileAllEntitlements(c);

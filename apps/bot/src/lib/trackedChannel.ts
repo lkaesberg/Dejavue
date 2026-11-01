@@ -22,12 +22,14 @@ import {
   getActiveReindexJob,
   getDb,
   getThreadByDiscordId,
+  isOptedOut,
   markChannelStale,
   markChannelSynced,
   setPublished,
   setTranscript,
   type TranscriptMessage,
   upsertThread,
+  withoutOptedOut,
 } from '@dejavue/db';
 import {
   enqueueEmbedThread,
@@ -203,7 +205,11 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
   if (!cfg.trackedChannelIds.includes(channel.id)) return;
   const sync = await ensureChannelSync(db, guildId, channel.id, 'channel');
 
-  const { messages, images, hitLimit, ok } = await fetchRecent(channel);
+  const fetched = await fetchRecent(channel);
+  const { hitLimit, ok } = fetched;
+  // Opted-out members' messages never reach a segment. The watermark below still uses
+  // the full batch, so a filtered message can't make the channel look behind.
+  const { messages, images } = await withoutOptedOut(db, fetched.messages, fetched.images);
   // Re-host images while their Discord urls are fresh (deduped in the worker).
   await queueImageRehost(guildId, images);
 
@@ -275,8 +281,8 @@ async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {
   // Update freshness. A transient fetch failure must not move the watermark or claim
   // a gap (mirrors the reconcile 10003-only safety invariant).
   if (!ok) return;
-  const newestId = messages.at(-1)?.messageId ?? null;
-  const oldestId = messages[0]?.messageId ?? null;
+  const newestId = fetched.messages.at(-1)?.messageId ?? null;
+  const oldestId = fetched.messages[0]?.messageId ?? null;
   const count = await countIndexedMessagesInChannel(db, guildId, channel.id);
 
   // Gap = we're missing history between our watermark and what we just fetched, OR
@@ -323,6 +329,9 @@ async function captureTrackedThread(thread: ThreadChannel): Promise<void> {
   const existing = await getThreadByDiscordId(db, guildId, threadId);
   // Stop indexing NEW content at the unified index cap (existing rows keep updating).
   if (!existing && (await atIndexCap(guildId))) return;
+
+  // A thread started by an opted-out member isn't archived at all.
+  if (await isOptedOut(db, thread.ownerId)) return;
 
   // fetchTranscript also re-hosts any images posted in the thread.
   const transcript = await fetchTranscript(thread);

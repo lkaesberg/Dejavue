@@ -32,6 +32,7 @@ import { searchResultsEmbed } from '../lib/embeds';
 import { ensureForumTags } from '../lib/forum';
 import { renderHelp } from '../lib/help';
 import { hubCtx } from '../lib/hubNav';
+import { handlePrivacy } from '../lib/privacy';
 import { handleDashboard, handleInsights, handleSettings, rescanSummary } from '../lib/hubs';
 import { allTargets, type ReindexTarget, startForumImport, startReindex } from '../lib/reindexTrigger';
 import { eph } from '../lib/reply';
@@ -128,6 +129,7 @@ const data = new SlashCommandBuilder()
           .setRequired(false),
       ),
   )
+  .addSubcommand((s) => s.setName('privacy').setDescription(desc('privacy')))
   .addSubcommand((s) => s.setName('help').setDescription(desc('help')))
   // Deprecated alias, kept for one release so muscle memory and older docs still
   // land somewhere useful. Remove once the rename has been out a while.
@@ -392,6 +394,8 @@ export const dejavueCommand: SlashCommand = {
         return handleInsights(interaction);
       case 'search':
         return handleSearch(interaction);
+      case 'privacy':
+        return handlePrivacy(interaction);
       case 'help':
         return handleHelp(interaction);
       default:

@@ -1,6 +1,6 @@
 import { ChannelType, type Message } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { channelMode, getDb, getGuildConfig } from '@dejavue/db';
+import { channelMode, getDb, getGuildConfig, isOptedOut } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
 import { forumParent } from '../lib/forum';
 import { scheduleKnowledgeArchive } from '../lib/knowledge';
@@ -59,6 +59,8 @@ export async function onMessageCreate(message: Message): Promise<void> {
   try {
     const cfg = await getGuildConfig(getDb(), channel.guildId);
     if (!(await monitoredForum(channel.guildId, cfg, forum.id))) return;
+    // A post by a member who opted out is left alone entirely.
+    if (await isOptedOut(getDb(), channel.ownerId)) return;
     if (channelMode(cfg, forum.id) === 'knowledge') {
       // Any message keeps the archived/embedded copy current, not just the starter.
       scheduleKnowledgeArchive(channel);

@@ -1,6 +1,6 @@
 import type { AnyThreadChannel, ThreadChannel } from 'discord.js';
 import { childLogger } from '@dejavue/core';
-import { channelMode, getDb, getGuildConfig, getThreadByDiscordId } from '@dejavue/db';
+import { channelMode, getDb, getGuildConfig, getThreadByDiscordId, isOptedOut } from '@dejavue/db';
 import { scheduleDedup } from '../lib/dedup';
 import { showBrandingFor } from '../lib/branding';
 import { controlMessage } from '../lib/embeds';
@@ -25,6 +25,9 @@ export async function onThreadCreate(
   const cfg = await getGuildConfig(db, guildId);
   // Only act on monitored forums (configured + within the tier's channel cap).
   if (!(await monitoredForum(guildId, cfg, forum.id))) return;
+
+  // A member who opted out (`/dejavue privacy`) gets no duplicate check, prompt or archive.
+  if (await isOptedOut(db, thread.ownerId)) return;
 
   // Already-solved threads (demo seeds / re-triggers) need no control message or unsolved tag.
   const existing = await getThreadByDiscordId(db, guildId, thread.id);

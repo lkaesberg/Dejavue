@@ -230,6 +230,13 @@ export const guildConfig = pgTable('guild_config', {
   // A shared passphrase gate for a private KB (salted hash; null = public).
   kbPassphraseHash: text('kb_passphrase_hash'),
   kbImprint: jsonb('kb_imprint').$type<KbImprint>(),
+  // ---- Retention after the bot is removed. Set when the bot leaves (or the daily
+  // reconcile finds it gone): the public KB goes offline at once, and the server's
+  // content is purged after the grace period. Cleared if the bot is added back first.
+  removedAt: timestamp('removed_at', { withTimezone: true }),
+  // When that purge ran. The row itself survives with only the purchased custom-domain
+  // unlock, so a server re-adding the bot later doesn't lose what it paid for.
+  purgedAt: timestamp('purged_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -592,6 +599,17 @@ export const attachment = pgTable(
   },
   (t) => [index('attachment_guild_idx').on(t.guildId)],
 );
+
+// ---------------------------------------------------------------------------
+// Per-user opt-out — members who ran `/privacy opt-out`. Global rather than per guild:
+// their messages are left out of every server's index, and what was already stored is
+// removed when they opt out. The numeric id is the only thing kept, so the opt-out
+// can be honoured.
+// ---------------------------------------------------------------------------
+export const userOptOut = pgTable('user_opt_out', {
+  userId: text('user_id').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 export type GuildConfig = typeof guildConfig.$inferSelect;
 export type NewGuildConfig = typeof guildConfig.$inferInsert;

@@ -15,3 +15,5 @@ export * from './kb';
 export * from './nudges';
 export * from './channelTopics';
 export * from './attachments';
+export * from './retention';
+export * from './privacy';

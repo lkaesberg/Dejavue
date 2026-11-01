@@ -22,6 +22,7 @@ import {
 import { handleBackfillForum } from './jobs/backfillForum';
 import { handleClusterGaps } from './jobs/clusterGaps';
 import { handleEmbedThread } from './jobs/embedThread';
+import { handleGuildRetention } from './jobs/guildRetention';
 import { handleIngestAttachment } from './jobs/ingestAttachment';
 import { handleNudgeStale } from './jobs/nudgeStale';
 import { handleStatsSnapshot } from './jobs/statsSnapshot';
@@ -87,11 +88,14 @@ async function main(): Promise<void> {
   });
 
   await work(QUEUES.STATS_SNAPSHOT, handleStatsSnapshot);
+  await work(QUEUES.GUILD_RETENTION, handleGuildRetention);
 
   // Hourly stale-question sweep (Plus+). Other generative jobs are on-demand.
   await schedule(QUEUES.NUDGE_STALE, '0 * * * *');
   // Daily instance rollup for product analytics (03:00 UTC — off the hourly sweep).
   await schedule(QUEUES.STATS_SNAPSHOT, '0 3 * * *');
+  // Daily removed-server retention (03:30 UTC — after the snapshot counts them).
+  await schedule(QUEUES.GUILD_RETENTION, '30 3 * * *');
 
   health = startHealthServer();
   log.info('Dejavue worker started');

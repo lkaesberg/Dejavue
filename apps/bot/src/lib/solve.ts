@@ -6,6 +6,7 @@ import {
   ensureGuildConfig,
   getDb,
   getThreadByDiscordId,
+  isOptedOut,
   markThreadSolved,
   setPublished,
   setThreadLabels,
@@ -31,10 +32,14 @@ import {
 
 const log = childLogger({ mod: 'solve' });
 
-/** Get-or-create the archive row for a forum thread, hydrating from the starter message. */
-export async function ensureThreadRow(thread: ThreadChannel): Promise<Thread> {
+/**
+ * Get-or-create the archive row for a forum thread, hydrating from the starter message.
+ * Null when the asker opted out (`/dejavue privacy`): their posts are never stored.
+ */
+export async function ensureThreadRow(thread: ThreadChannel): Promise<Thread | null> {
   const db = getDb();
   const guildId = thread.guildId;
+  if (await isOptedOut(db, thread.ownerId)) return null;
   const existing = await getThreadByDiscordId(db, guildId, thread.id);
   if (existing) return existing;
 
@@ -70,6 +75,7 @@ export function scheduleQuestionArchive(thread: ThreadChannel): void {
 async function captureQuestionTranscript(thread: ThreadChannel): Promise<void> {
   const db = getDb();
   const row = await ensureThreadRow(thread);
+  if (!row) return;
   let captured: TranscriptMessage[] = [];
   try {
     captured = await fetchTranscript(thread);
@@ -201,7 +207,7 @@ export async function solveThread(
   // own post solved by hand, credits no one — keeps the top-helpers stats honest.
   const answerAuthorId =
     opts.answer?.author.id ??
-    (opts.answerAuthorId && opts.answerAuthorId !== existingRow.opUserId ? opts.answerAuthorId : null);
+    (opts.answerAuthorId && opts.answerAuthorId !== existingRow?.opUserId ? opts.answerAuthorId : null);
 
   const forum = forumParent(thread);
   if (forum) {
@@ -219,12 +225,18 @@ export async function solveThread(
     }
   }
 
+  // An opted-out asker's post is solved in Discord (the tags above) but never stored.
+  if (!existingRow) return undefined;
+
+  // Likewise an answer written by a member who opted out: the post is solved, but their
+  // text and id are not kept.
+  const answerOptedOut = await isOptedOut(db, answerAuthorId);
   const row = await markThreadSolved(db, {
     guildId,
     discordThreadId: thread.id,
-    answerMessageId: opts.answer?.id ?? null,
-    answerText: opts.answer?.content ?? opts.answerText ?? null,
-    answerAuthorId,
+    answerMessageId: answerOptedOut ? null : (opts.answer?.id ?? null),
+    answerText: answerOptedOut ? null : (opts.answer?.content ?? opts.answerText ?? null),
+    answerAuthorId: answerOptedOut ? null : answerAuthorId,
   });
   if (!row) return undefined;
 
