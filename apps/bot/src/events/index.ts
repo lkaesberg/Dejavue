@@ -1,6 +1,6 @@
 import { type Client, Events } from 'discord.js';
 import { logger, notifyAsync } from '@dejavue/core';
-import { getDb, markGuildsPresent } from '@dejavue/db';
+import { getDb, markGuildsPresent, waitForDatabase } from '@dejavue/db';
 import { registerCommands } from '../commands/registry';
 import { channelFitReconcile } from '../lib/channelFit';
 import { kbStartupReconcile } from '../lib/kbReconcile';
@@ -54,22 +54,33 @@ export function registerEvents(client: Client): void {
       logger().warn('no application id on ready; skipping command registration');
     }
 
-    // A server that removed and re-added the bot while it was offline gets no
-    // guildCreate (READY lists it as a known guild), so cancel pending removals here.
-    void markGuildsPresent(getDb(), [...c.guilds.cache.keys()]).catch((err) =>
-      logger().warn({ err }, 'startup removal reconcile failed'),
-    );
-
-    // Heal any entitlement drift on startup, then hourly.
-    void reconcileAllEntitlements(c);
+    // The startup checks below all need the database. After a reboot Docker starts every
+    // container at once, so the bot can be ready before Postgres accepts connections; a
+    // check that ran then would fail and, for deletions, not be retried for 6 hours —
+    // leaving a channel deleted while we were down as a watched ghost. Wait for it first.
+    void waitForDatabase({
+      onRetry: (attempt, err) => {
+        if (attempt === 1 || attempt % 10 === 0) {
+          logger().warn({ err, attempt }, 'database not reachable yet; startup checks are waiting');
+        }
+      },
+    }).then(() => {
+      // A server that removed and re-added the bot while it was offline gets no
+      // guildCreate (READY lists it as a known guild), so cancel pending removals here.
+      void markGuildsPresent(getDb(), [...c.guilds.cache.keys()]).catch((err) =>
+        logger().warn({ err }, 'startup removal reconcile failed'),
+      );
+      // Heal any entitlement drift on startup (then hourly, below).
+      void reconcileAllEntitlements(c);
+      // Heal deletions that happened while we were offline, THEN fill the KB — so we
+      // don't re-publish/re-embed ghosts. The periodic sweep backstops missed events.
+      void reconcileDeletions(c).then(() => kbStartupReconcile(c));
+      // Heal channel-fit topics: rebuild any missing for the active model (and drop
+      // rows from a previous model) so a model switch / failed build self-corrects.
+      void channelFitReconcile(c);
+    });
     setInterval(() => void reconcileAllEntitlements(c), RECONCILE_INTERVAL_MS).unref();
-    // Heal deletions that happened while we were offline, THEN fill the KB — so we
-    // don't re-publish/re-embed ghosts. Periodic sweep backstops missed events.
-    void reconcileDeletions(c).then(() => kbStartupReconcile(c));
     setInterval(() => void reconcileDeletions(c), DELETION_RECONCILE_INTERVAL_MS).unref();
-    // Heal channel-fit topics: rebuild any missing for the active model (and drop
-    // rows from a previous model) so a model switch / failed build self-corrects.
-    void channelFitReconcile(c);
     setInterval(() => void channelFitReconcile(c), RECONCILE_INTERVAL_MS).unref();
   });
 
