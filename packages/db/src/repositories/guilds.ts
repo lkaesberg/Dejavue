@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../client';
 import { guildConfig, type GuildConfig, type NewGuildConfig } from '../schema';
 import { deleteChannelSync } from './channelSync';
@@ -112,6 +112,31 @@ export async function updateGuildConfig(
     .where(eq(guildConfig.guildId, guildId))
     .returning();
   return row;
+}
+
+/**
+ * Compare-and-set guild_config.last_tier: moves it from `from` to `to` only if it
+ * still holds `from` (NULL-safe). Returns whether this caller won the transition —
+ * concurrent entitlement events / reconcile racing on the same upgrade see false and
+ * must not act on it.
+ */
+export async function swapLastTier(
+  db: Database,
+  guildId: string,
+  from: string | null,
+  to: string | null,
+): Promise<boolean> {
+  const rows = await db
+    .update(guildConfig)
+    .set({ lastTier: to, updatedAt: new Date() })
+    .where(
+      and(
+        eq(guildConfig.guildId, guildId),
+        from === null ? isNull(guildConfig.lastTier) : eq(guildConfig.lastTier, from),
+      ),
+    )
+    .returning({ guildId: guildConfig.guildId });
+  return rows.length > 0;
 }
 
 // ---------------------------------------------------------------------------
