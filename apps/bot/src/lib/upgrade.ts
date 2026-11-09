@@ -1,5 +1,11 @@
 import { childLogger, type Tier, TIER_RANK } from '@dejavue/core';
-import { createBackfillJob, getDb, getGuildConfig, updateGuildConfig } from '@dejavue/db';
+import {
+  createBackfillJob,
+  getActiveBackfillJob,
+  getDb,
+  getGuildConfig,
+  updateGuildConfig,
+} from '@dejavue/db';
 import { enqueueBackfill } from '@dejavue/queue';
 import { getGuildTier } from './tier';
 
@@ -35,6 +41,10 @@ export async function checkTierUpgrade(guildId: string): Promise<void> {
     }
 
     for (const channelId of cfg.forumChannelIds) {
+      // An import already queued/running for this forum picks up the new cap itself
+      // (it re-reads limits before stopping at the cap) — a second one would only race
+      // it over the same threads.
+      if (await getActiveBackfillJob(db, guildId, channelId)) continue;
       const job = await createBackfillJob(db, { guildId, channelId, entitlementId: null });
       await enqueueBackfill({ backfillJobId: job.id });
     }

@@ -17,8 +17,10 @@ import {
   forgetDeletedChannel,
   getDb,
   getGuildConfig,
+  claimReindexJob,
   getReindexJob,
   getThreadByDiscordId,
+  heartbeatReindexJob,
   type GuildConfig,
   isOptedOut,
   listThreadIdsByChannel,
@@ -29,6 +31,7 @@ import {
   setTranscript,
   type TranscriptAttachment,
   type TranscriptMessage,
+  transitionReindexJob,
   updateChannelName,
   updateReindexJob,
   upsertThread,
@@ -50,6 +53,13 @@ import {
   type RawChannelMessage,
   type RawThread,
 } from '../lib/discordRest';
+import {
+  ChannelUnmonitoredError,
+  isChannelMonitored,
+  JOB_LEASE_MS,
+  JobLeaseHeldError,
+  startHeartbeat,
+} from '../lib/jobLease';
 import { LiveProgress } from '../lib/progress';
 import { syncThreadEmbeddings } from '../lib/embedChunks';
 import { embedBudgetGate, guildLimits } from '../lib/quota';
@@ -68,26 +78,53 @@ const AUTO_FOLD_SIMILARITY = 0.9;
  */
 export async function handleReindexChannel(job: ReindexChannelJob): Promise<void> {
   const db = getDb();
-  const rj = await getReindexJob(db, job.reindexJobId);
-  if (!rj || rj.status === 'completed') return;
-  const cfg = await getGuildConfig(db, rj.guildId);
+  const existing = await getReindexJob(db, job.reindexJobId);
+  if (!existing) return;
+  // pending → running (or re-take a dead worker's run). A row another live worker holds
+  // is refused: throw so pg-boss retries later instead of running it twice. Terminal
+  // rows ('completed', 'failed') are done — a failed run released its channel claim, and
+  // a fresh rescan creates a new job.
+  const rj = await claimReindexJob(db, existing.id, JOB_LEASE_MS);
+  if (!rj) {
+    if (existing.status === 'running' || existing.status === 'pending') {
+      throw new JobLeaseHeldError('reindex', existing.id);
+    }
+    return;
+  }
   const live =
     rj.statusChannelId && rj.statusMessageId
       ? new LiveProgress({ channelId: rj.statusChannelId, messageId: rj.statusMessageId })
       : null;
   const label = `<#${rj.channelId}>`;
 
-  await updateReindexJob(db, rj.id, { status: 'running' });
+  const stopHeartbeat = startHeartbeat(() => heartbeatReindexJob(db, rj.id));
   try {
+    const cfg = await getGuildConfig(db, rj.guildId);
+    if (!isChannelMonitored(cfg, rj.channelId, rj.kind)) throw new ChannelUnmonitoredError(rj.channelId);
     if (rj.kind === 'forum') await reindexForum(rj, cfg, live, label);
     else await reindexTracked(rj, cfg, live, label);
   } catch (err) {
+    // Removed from the hub (or deleted) mid-run: its channel_sync row is gone and its
+    // archive is no longer ours to rebuild or prune. Stop without touching either.
+    if (err instanceof ChannelUnmonitoredError) {
+      await transitionReindexJob(db, rj.id, ['running'], 'failed');
+      log.info({ jobId: rj.id, channelId: rj.channelId }, 'reindex target no longer monitored; stopped');
+      await live?.fail(
+        reindexProgressEmbed({
+          channelLabel: label,
+          kind: rj.kind,
+          phase: 'failed',
+          error: 'This channel is no longer monitored, so the re-scan stopped.',
+        }),
+      );
+      return;
+    }
     // The channel itself was deleted — usually while the bot was offline, so its
     // channelDelete handler never ran. Retrying could never succeed: stop watching it and
     // drop its archive, as that handler would have, and say so instead of "hit a snag".
     if ((await channelExists(rj.channelId)) === false) {
       const removed = await forgetDeletedChannel(db, rj.guildId, rj.channelId);
-      await updateReindexJob(db, rj.id, { status: 'completed', phase: 'done', removed });
+      await transitionReindexJob(db, rj.id, ['running'], 'completed', { phase: 'done', removed });
       log.info(
         { jobId: rj.id, channelId: rj.channelId, removed },
         'reindex target was deleted; stopped watching it',
@@ -98,11 +135,15 @@ export async function handleReindexChannel(job: ReindexChannelJob): Promise<void
       return;
     }
     log.error({ err, jobId: rj.id }, 'reindex failed');
-    await updateReindexJob(db, rj.id, { status: 'failed' });
-    // failReindex (not markChannelStale): the channel is in 'reindexing' from setReindexing,
-    // and markChannelStale deliberately won't overwrite that — which would pin a failed
-    // reindex at "re-scanning…" forever. This forces it to 'stale' so it's retryable.
-    await failReindex(db, rj.guildId, rj.channelId, 'reindex failed').catch(() => undefined);
+    // A handled failure is terminal by design (no rethrow → no pg-boss retry): the
+    // channel claim is released to 'stale' right here, so the next /dejavue rescan or
+    // auto-trigger starts a fresh run. pg-boss retries still cover a crashed worker
+    // (the lease lets the retry re-take the row).
+    if (await transitionReindexJob(db, rj.id, ['running'], 'failed')) {
+      // failReindex (not markChannelStale): the channel is in 'reindexing' from
+      // claimReindex, and markChannelStale deliberately won't overwrite that.
+      await failReindex(db, rj.guildId, rj.channelId, 'reindex failed').catch(() => undefined);
+    }
     await live?.fail(
       reindexProgressEmbed({
         channelLabel: label,
@@ -111,7 +152,39 @@ export async function handleReindexChannel(job: ReindexChannelJob): Promise<void
         error: 'Reindex hit an error.',
       }),
     );
+  } finally {
+    stopHeartbeat();
   }
+}
+
+/** Abort at a checkpoint when the channel was removed from monitoring mid-run. */
+async function assertStillMonitored(rj: ReindexJob): Promise<void> {
+  const cfg = await getGuildConfig(getDb(), rj.guildId);
+  if (!isChannelMonitored(cfg, rj.channelId, rj.kind)) throw new ChannelUnmonitoredError(rj.channelId);
+}
+
+/**
+ * Finish a run: running → completed, then settle the channel claim. If the row is no
+ * longer running (the sweeper failed it after a long stall), the claim was already
+ * released and the channel isn't ours to mark.
+ */
+async function finishReindex(
+  rj: ReindexJob,
+  patch: { processed?: number; failed?: number; removed: number; processedThreadIds?: string[] },
+  sync: { lastIndexedMessageId: string | null; capped: boolean },
+): Promise<boolean> {
+  const db = getDb();
+  if (!(await transitionReindexJob(db, rj.id, ['running'], 'completed', { ...patch, phase: 'done' }))) {
+    log.warn({ jobId: rj.id }, 'reindex finished after its row left running; leaving channel state alone');
+    return false;
+  }
+  const count = await countIndexedMessagesInChannel(db, rj.guildId, rj.channelId);
+  await completeReindex(db, rj.guildId, rj.channelId, {
+    indexedMessageCount: count,
+    lastIndexedMessageId: sync.lastIndexedMessageId,
+    capped: sync.capped,
+  });
+  return true;
 }
 
 async function reindexForum(
@@ -155,6 +228,7 @@ async function reindexForum(
   }
   // Oldest first so a duplicate always folds under the older canonical (acyclic).
   all.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  await assertStillMonitored(rj);
   await updateReindexJob(db, rj.id, { total: all.length, phase: 'indexing' });
   live?.update(reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'listing', done: all.length }));
 
@@ -166,10 +240,15 @@ async function reindexForum(
   const seen = new Set(all.map((t) => t.id));
   const processed = new Set(rj.processedThreadIds);
   let processedCount = rj.processed;
+  let failedCount = rj.failed;
+  let cappedOut = false;
   let indexed = await countIndexedMessages(db, rj.guildId);
   for (const t of all) {
     if (processed.has(t.id)) continue;
-    if (indexed >= limits.indexCap) break;
+    if (indexed >= limits.indexCap) {
+      cappedOut = true;
+      break;
+    }
     try {
       const starter = await fetchStarterMessage(t.id);
       // A post by a member who opted out (`/dejavue privacy`) is never re-indexed.
@@ -240,11 +319,17 @@ async function reindexForum(
       }
       processedCount++;
     } catch (err) {
+      failedCount++;
       log.warn({ err, threadId: t.id }, 'reindex: failed thread');
     }
     processed.add(t.id);
     if (processedCount % CHECKPOINT_EVERY === 0) {
-      await updateReindexJob(db, rj.id, { processed: processedCount, processedThreadIds: [...processed] });
+      await assertStillMonitored(rj);
+      await updateReindexJob(db, rj.id, {
+        processed: processedCount,
+        failed: failedCount,
+        processedThreadIds: [...processed],
+      });
       live?.update(
         reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'indexing', done: processedCount, total: all.length }),
       );
@@ -252,7 +337,13 @@ async function reindexForum(
   }
 
   // 3. PRUNE threads Discord no longer returns (only after the full listing).
-  await updateReindexJob(db, rj.id, { phase: 'pruning', processed: processedCount, processedThreadIds: [...processed] });
+  await assertStillMonitored(rj);
+  await updateReindexJob(db, rj.id, {
+    phase: 'pruning',
+    processed: processedCount,
+    failed: failedCount,
+    processedThreadIds: [...processed],
+  });
   live?.update(reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'pruning' }));
   const dbIds = await listThreadIdsByChannel(db, rj.guildId, rj.channelId);
   const gone = dbIds.filter((id) => !seen.has(id));
@@ -266,15 +357,19 @@ async function reindexForum(
     }
   }
 
-  // 4. DONE
-  await updateReindexJob(db, rj.id, { status: 'completed', phase: 'done', removed });
-  const count = await countIndexedMessagesInChannel(db, rj.guildId, rj.channelId);
-  await completeReindex(db, rj.guildId, rj.channelId, {
-    indexedMessageCount: count,
-    lastIndexedMessageId: all.at(-1)?.id ?? null,
-  });
+  // 4. DONE — a run that stopped at the index cap leaves the channel stale 'cap', not synced.
+  const skipped = cappedOut ? all.filter((t) => !processed.has(t.id)).length : 0;
+  if (
+    !(await finishReindex(
+      rj,
+      { processed: processedCount, failed: failedCount, removed, processedThreadIds: [...processed] },
+      { lastIndexedMessageId: all.at(-1)?.id ?? null, capped: cappedOut },
+    ))
+  ) {
+    return;
+  }
   await live?.finalize(
-    reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'done', done: processedCount, removed }),
+    reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'done', done: processedCount, removed, skipped }),
   );
   log.info({ jobId: rj.id, processed: processedCount, removed }, 'forum reindex complete');
 }
@@ -396,6 +491,7 @@ async function reindexTracked(
 
   const segments = segmentByGap(main.msgs).filter((s) => s.length >= MIN_SEGMENT_MSGS);
   const total = segments.length + threads.length;
+  await assertStillMonitored(rj);
   await updateReindexJob(db, rj.id, { total, phase: 'indexing' });
 
   const builtIds = new Set<string>();
@@ -446,6 +542,7 @@ async function reindexTracked(
     });
     processedCount++;
     if (processedCount % CHECKPOINT_EVERY === 0) {
+      await assertStillMonitored(rj);
       await updateReindexJob(db, rj.id, { processed: processedCount });
       live?.update(
         reindexProgressEmbed({ channelLabel: label, kind: 'tracked', phase: 'indexing', done: processedCount, total }),
@@ -475,7 +572,8 @@ async function reindexTracked(
   // 3. PRUNE — remove rows we no longer rebuild. SAFE: skip on an empty scan, and never
   // delete content OLDER than the oldest message we actually saw (guards against a
   // partial scan wiping good history).
-  await updateReindexJob(db, rj.id, { phase: 'pruning' });
+  await assertStillMonitored(rj);
+  await updateReindexJob(db, rj.id, { phase: 'pruning', processed: processedCount });
   live?.update(reindexProgressEmbed({ channelLabel: label, kind: 'tracked', phase: 'pruning' }));
   let removed = 0;
   if (main.msgs.length > 0 || threads.length > 0) {
@@ -494,13 +592,16 @@ async function reindexTracked(
     }
   }
 
-  // 4. DONE
-  await updateReindexJob(db, rj.id, { status: 'completed', phase: 'done', processed: processedCount, removed });
-  const count = await countIndexedMessagesInChannel(db, rj.guildId, rj.channelId);
-  await completeReindex(db, rj.guildId, rj.channelId, {
-    indexedMessageCount: count,
-    lastIndexedMessageId: main.msgs.at(-1)?.messageId ?? null,
-  });
+  // 4. DONE — entries skipped at the index cap leave the channel stale 'cap', not synced.
+  if (
+    !(await finishReindex(
+      rj,
+      { processed: processedCount, removed },
+      { lastIndexedMessageId: main.msgs.at(-1)?.messageId ?? null, capped: skippedForCap > 0 },
+    ))
+  ) {
+    return;
+  }
   await live?.finalize(
     reindexProgressEmbed({
       channelLabel: label,

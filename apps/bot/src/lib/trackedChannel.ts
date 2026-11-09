@@ -16,7 +16,6 @@ import {
 import {
   claimReindex,
   countIndexedMessagesInChannel,
-  createReindexJob,
   ensureChannelSync,
   ensureGuildConfig,
   getActiveReindexJob,
@@ -33,13 +32,13 @@ import {
 } from '@dejavue/db';
 import {
   enqueueEmbedThread,
-  enqueueReindexChannel,
   enqueueRevalidateKb,
   type IngestAttachmentItem,
 } from '@dejavue/queue';
 import { mapAttachments, queueImageRehost } from './attachments';
 import { keyedTrailingDebounce } from './debounce';
 import { fetchTranscript } from './forum';
+import { launchClaimedReindex } from './reindexLaunch';
 import { atIndexCap } from './tier';
 
 const log = childLogger({ mod: 'tracked' });
@@ -187,14 +186,15 @@ async function triggerTrackedReindex(channel: TrackedChannel): Promise<void> {
   } catch {
     /* missing Send Messages — the reindex still runs, just without a live message */
   }
-  const job = await createReindexJob(db, {
+  // Rolls the claim back if the job can't be created or enqueued, so a transient failure
+  // here never pins the channel at "re-scanning…".
+  await launchClaimedReindex({
     guildId,
     channelId: channel.id,
     kind: 'tracked',
     statusChannelId: channel.id,
     statusMessageId,
-  });
-  await enqueueReindexChannel({ reindexJobId: job.id });
+  }).catch((err) => log.warn({ err, channelId: channel.id }, 'auto-reindex could not be queued'));
 }
 
 async function captureTrackedChannel(channel: TrackedChannel): Promise<void> {

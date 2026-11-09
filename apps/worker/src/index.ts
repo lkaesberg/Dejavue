@@ -3,7 +3,7 @@ import { shutdownAnalytics } from '@dejavue/analytics';
 import '@dejavue/core/env-preload';
 import { createServer, type Server } from 'node:http';
 import { getEnv, installCrashHandlers, logger, notify, notifyAsync } from '@dejavue/core';
-import { getSql } from '@dejavue/db';
+import { getDb, getSql } from '@dejavue/db';
 import {
   type BackfillForumJob,
   type ClusterGapsJob,
@@ -32,6 +32,7 @@ import { handleReindexChannel } from './jobs/reindexChannel';
 import { handleRevalidateKb } from './jobs/revalidateKb';
 import { handleSummarizeThread } from './jobs/summarizeThread';
 import { handleEmbedRequest } from './lib/embedService';
+import { SWEEP_EVERY_MS, sweepStaleChannelJobs } from './lib/jobLease';
 
 const log = logger();
 installCrashHandlers('worker');
@@ -93,6 +94,15 @@ async function main(): Promise<void> {
     batchSize: 1,
     localConcurrency: CHANNEL_JOB_CONCURRENCY,
   });
+
+  // Backfill/reindex rows whose worker died (or whose queue message was lost) would
+  // otherwise stay 'running'/'pending' forever and block their channel. Sweep them on
+  // start and periodically; the sweep is guarded, so several workers may run it.
+  const sweep = (): void => {
+    sweepStaleChannelJobs(getDb()).catch((err) => log.warn({ err }, 'stale channel job sweep failed'));
+  };
+  sweep();
+  setInterval(sweep, SWEEP_EVERY_MS).unref();
 
   await work(QUEUES.STATS_SNAPSHOT, handleStatsSnapshot);
   await work(QUEUES.GUILD_RETENTION, handleGuildRetention);

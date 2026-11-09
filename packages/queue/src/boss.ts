@@ -30,7 +30,9 @@ const DEFAULT_POLICY: QueuePolicy = { retryLimit: 3, retryDelay: 30, retryBackof
 // Backfill/reindex paginate a channel's full history in one invocation and can
 // legitimately run for hours; pg-boss's default 15-minute expiry would mark
 // them failed and start a retry WHILE the original is still running. Both
-// handlers checkpoint to their own job rows, so a post-crash retry resumes.
+// handlers hold their job row with a heartbeat lease (apps/worker/src/lib/jobLease.ts),
+// so such a retry is refused while the original lives, and a post-crash retry re-takes
+// the row and resumes from its checkpoint.
 const LONG_RUNNING_EXPIRE = 6 * 3600;
 // LLM jobs wait on OpenRouter; give them headroom past the 15-minute default.
 const LLM_EXPIRE = 1800;

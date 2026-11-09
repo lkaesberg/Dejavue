@@ -2,14 +2,20 @@ import { capture } from '@dejavue/analytics';
 import { buildEmbeddingChunks, embedBatch, embedContentHash, embeddingModelId } from '@dejavue/ai';
 import { backfillProgressEmbed, childLogger, getEnv } from '@dejavue/core';
 import {
+  type BackfillJob,
   channelMode,
+  claimBackfillJob,
   completeReindex,
   countIndexedMessages,
   countIndexedMessagesInChannel,
   ensureChannelSync,
+  getActiveReindexJob,
   getBackfillJob,
   getDb,
   getGuildConfig,
+  getOtherActiveBackfillJob,
+  type GuildConfig,
+  heartbeatBackfillJob,
   getThreadByDiscordId,
   isOptedOut,
   listEmbeddedThreadIdsInChannel,
@@ -20,6 +26,7 @@ import {
   setDuplicateOf,
   setEmbedContentHash,
   setPublished,
+  transitionBackfillJob,
   updateBackfillJob,
   updateChannelName,
   upsertEmbedding,
@@ -34,6 +41,13 @@ import {
   fetchStarterMessage,
   type RawThread,
 } from '../lib/discordRest';
+import {
+  ChannelUnmonitoredError,
+  isChannelMonitored,
+  JOB_LEASE_MS,
+  JobLeaseHeldError,
+  startHeartbeat,
+} from '../lib/jobLease';
 import { LiveProgress } from '../lib/progress';
 import { embedBudgetGate, guildLimits } from '../lib/quota';
 
@@ -50,23 +64,105 @@ const AUTO_FOLD_SIMILARITY = 0.9;
  */
 export async function handleBackfillForum(job: BackfillForumJob): Promise<void> {
   const db = getDb();
-  const bf = await getBackfillJob(db, job.backfillJobId);
-  if (!bf || bf.status === 'completed') return;
+  const existing = await getBackfillJob(db, job.backfillJobId);
+  if (!existing || existing.status === 'completed') return;
 
   // The one live progress message posted at setup (null → silent import).
   const live =
-    bf.statusChannelId && bf.statusMessageId
-      ? new LiveProgress({ channelId: bf.statusChannelId, messageId: bf.statusMessageId })
+    existing.statusChannelId && existing.statusMessageId
+      ? new LiveProgress({ channelId: existing.statusChannelId, messageId: existing.statusMessageId })
       : null;
-  const label = `<#${bf.channelId}>`;
+  const label = `<#${existing.channelId}>`;
 
-  await updateBackfillJob(db, bf.id, { status: 'running' });
+  // One history job per forum at a time. A re-scan re-reads and re-embeds every thread
+  // (a superset of this import), and a second import of the same forum would only redo
+  // the same work — either way this row is redundant, so it ends instead of overlapping.
+  if (existing.status !== 'running') {
+    const other =
+      (await getActiveReindexJob(db, existing.guildId, existing.channelId)) ??
+      (await getOtherActiveBackfillJob(db, existing));
+    if (other) {
+      if (await transitionBackfillJob(db, existing.id, ['pending', 'failed'], 'failed')) {
+        log.info({ jobId: existing.id, by: other.id }, 'backfill superseded by another job on this forum');
+        await live?.fail(
+          backfillProgressEmbed({
+            channelLabel: label,
+            phase: 'failed',
+            error: 'Another import or re-scan of this channel is already running — it covers this one.',
+          }),
+        );
+      }
+      return;
+    }
+  }
+
+  // pending/failed → running (a retry after a recorded failure resumes from its
+  // checkpoint), or re-take a dead worker's run. A row a live worker holds is refused:
+  // throw so pg-boss retries later instead of importing it twice.
+  const bf = await claimBackfillJob(db, existing.id, JOB_LEASE_MS);
+  if (!bf) throw new JobLeaseHeldError('backfill', existing.id);
+
+  const stopHeartbeat = startHeartbeat(() => heartbeatBackfillJob(db, bf.id));
+  try {
+    await runBackfill(bf, live, label);
+  } catch (err) {
+    const unmonitored = err instanceof ChannelUnmonitoredError;
+    if (unmonitored) log.info({ jobId: bf.id, channelId: bf.channelId }, 'backfill target no longer monitored; stopped');
+    else log.error({ err, jobId: bf.id }, 'backfill failed');
+    // Every error lands the row on 'failed' (never a stuck 'running'). A real failure is
+    // rethrown so pg-boss retries it — the claim accepts 'failed', resuming from the
+    // last checkpoint — and stays 'failed' once retries run out.
+    await transitionBackfillJob(db, bf.id, ['running'], 'failed').catch(() => undefined);
+    if (unmonitored) {
+      await live?.fail(
+        backfillProgressEmbed({
+          channelLabel: label,
+          phase: 'failed',
+          error: 'This channel is no longer monitored, so the import stopped.',
+        }),
+      );
+      return;
+    }
+    // Only flag freshness for a channel we still watch (never resurrect a removed row).
+    if (isChannelMonitored(await getGuildConfig(db, bf.guildId).catch(() => undefined), bf.channelId, 'forum')) {
+      await markChannelStale(db, bf.guildId, bf.channelId, 'forum', 'gap').catch(() => undefined);
+    }
+    await live?.fail(
+      backfillProgressEmbed({
+        channelLabel: label,
+        phase: 'failed',
+        error: err instanceof ListingError ? 'Could not read the channel history.' : 'The import hit an error.',
+      }),
+    );
+    throw err;
+  } finally {
+    stopHeartbeat();
+  }
+}
+
+/** Listing the forum's threads failed (Discord unreachable / no access). */
+class ListingError extends Error {
+  constructor(cause: unknown) {
+    super('backfill: failed to list threads', { cause });
+    this.name = 'ListingError';
+  }
+}
+
+/** Abort at a checkpoint when the forum was removed from monitoring mid-run. */
+async function loadMonitoredConfig(bf: BackfillJob): Promise<GuildConfig | undefined> {
+  const cfg = await getGuildConfig(getDb(), bf.guildId);
+  if (!isChannelMonitored(cfg, bf.channelId, 'forum')) throw new ChannelUnmonitoredError(bf.channelId);
+  return cfg;
+}
+
+async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: string): Promise<void> {
+  const db = getDb();
   live?.update(backfillProgressEmbed({ channelLabel: label, phase: 'listing', done: 0 }));
-  const cfg = await getGuildConfig(db, bf.guildId);
+  const cfg = await loadMonitoredConfig(bf);
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model); // the actual active model id for provenance
   const solvedTagId = cfg?.solvedTagId ?? undefined;
-  const limits = await guildLimits(bf.guildId);
+  let limits = await guildLimits(bf.guildId);
   const mode = channelMode(cfg, bf.channelId);
   const processed = new Set(bf.processedThreadIds);
 
@@ -79,7 +175,9 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
     await updateChannelName(db, bf.guildId, bf.channelId, channelName).catch(() => undefined);
   }
 
-  // Collect active + paginated archived threads for the forum.
+  // Collect active + paginated archived threads for the forum. Always a full listing
+  // (no cursor resume): it is cheap metadata, `total` needs the complete set, and
+  // processedThreadIds already skips the expensive per-thread work on a retry.
   const all: RawThread[] = [];
   try {
     const active = (await fetchActiveGuildThreads(bf.guildId)).filter(
@@ -87,7 +185,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
     );
     all.push(...active);
 
-    let cursor = bf.cursor ?? undefined;
+    let cursor: string | undefined;
     for (;;) {
       const page = await fetchArchivedPublicThreads(bf.channelId, cursor);
       all.push(...page.threads);
@@ -96,17 +194,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
       if (page.threads.length === 0 || !page.hasMore || !cursor) break;
     }
   } catch (err) {
-    log.error({ err, jobId: bf.id }, 'backfill: failed to list threads');
-    await updateBackfillJob(db, bf.id, { status: 'failed' });
-    await markChannelStale(db, bf.guildId, bf.channelId, 'forum', 'gap').catch(() => undefined);
-    await live?.fail(
-      backfillProgressEmbed({
-        channelLabel: label,
-        phase: 'failed',
-        error: 'Could not read the channel history.',
-      }),
-    );
-    return;
+    throw new ListingError(err);
   }
 
   // Oldest first (snowflake order) so a duplicate always folds under the older
@@ -131,6 +219,7 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
   let cappedOut = false;
 
   const checkpoint = async (): Promise<void> => {
+    await loadMonitoredConfig(bf);
     await updateBackfillJob(db, bf.id, {
       processed: processedCount,
       failed,
@@ -166,8 +255,13 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
 
     for (const t of todo.slice(w, w + batchSize)) {
       if (indexedMessages >= limits.indexCap) {
-        cappedOut = true;
-        break;
+        // A tier upgrade may have landed mid-run (checkTierUpgrade won't queue a second
+        // import while this one is active) — re-read the cap before stopping.
+        limits = await guildLimits(bf.guildId);
+        if (indexedMessages >= limits.indexCap) {
+          cappedOut = true;
+          break;
+        }
       }
       try {
         const starter = await fetchStarterMessage(t.id);
@@ -287,12 +381,19 @@ export async function handleBackfillForum(job: BackfillForumJob): Promise<void> 
     }
   }
 
-  await updateBackfillJob(db, bf.id, {
-    processed: processedCount,
-    failed,
-    processedThreadIds: [...processed],
-    status: 'completed',
-  });
+  // Re-check before the final writes: a forum removed from the hub mid-run must not get
+  // its channel_sync row recreated below.
+  await loadMonitoredConfig(bf);
+  if (
+    !(await transitionBackfillJob(db, bf.id, ['running'], 'completed', {
+      processed: processedCount,
+      failed,
+      processedThreadIds: [...processed],
+    }))
+  ) {
+    log.warn({ jobId: bf.id }, 'backfill finished after its row left running; leaving channel state alone');
+    return;
+  }
 
   // Flip the channel's freshness so the setup hub shows "✅ up to date" instead of
   // "not yet indexed" after the first import. `all` is sorted ascending, so the last

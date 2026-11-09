@@ -7,13 +7,13 @@ import { backfillProgressEmbed, type ProgressEmbed, reindexProgressEmbed } from 
 import {
   claimReindex,
   createBackfillJob,
-  createReindexJob,
   ensureChannelSync,
   getActiveBackfillJob,
   getActiveReindexJob,
   getDb,
 } from '@dejavue/db';
-import { enqueueBackfill, enqueueReindexChannel } from '@dejavue/queue';
+import { enqueueBackfill } from '@dejavue/queue';
+import { launchClaimedReindex } from './reindexLaunch';
 import { getGuildTier, limitsFor } from './tier';
 
 export type ReindexTarget = { id: string; kind: 'forum' | 'tracked' };
@@ -84,7 +84,11 @@ export async function startReindex(
   const cooldownMs = limitsFor(await getGuildTier(guildId)).manualReindexCooldownMs;
 
   for (const t of targets) {
-    if (await getActiveReindexJob(db, guildId, t.id)) {
+    // One history job per channel: a running first-setup import counts as busy too.
+    if (
+      (await getActiveReindexJob(db, guildId, t.id)) ||
+      (t.kind === 'forum' && (await getActiveBackfillJob(db, guildId, t.id)))
+    ) {
       skipped.push(`<#${t.id}>`);
       continue;
     }
@@ -100,14 +104,8 @@ export async function startReindex(
       channel,
       reindexProgressEmbed({ channelLabel: `<#${t.id}>`, kind: t.kind, phase: 'queued' }),
     );
-    const job = await createReindexJob(db, {
-      guildId,
-      channelId: t.id,
-      kind: t.kind,
-      statusChannelId,
-      statusMessageId,
-    });
-    await enqueueReindexChannel({ reindexJobId: job.id });
+    // Rolls the claim back if the job can't be created or enqueued.
+    await launchClaimedReindex({ guildId, channelId: t.id, kind: t.kind, statusChannelId, statusMessageId });
     started.push(`<#${t.id}>`);
   }
   return { started, skipped, throttled };
