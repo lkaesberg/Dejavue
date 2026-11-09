@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -239,7 +240,14 @@ export const guildConfig = pgTable('guild_config', {
   purgedAt: timestamp('purged_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  // The public site can't be "on" without an address to serve it at: clearing the
+  // last slug/domain turns it off (customize.ts), and this keeps it that way.
+  check(
+    'guild_config_kb_site_needs_address',
+    sql`not ${t.kbPublishOptIn} or ${t.kbSlug} is not null or ${t.customDomain} is not null`,
+  ),
+]);
 
 // ---------------------------------------------------------------------------
 // Entitlements — a raw mirror of Discord entitlement objects.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { imprintComplete, isPubliclyLive } from './kbGate';
+import { imprintComplete, isPubliclyLive, kbVisibilityStatus, withSiteOffIfAddressless } from './kbGate';
 
 const base = { kbPublishOptIn: true, kbSlug: 'helio', customDomain: null, kbPassphraseHash: null };
 
@@ -51,5 +51,43 @@ describe('imprintComplete', () => {
 
   it('does not require the optional fields', () => {
     expect(imprintComplete({ operator: 'Helio', contact: 'a@b.c', representedBy: undefined })).toBe(true);
+  });
+});
+
+describe('kbVisibilityStatus', () => {
+  it('derives one state from the four fields', () => {
+    expect(kbVisibilityStatus({ ...base, kbPublishOptIn: false })).toBe('off');
+    expect(kbVisibilityStatus({ ...base, kbSlug: null })).toBe('needs_address');
+    expect(kbVisibilityStatus({ ...base, kbPassphraseHash: 'hash' })).toBe('private');
+    expect(kbVisibilityStatus(base)).toBe('public');
+  });
+});
+
+describe('withSiteOffIfAddressless', () => {
+  const domainOnly = { ...base, kbSlug: null, customDomain: 'help.acme.com' };
+
+  it('turns the site off when the last address is cleared', () => {
+    expect(withSiteOffIfAddressless(domainOnly, { customDomain: null })).toEqual({
+      customDomain: null,
+      kbPublishOptIn: false,
+    });
+  });
+
+  it('keeps the site on while a slug remains', () => {
+    expect(withSiteOffIfAddressless({ ...domainOnly, kbSlug: 'helio' }, { customDomain: null })).toEqual({
+      customDomain: null,
+    });
+  });
+
+  it('keeps the site on when the domain is replaced', () => {
+    expect(withSiteOffIfAddressless(domainOnly, { customDomain: 'kb.acme.com' })).toEqual({
+      customDomain: 'kb.acme.com',
+    });
+  });
+
+  it('leaves an off site alone', () => {
+    expect(withSiteOffIfAddressless({ ...domainOnly, kbPublishOptIn: false }, { customDomain: null })).toEqual({
+      customDomain: null,
+    });
   });
 });

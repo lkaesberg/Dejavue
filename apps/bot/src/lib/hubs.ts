@@ -52,7 +52,7 @@ import { showBrandingFor } from './branding';
 import { COLOR } from './embeds';
 import { runFaq, runGaps } from './generate';
 import { assertRowBudget, type HubCtx, hubCtx, type HubId, isHubAdmin, navRow } from './hubNav';
-import { imprintComplete, isPubliclyLive } from './kbGate';
+import { imprintComplete, isPubliclyLive, type KbVisibilityStatus, kbVisibilityStatus } from './kbGate';
 import { eph } from './reply';
 import { allTargets, startReindex } from './reindexTrigger';
 import {
@@ -212,7 +212,7 @@ export async function renderDashboard(guild: Guild, ctx: HubCtx): Promise<BaseMe
       },
       {
         name: 'Public site',
-        value: cfg?.kbPublishOptIn && kbUrl ? `on — ${kbUrl}${imprintWarn}` : cfg?.kbPublishOptIn ? `on — _set an address in_ \`/dejavue website\`${imprintWarn}` : 'off — _turn it on in_ `/dejavue website`',
+        value: siteStatusLine(cfg ? kbVisibilityStatus(cfg) : 'off', kbUrl ?? (cfg?.customDomain ? `https://${cfg.customDomain}` : null), imprintWarn),
       },
     );
   embed.addFields({
@@ -706,3 +706,17 @@ export async function handleHubRoleSelect(interaction: RoleSelectMenuInteraction
 }
 
 export { isSettingsInteraction };
+
+/** The hub's "Public site" line, from the one derived visibility state. */
+function siteStatusLine(status: KbVisibilityStatus, address: string | null, imprintWarn: string): string {
+  switch (status) {
+    case 'off':
+      return 'off — _turn it on in_ `/dejavue website`';
+    case 'needs_address':
+      return 'on — _set an address in_ `/dejavue website`';
+    case 'private':
+      return `on (passphrase) — ${address}`;
+    case 'public':
+      return `on — ${address}${imprintWarn}`;
+  }
+}

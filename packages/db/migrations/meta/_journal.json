@@ -211,6 +211,13 @@
       "when": 1793556512612,
       "tag": "0029_peaceful_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794220689586,
+      "tag": "0030_kb_site_needs_address",
+      "breakpoints": true
     }
   ]
 }

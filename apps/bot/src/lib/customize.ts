@@ -36,7 +36,7 @@ import { enqueueRevalidateKb } from '@dejavue/queue';
 import { checkDomainDns, dnsInstructions } from './domainDns';
 import { assertRowBudget, type HubCtx, hubCtx, navRow } from './hubNav';
 import { COLOR } from './embeds';
-import { imprintComplete, isPubliclyLive } from './kbGate';
+import { imprintComplete, isPubliclyLive, withSiteOffIfAddressless } from './kbGate';
 import { eph } from './reply';
 import { getGuildTier, limitsFor } from './tier';
 import { upsellPayload } from './upsell';
@@ -523,7 +523,7 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
   if (interaction.customId === ID.detailsModal) {
     const env = getEnv();
     const cfg = await ensureGuildConfig(db, guildId);
-    const patch: Parameters<typeof updateGuildConfig>[2] = {};
+    let patch: Parameters<typeof updateGuildConfig>[2] = {};
     const errors: string[] = [];
 
     const brand = interaction.fields.getTextInputValue('brand').trim();
@@ -600,6 +600,10 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
       await interaction.reply({ ...imprintRequiredPayload(), flags: MessageFlags.Ephemeral });
       return;
     }
+    // Clearing the last address (domain removed, no slug) turns the site off rather
+    // than leaving it "on" with nowhere to be served.
+    patch = withSiteOffIfAddressless(cfg, patch);
+    const turnedOff = cfg.kbPublishOptIn && patch.kbPublishOptIn === false;
     try {
       await updateGuildConfig(db, guildId, patch);
     } catch (err) {
@@ -607,7 +611,9 @@ export async function handleCustomizeModal(interaction: ModalSubmitInteraction):
       await interaction.reply(eph('Couldn’t save — that slug or custom domain is already in use.'));
       return;
     }
-    await enqueueRevalidateKb({ guildId, threadId: 'all', action: 'publish' }).catch(() => undefined);
+    await enqueueRevalidateKb({ guildId, threadId: 'all', action: turnedOff ? 'unpublish' : 'publish' }).catch(
+      () => undefined,
+    );
     await rerender(interaction, guildId);
     // A domain was set → confirm the purchase is active, check DNS live, and
     // show exactly which record to create. Re-saving the domain re-runs this,
