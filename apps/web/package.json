@@ -21,7 +21,7 @@
     "@huggingface/transformers": "^4.2.0",
     "astro": "^7.3.8",
     "openai": "^6.42.0",
-    "pg-boss": "^12.19.1",
+    "pg-boss": "^12.38.0",
     "posthog-js": "^1.297.0"
   },
   "devDependencies": {
