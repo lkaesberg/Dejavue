@@ -11,6 +11,8 @@ import {
 } from 'discord.js';
 import { childLogger, getEnv, SEARCH_PRESET_SIMILARITY } from '@dejavue/core';
 import {
+  addForumChannel,
+  addTrackedChannel,
   type ChannelMode,
   countIndexedMessages,
   ensureChannelSync,
@@ -21,7 +23,6 @@ import {
   type SearchMatch,
   hybridSearch,
   setChannelGuidelines,
-  updateGuildConfig,
 } from '@dejavue/db';
 import { botPermissionWarning, missingBotPermissions } from '../lib/botPerms';
 import { showBrandingFor } from '../lib/branding';
@@ -186,9 +187,6 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       return;
     }
     const mode = (interaction.options.getString('mode') ?? 'question') as ChannelMode;
-    const channels = new Set(cfg.forumChannelIds);
-    channels.add(forum.id);
-    const channelModes = { ...(cfg.channelModes ?? {}), [forum.id]: mode };
 
     // Question mode can't work without the `solved` / `unsolved` tags. If that
     // fails, re-check the permissions and name what's actually missing — the old
@@ -211,7 +209,14 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       log.warn({ err, channel: forum.id }, 'knowledge channel: forum tags skipped');
     }
 
-    await updateGuildConfig(db, guildId, { forumChannelIds: [...channels], channelModes, ...tagPatch });
+    // Element-level add with the cap re-checked in the same UPDATE: a concurrent setup
+    // or removal can't be overwritten by this one's stale snapshot of the array.
+    if (!(await addForumChannel(db, guildId, forum.id, { mode, cap: limits.maxForumChannels, ...tagPatch }))) {
+      await interaction.editReply(
+        `Your plan monitors up to ${limits.maxForumChannels} forum channel(s), and another setup just used the last slot. ${channelCapUpsellLine('forum')}`,
+      );
+      return;
+    }
     capture('setup_completed', guildId, { channel_kind: 'forum', mode });
     await setChannelGuidelines(db, guildId, forum.id, forum.topic ?? null);
     await ensureChannelSync(db, guildId, forum.id, 'forum');
@@ -251,8 +256,12 @@ async function handleSetup(interaction: ChatInputCommandInteraction): Promise<vo
       );
       return;
     }
-    const trackedChannelIds = already ? cfg.trackedChannelIds : [...cfg.trackedChannelIds, channel.id];
-    await updateGuildConfig(db, guildId, { trackedChannelIds });
+    if (!(await addTrackedChannel(db, guildId, channel.id, limits.maxTrackedChannels))) {
+      await interaction.editReply(
+        `Your plan indexes up to ${limits.maxTrackedChannels} normal channel(s), and another setup just used the last slot. ${channelCapUpsellLine('tracked')}`,
+      );
+      return;
+    }
     capture('setup_completed', guildId, { channel_kind: 'tracked' });
     await setChannelGuidelines(db, guildId, channel.id, (channel as TextChannel).topic ?? null);
     await ensureChannelSync(db, guildId, channel.id, 'channel');

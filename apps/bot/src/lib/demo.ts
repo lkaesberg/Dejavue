@@ -2,10 +2,10 @@ import { capture } from '@dejavue/analytics';
 import { ChannelType, type ForumChannel, type Guild } from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import {
+  addForumChannel,
   ensureGuildConfig,
   getDb,
   setTranscript,
-  updateGuildConfig,
   upsertEmbedding,
   upsertThread,
 } from '@dejavue/db';
@@ -133,10 +133,10 @@ export async function runDemo(guild: Guild): Promise<DemoResult> {
   }
 
   // Now monitor the forum so the fresh posts go through the real flow.
-  const channels = new Set(cfg.forumChannelIds);
-  channels.add(forum.id);
-  await updateGuildConfig(db, guild.id, {
-    forumChannelIds: [...channels],
+  // Element-level add (no stale whole-array write); the demo forum isn't held to the cap.
+  await addForumChannel(db, guild.id, forum.id, {
+    mode: 'question',
+    cap: Number.POSITIVE_INFINITY,
     solvedTagId: solvedTagId ?? null,
     unsolvedTagId: unsolvedTagId ?? null,
   });

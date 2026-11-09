@@ -15,10 +15,10 @@ import {
   listChannelIdsForGuild,
   listThreadIdsByChannel,
   listThreadLabelsByChannel,
+  removeMonitoredChannel,
   setChannelGuidelines,
   setThreadLabels,
   updateChannelName,
-  updateGuildConfig,
 } from '@dejavue/db';
 import { ensureForumTags, forumParent, threadLabels } from './forum';
 import { scheduleTrackedCapture } from './trackedChannel';
@@ -68,26 +68,19 @@ async function reconcileGuild(guild: Guild): Promise<void> {
   ]);
 
   const trackedNormal = new Set(cfg.trackedChannelIds);
-  let configChanged = false;
-  let forumChannelIds = [...cfg.forumChannelIds];
-  let trackedChannelIds = [...cfg.trackedChannelIds];
-  const channelModes = { ...(cfg.channelModes ?? {}) };
 
   for (const channelId of candidates) {
     const state = await existence(guild, channelId);
     if (state === 'transient') continue; // uncertain → leave everything as-is
 
     if (state === 'missing') {
+      // Unmonitor element-wise right away: this sweep runs for minutes, and writing
+      // back the arrays from the snapshot taken at its start would drop channels set
+      // up (or resurrect ones removed) in the meantime.
+      if (tracked.has(channelId) || trackedNormal.has(channelId)) {
+        await removeMonitoredChannel(db, guild.id, channelId);
+      }
       const removed = await deleteThreadsByChannel(db, guild.id, channelId);
-      if (tracked.has(channelId)) {
-        forumChannelIds = forumChannelIds.filter((id) => id !== channelId);
-        delete channelModes[channelId];
-        configChanged = true;
-      }
-      if (trackedNormal.has(channelId)) {
-        trackedChannelIds = trackedChannelIds.filter((id) => id !== channelId);
-        configChanged = true;
-      }
       if (removed > 0 || tracked.has(channelId) || trackedNormal.has(channelId)) {
         log.info({ guildId: guild.id, channelId, removed }, 'reconcile: purged deleted channel');
       }
@@ -171,10 +164,6 @@ async function reconcileGuild(guild: Guild): Promise<void> {
       const removed = await deleteThreadsByDiscordIds(db, guild.id, stale);
       log.info({ guildId: guild.id, channelId, removed }, 'reconcile: purged deleted threads');
     }
-  }
-
-  if (configChanged) {
-    await updateGuildConfig(db, guild.id, { forumChannelIds, trackedChannelIds, channelModes });
   }
 }
 

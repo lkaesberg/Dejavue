@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or, type SQL, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { guildConfig, type GuildConfig, type NewGuildConfig } from '../schema';
 import { deleteChannelSync } from './channelSync';
@@ -27,23 +27,126 @@ export function channelGuidelinesOf(
   return cfg?.channelGuidelines?.[channelId] || undefined;
 }
 
-/** Store (or clear, when empty) a channel's forum post-guidelines. */
+/**
+ * Store (or clear, when empty) a channel's forum post-guidelines. One key-level jsonb
+ * write, so concurrent edits for different channels can't drop each other.
+ */
 export async function setChannelGuidelines(
   db: Database,
   guildId: string,
   channelId: string,
   guidelines: string | null,
 ): Promise<void> {
-  const cfg = await getGuildConfig(db, guildId);
-  if (!cfg) return;
-  const map = { ...(cfg.channelGuidelines ?? {}) };
   const trimmed = guidelines?.trim();
-  if (trimmed) map[channelId] = trimmed;
-  else delete map[channelId];
   await db
     .update(guildConfig)
-    .set({ channelGuidelines: map, updatedAt: new Date() })
+    .set({
+      channelGuidelines: trimmed
+        ? sql`${guildConfig.channelGuidelines} || jsonb_build_object(${channelId}::text, ${trimmed}::text)`
+        : sql`${guildConfig.channelGuidelines} - ${channelId}::text`,
+      updatedAt: new Date(),
+    })
     .where(eq(guildConfig.guildId, guildId));
+}
+
+// ---------------------------------------------------------------------------
+// Channel membership. guild_config keeps the monitored channels as arrays plus the
+// channel_modes map; every add/remove is a single element-level UPDATE (array_append /
+// array_remove, jsonb || / -), never a read-modify-write of the whole array, so two
+// concurrent setups, or a setup racing a removal, can't drop or resurrect a channel.
+// ---------------------------------------------------------------------------
+
+/** `channelId` is already in `col`, or `col` is under `cap` (no bound when infinite). */
+function roomFor(
+  col: typeof guildConfig.forumChannelIds | typeof guildConfig.trackedChannelIds,
+  channelId: string,
+  cap: number,
+): SQL {
+  if (!Number.isFinite(cap)) return sql`true`;
+  return sql`(${channelId}::text = any(${col}) or cardinality(${col}) < ${Math.max(0, Math.trunc(cap))})`;
+}
+
+/**
+ * Add (or re-mode) a monitored forum channel, refusing a new one past `cap`. Returns
+ * false when the cap refused it (or the guild has no config row).
+ */
+export async function addForumChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  opts: {
+    mode: ChannelMode;
+    cap: number;
+    solvedTagId?: string | null;
+    unsolvedTagId?: string | null;
+  },
+): Promise<boolean> {
+  const tags: { solvedTagId?: string | null; unsolvedTagId?: string | null } = {};
+  if (opts.solvedTagId !== undefined) tags.solvedTagId = opts.solvedTagId;
+  if (opts.unsolvedTagId !== undefined) tags.unsolvedTagId = opts.unsolvedTagId;
+  const rows = await db
+    .update(guildConfig)
+    .set({
+      forumChannelIds: sql`case when ${channelId}::text = any(${guildConfig.forumChannelIds}) then ${guildConfig.forumChannelIds} else array_append(${guildConfig.forumChannelIds}, ${channelId}::text) end`,
+      channelModes: sql`${guildConfig.channelModes} || jsonb_build_object(${channelId}::text, ${opts.mode}::text)`,
+      ...tags,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(guildConfig.guildId, guildId), roomFor(guildConfig.forumChannelIds, channelId, opts.cap)))
+    .returning({ guildId: guildConfig.guildId });
+  return rows.length > 0;
+}
+
+/** Add a tracked normal channel, refusing a new one past `cap`. False when refused. */
+export async function addTrackedChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  cap: number,
+): Promise<boolean> {
+  const rows = await db
+    .update(guildConfig)
+    .set({
+      trackedChannelIds: sql`case when ${channelId}::text = any(${guildConfig.trackedChannelIds}) then ${guildConfig.trackedChannelIds} else array_append(${guildConfig.trackedChannelIds}, ${channelId}::text) end`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(guildConfig.guildId, guildId), roomFor(guildConfig.trackedChannelIds, channelId, cap)))
+    .returning({ guildId: guildConfig.guildId });
+  return rows.length > 0;
+}
+
+/**
+ * Stop monitoring a channel (forum or tracked): drop it from both arrays and its mode,
+ * and its guidelines when `dropGuidelines`. A no-op when it isn't monitored. In-flight
+ * backfill/reindex jobs notice at their next checkpoint (ChannelUnmonitoredError) and
+ * stop without recreating channel_sync.
+ */
+export async function removeMonitoredChannel(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  opts: { dropGuidelines?: boolean } = {},
+): Promise<void> {
+  await db
+    .update(guildConfig)
+    .set({
+      forumChannelIds: sql`array_remove(${guildConfig.forumChannelIds}, ${channelId}::text)`,
+      trackedChannelIds: sql`array_remove(${guildConfig.trackedChannelIds}, ${channelId}::text)`,
+      channelModes: sql`${guildConfig.channelModes} - ${channelId}::text`,
+      ...(opts.dropGuidelines
+        ? { channelGuidelines: sql`${guildConfig.channelGuidelines} - ${channelId}::text` }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(guildConfig.guildId, guildId),
+        or(
+          sql`${channelId}::text = any(${guildConfig.forumChannelIds})`,
+          sql`${channelId}::text = any(${guildConfig.trackedChannelIds})`,
+        ),
+      ),
+    );
 }
 
 export async function getGuildConfig(
@@ -82,22 +185,12 @@ export async function forgetDeletedChannel(
   guildId: string,
   channelId: string,
 ): Promise<number> {
+  // Unmonitor first, so an in-flight backfill/reindex stops at its next checkpoint
+  // instead of re-indexing threads into the channel being purged.
+  await removeMonitoredChannel(db, guildId, channelId, { dropGuidelines: true });
   const removed = await deleteThreadsByChannel(db, guildId, channelId);
   await deleteChannelTopic(db, guildId, channelId);
   await deleteChannelSync(db, guildId, channelId);
-  const cfg = await getGuildConfig(db, guildId);
-  if (cfg && (cfg.forumChannelIds.includes(channelId) || cfg.trackedChannelIds.includes(channelId))) {
-    const channelModes = { ...cfg.channelModes };
-    delete channelModes[channelId];
-    const channelGuidelines = { ...cfg.channelGuidelines };
-    delete channelGuidelines[channelId];
-    await updateGuildConfig(db, guildId, {
-      forumChannelIds: cfg.forumChannelIds.filter((id) => id !== channelId),
-      trackedChannelIds: cfg.trackedChannelIds.filter((id) => id !== channelId),
-      channelModes,
-      channelGuidelines,
-    });
-  }
   return removed;
 }
 

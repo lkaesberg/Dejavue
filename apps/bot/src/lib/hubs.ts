@@ -39,6 +39,7 @@ import {
   listActiveBackfillJobs,
   listActiveReindexJobs,
   listChannelSync,
+  removeMonitoredChannel,
   resolutionStats,
   topHelpers,
   getTopClusters,
@@ -645,17 +646,11 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
   }
   if (id === ID.remove && value) {
     const cfg = await getGuildConfig(db, guildId);
-    if (cfg?.trackedChannelIds.includes(value)) {
-      await updateGuildConfig(db, guildId, {
-        trackedChannelIds: cfg.trackedChannelIds.filter((c) => c !== value),
-      });
-    } else if (cfg?.forumChannelIds.includes(value)) {
-      const channelModes = { ...(cfg.channelModes ?? {}) };
-      delete channelModes[value];
-      await updateGuildConfig(db, guildId, {
-        forumChannelIds: cfg.forumChannelIds.filter((c) => c !== value),
-        channelModes,
-      });
+    // Element-level removal: never writes back a stale snapshot of the arrays, so a
+    // setup running at the same time keeps its channel. In-flight import/rescan jobs
+    // for this channel stop at their next checkpoint.
+    await removeMonitoredChannel(db, guildId, value);
+    if (cfg?.forumChannelIds.includes(value) && !cfg.trackedChannelIds.includes(value)) {
       await deleteChannelTopic(db, guildId, value).catch(() => undefined);
     }
     await deleteChannelSync(db, guildId, value).catch(() => undefined);
