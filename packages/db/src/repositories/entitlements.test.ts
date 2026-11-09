@@ -28,7 +28,7 @@ describe('entitlement mirror', () => {
     const guild = await upsertEntitlement(db, { id: 'e1', skuId: 's', guildId: null, userId: 'u' });
     expect(guild).toBeNull();
     const sql = last(queries);
-    expect(sql).toContain('"guild_id" = coalesce(excluded.guild_id, "entitlement"."guild_id")');
+    expect(sql).toContain('"guild_id" = coalesce("entitlement"."guild_id", excluded.guild_id)');
     expect(sql).toContain('"consumed" = ("entitlement"."consumed" or excluded.consumed)');
     expect(sql).toMatch(/returning "guild_id"$/);
   });

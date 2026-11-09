@@ -3,6 +3,7 @@ import { childLogger, getEnv, isTopUpSku, notifyAsync, topUpTiers } from '@dejav
 import {
   clearPurchaseIntent,
   getDb,
+  getEntitlement,
   hasOtherLiveEntitlement,
   resolvePurchaseIntent,
   revokeTopUpGrant,
@@ -45,12 +46,15 @@ export async function storeAndFulfil(
   const row = mapEntitlement(ent);
   const oneTime = isOneTimeSku(row.skuId);
   let bridged: string | undefined;
-  if (!row.guildId && row.userId && oneTime) {
+  // Bridge only a purchase that isn't bound yet: an UPDATE / redelivery / reconcile of
+  // an already-bound one must not consume a newer intent the buyer made for another
+  // guild (that would steal the next purchase's binding).
+  if (!row.guildId && row.userId && oneTime && !(await getEntitlement(db, row.id))?.guildId) {
     bridged = await resolvePurchaseIntent(db, row.userId, row.skuId);
     if (bridged) row.guildId = bridged;
   }
   const guildId = await upsertEntitlement(db, row);
-  if (bridged && row.userId) {
+  if (bridged && row.userId && guildId === bridged) {
     // The top-up ladder recorded an intent for every pack; the buyer picked one.
     const skuIds = isTopUpSku(getEnv(), row.skuId)
       ? [row.skuId, ...topUpTiers(getEnv()).map((t) => t.skuId)]

@@ -23,7 +23,9 @@ export async function upsertEntitlement(
       target: entitlement.id,
       set: {
         skuId: row.skuId,
-        guildId: sql`coalesce(excluded.guild_id, ${entitlement.guildId})`,
+        // The stored binding wins: an entitlement's guild never changes once bound, so a
+        // later bridge attempt (a newer intent for another guild) can't move it.
+        guildId: sql`coalesce(${entitlement.guildId}, excluded.guild_id)`,
         userId: sql`coalesce(excluded.user_id, ${entitlement.userId})`,
         type: row.type ?? 'unknown',
         startsAt: row.startsAt ?? null,
@@ -43,6 +45,12 @@ export async function upsertEntitlement(
  * bound — for user-owned purchases the Discord payload has no guild, the row does —
  * and whether this call was the one that flipped it (so a refund is reversed once).
  */
+/** The stored mirror of one entitlement, if any. */
+export async function getEntitlement(db: Database, id: string): Promise<Entitlement | undefined> {
+  const [row] = await db.select().from(entitlement).where(eq(entitlement.id, id)).limit(1);
+  return row;
+}
+
 export async function markEntitlementDeleted(
   db: Database,
   id: string,
