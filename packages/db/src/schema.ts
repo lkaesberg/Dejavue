@@ -179,8 +179,8 @@ export const guildConfig = pgTable('guild_config', {
   // Per-guild model override. Must stay dimension-compatible with the vec columns —
   // resolveModel ignores a row whose model has the wrong dim rather than trusting it.
   embeddingModel: text('embedding_model').notNull().default('embeddinggemma-300m'),
-  // Stale-question nudges. NOT tier-gated — tierLimits gives every tier nudges,
-  // and nothing reads limits.nudges. Exposed in `/dejavue settings`.
+  // Stale-question nudges. Exposed in `/dejavue settings` to every tier; the worker
+  // gates only on tierLimits(tier).nudges, which every tier has.
   nudgeEnabled: boolean('nudge_enabled').notNull().default(false),
   nudgeAfterHours: integer('nudge_after_hours').notNull().default(24),
   nudgeHelperRoleId: text('nudge_helper_role_id'),

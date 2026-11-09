@@ -1,5 +1,6 @@
+import { DiscordAPIError } from 'discord.js';
 import { describe, expect, it } from 'vitest';
-import { archivedAt, forumSolvedTagId } from './discordRest';
+import { archivedAt, forumSolvedTagId, isPermanentDiscordError } from './discordRest';
 
 describe('forumSolvedTagId', () => {
   it("uses the forum's own solved tag, not the guild-wide one", () => {
@@ -24,5 +25,22 @@ describe('archivedAt', () => {
     );
     expect(archivedAt({ id: '1', name: 'n' })).toBeUndefined();
     expect(archivedAt({ id: '1', name: 'n', thread_metadata: { archive_timestamp: 'garbage' } })).toBeUndefined();
+  });
+});
+
+describe('isPermanentDiscordError', () => {
+  const apiError = (status: number, code = 0) =>
+    new DiscordAPIError({ code, message: 'x' }, code, status, 'POST', '/channels/1/messages', {});
+
+  it('treats a 4xx refusal as final', () => {
+    expect(isPermanentDiscordError(apiError(404, 10003))).toBe(true);
+    expect(isPermanentDiscordError(apiError(403, 50001))).toBe(true);
+    expect(isPermanentDiscordError(apiError(400, 50083))).toBe(true);
+  });
+
+  it('keeps rate limits, server errors and network errors retryable', () => {
+    expect(isPermanentDiscordError(apiError(429))).toBe(false);
+    expect(isPermanentDiscordError(apiError(502))).toBe(false);
+    expect(isPermanentDiscordError(new Error('ECONNRESET'))).toBe(false);
   });
 });

@@ -1,18 +1,19 @@
-import { childLogger, getEnv } from '@dejavue/core';
+import { childLogger, getEnv, tierLimits } from '@dejavue/core';
 import {
   getDb,
   getGuildConfig,
   getStaleUnansweredThreads,
   listGuildsWithNudges,
   markThreadNudged,
+  nudgeableChannelIds,
   resolveGuildTier,
 } from '@dejavue/db';
 import type { NudgeStaleJob } from '@dejavue/queue';
-import { postMessage } from '../lib/discordRest';
+import { isPermanentDiscordError, postMessage } from '../lib/discordRest';
 
 const log = childLogger({ mod: 'job:nudge-stale' });
 
-/** Ping helpers about stale unanswered posts (Plus+). Scheduled hourly sweep. */
+/** Ping helpers about stale unanswered posts. Scheduled hourly sweep. */
 export async function handleNudgeStale(job: NudgeStaleJob): Promise<void> {
   const db = getDb();
   const env = getEnv();
@@ -30,9 +31,16 @@ export async function handleNudgeStale(job: NudgeStaleJob): Promise<void> {
         pro: env.SKU_PRO,
         max: env.SKU_MAX,
       }));
-    if (tier === 'free') continue; // nudges are a Plus+ feature
+    // One source of truth for the gate: the tier matrix (every tier has nudges today,
+    // which is what the settings page offers).
+    if (!tierLimits(tier).nudges) continue;
 
-    const stale = await getStaleUnansweredThreads(db, guildId, cfg.nudgeAfterHours);
+    const stale = await getStaleUnansweredThreads(
+      db,
+      guildId,
+      nudgeableChannelIds(cfg),
+      cfg.nudgeAfterHours,
+    );
     for (const t of stale) {
       try {
         const mention = cfg.nudgeHelperRoleId ? `<@&${cfg.nudgeHelperRoleId}> ` : '';
@@ -45,7 +53,11 @@ export async function handleNudgeStale(job: NudgeStaleJob): Promise<void> {
         );
         await markThreadNudged(db, t.threadRowId);
       } catch (err) {
-        log.warn({ err, threadId: t.threadId }, 'nudge failed');
+        // A permanent refusal (thread deleted, no access) settles the nudge; a transient
+        // one leaves it eligible for the next sweep.
+        const permanent = isPermanentDiscordError(err);
+        log.warn({ err, threadId: t.threadId, permanent }, 'nudge failed');
+        if (permanent) await markThreadNudged(db, t.threadRowId).catch(() => undefined);
       }
     }
     if (stale.length) log.info({ guildId, nudged: stale.length }, 'sent nudges');

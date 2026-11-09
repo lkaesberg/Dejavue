@@ -127,6 +127,10 @@ export async function setThreadStatus(
       acceptedAnswerText: null,
       acceptedAnswerAuthorId: null,
       canonicalSummary: null,
+      // A solved post that is reopened is a new wait for help: make it nudgeable again.
+      // Only on a real solved -> open/unsolved move, so re-applying the same status
+      // doesn't re-arm a nudge that already went out.
+      lastNudgedAt: sql`case when ${thread.status} = 'solved' then null else ${thread.lastNudgedAt} end`,
       updatedAt: new Date(),
     })
     .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));

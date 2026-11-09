@@ -97,6 +97,15 @@ export function isUnknownChannel(err: unknown): boolean {
 }
 
 /**
+ * Whether Discord refused a request for good: a 4xx other than a rate limit (unknown
+ * channel, missing access, archived/locked thread). Retrying it won't change the answer;
+ * a 429, a 5xx or a network error might.
+ */
+export function isPermanentDiscordError(err: unknown): boolean {
+  return err instanceof DiscordAPIError && err.status >= 400 && err.status < 500 && err.status !== 429;
+}
+
+/**
  * Whether a channel still exists. Only Discord's definitive "Unknown Channel" counts as
  * gone; any other failure (missing access, rate limit, network) is `null`, and callers
  * must never delete on it — the same rule the bot's deletion reconcile follows.
