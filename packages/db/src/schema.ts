@@ -167,7 +167,7 @@ export const guildConfig = pgTable('guild_config', {
   // Per-guild generative run state (epoch ms), keyed by feature ('cluster' | 'faq').
   // Lets commands dedupe in-flight runs and show "still working" + freshness.
   genRuns: jsonb('gen_runs')
-    .$type<Record<string, { started?: number; finished?: number }>>()
+    .$type<Record<string, { started?: number; finished?: number; failed?: number }>>()
     .notNull()
     .default({}),
   // Last tier we acted on — a change-detection marker for auto-backfill on upgrade.

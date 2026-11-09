@@ -13,7 +13,7 @@ import {
   getFaqEntries,
   getGuildConfig,
   getTopClusters,
-  markGenerationStarted,
+  tryStartGeneration,
 } from '@dejavue/db';
 import { enqueueClusterGaps, enqueueRegenFaq } from '@dejavue/queue';
 import { COLOR, threadUrl } from './embeds';
@@ -22,9 +22,11 @@ import { prepareTopUpSkus } from './topUp';
 import { upsellPayload } from './upsell';
 
 /** A generation is re-triggered only if none ran in the last 5 minutes and one isn't
- *  already in flight; an in-flight run "expires" after 5 minutes so a stuck run never
- *  blocks forever. */
-export const GEN_OPTS = { throttleMs: 5 * 60_000, maxRunMs: 5 * 60_000 };
+ *  already in flight. An in-flight run "expires" after the queue's job expiry (30 min,
+ *  LLM_EXPIRE in packages/queue/src/boss.ts) so a stuck run never blocks forever, but a
+ *  slow run that pg-boss still considers alive is never treated as idle. The worker
+ *  re-arms the window on every attempt and records failures, so it rarely matters. */
+export const GEN_OPTS = { throttleMs: 5 * 60_000, maxRunMs: 30 * 60_000 };
 
 /** Slash command or a hub button — both can defer/fetch/edit a reply. */
 type Repliable = ChatInputCommandInteraction | ButtonInteraction;
@@ -83,8 +85,9 @@ export async function runGaps(interaction: Repliable): Promise<void> {
   await interaction.deferReply();
   const cfg = await getGuildConfig(db, guildId);
   const st = generationStatus(cfg, 'cluster', GEN_OPTS);
-  if (!st.inFlight && !st.fresh) {
-    await markGenerationStarted(db, guildId, 'cluster');
+  // Compare-and-set: of two concurrent commands only one starts (and enqueues) a run;
+  // the other falls through and shows the current result as still refreshing.
+  if (!st.inFlight && !st.fresh && (await tryStartGeneration(db, guildId, 'cluster', GEN_OPTS))) {
     const reply = await interaction.fetchReply();
     await enqueueClusterGaps({ guildId, progress: { channelId: reply.channelId, messageId: reply.id } });
     await interaction.editReply({ embeds: [wrap(genProgressEmbed({ kind: 'cluster', phase: 'queued' }))] });
@@ -104,7 +107,8 @@ export async function runGaps(interaction: Repliable): Promise<void> {
     .setColor(COLOR)
     .setTitle('Knowledge gaps')
     .setDescription(list || '_No clusters yet._');
-  if (st.inFlight) embed.setFooter({ text: 'Still refreshing in the background…' });
+  // Not fresh here means in flight, or another command just won the start.
+  if (st.inFlight || !st.fresh) embed.setFooter({ text: 'Still refreshing in the background…' });
   await interaction.editReply({ embeds: [embed] });
 }
 
@@ -130,8 +134,9 @@ export async function runFaq(interaction: Repliable): Promise<void> {
   await interaction.deferReply();
   const cfg = await getGuildConfig(db, guildId);
   const st = generationStatus(cfg, 'faq', GEN_OPTS);
-  if (!st.inFlight && !st.fresh) {
-    await markGenerationStarted(db, guildId, 'faq');
+  // Compare-and-set: of two concurrent commands only one starts (and enqueues) a run;
+  // the other falls through and shows the current result as still refreshing.
+  if (!st.inFlight && !st.fresh && (await tryStartGeneration(db, guildId, 'faq', GEN_OPTS))) {
     const reply = await interaction.fetchReply();
     await enqueueRegenFaq({ guildId, progress: { channelId: reply.channelId, messageId: reply.id } });
     await interaction.editReply({ embeds: [wrap(genProgressEmbed({ kind: 'faq', phase: 'queued' }))] });
@@ -141,6 +146,7 @@ export async function runFaq(interaction: Repliable): Promise<void> {
   const embed = new EmbedBuilder().setColor(COLOR).setTitle('Auto-FAQ');
   if (faqs.length === 0) embed.setDescription('_No FAQ entries yet._');
   else for (const f of faqs.slice(0, 8)) embed.addFields({ name: f.question.slice(0, 256), value: f.answer.slice(0, 1024) });
-  if (st.inFlight) embed.setFooter({ text: 'Still refreshing in the background…' });
+  // Not fresh here means in flight, or another command just won the start.
+  if (st.inFlight || !st.fresh) embed.setFooter({ text: 'Still refreshing in the background…' });
   await interaction.editReply({ embeds: [embed] });
 }

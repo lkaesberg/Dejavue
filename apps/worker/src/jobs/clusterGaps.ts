@@ -7,7 +7,9 @@ import {
   getDb,
   getGuildEmbeddingPoints,
   getTopClusters,
+  markGenerationFailed,
   markGenerationFinished,
+  markGenerationRunning,
   type NewClusterInput,
   replaceClusters,
 } from '@dejavue/db';
@@ -40,11 +42,18 @@ export async function handleClusterGaps(job: ClusterGapsJob): Promise<void> {
   const env = getEnv();
   const live = job.progress ? new LiveProgress(job.progress) : null;
   live?.update(genProgressEmbed({ kind: 'cluster', phase: 'working', note: 'grouping questions…' }));
+  // Every attempt (incl. a pg-boss retry) re-arms the in-flight window.
+  await markGenerationRunning(db, job.guildId, 'cluster');
   try {
     await clusterGaps(job, db, env);
-  } finally {
-    if (live) await renderClusters(job.guildId, live).catch(() => undefined);
+  } catch (err) {
+    // Record the failure (ends in-flight without looking fresh) and show it as a
+    // failure — never the "done" result. Rethrow so pg-boss can retry.
+    await markGenerationFailed(db, job.guildId, 'cluster').catch(() => undefined);
+    if (live) await live.fail(genProgressEmbed({ kind: 'cluster', phase: 'failed' }));
+    throw err;
   }
+  if (live) await renderClusters(job.guildId, live).catch(() => undefined);
 }
 
 async function clusterGaps(

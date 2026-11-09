@@ -8,7 +8,9 @@ import {
   getFaqEntries,
   getThreadsByRowIds,
   getTopClusters,
+  markGenerationFailed,
   markGenerationFinished,
+  markGenerationRunning,
   upsertGeneratedFaq,
 } from '@dejavue/db';
 import type { RegenFaqJob } from '@dejavue/queue';
@@ -37,10 +39,13 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
   const live = job.progress ? new LiveProgress(job.progress) : null;
   live?.update(genProgressEmbed({ kind: 'faq', phase: 'working', note: 'drafting answers…' }));
   let stoppedOnQuota = false;
+  // Every attempt (incl. a pg-boss retry) re-arms the in-flight window.
+  await markGenerationRunning(db, job.guildId, 'faq');
   try {
     if (!env.OPENROUTER_API_KEY) {
       log.warn('OPENROUTER_API_KEY not set; skipping FAQ regen');
       await markGenerationFinished(db, job.guildId, 'faq');
+      if (live) await renderFaq(job.guildId, live).catch(() => undefined);
       return;
     }
     const baseCredits = await guildCreditBudget(job.guildId);
@@ -89,12 +94,17 @@ export async function handleRegenFaq(job: RegenFaqJob): Promise<void> {
     }
     await markGenerationFinished(db, job.guildId, 'faq');
     log.info({ guildId: job.guildId, clusters: clusters.length }, 'regenerated FAQ');
-  } finally {
-    if (live) {
-      const note = stoppedOnQuota
-        ? 'Stopped early — monthly AI credits used up. Top up or wait for the reset on the 1st (UTC).'
-        : undefined;
-      await renderFaq(job.guildId, live, note).catch(() => undefined);
-    }
+  } catch (err) {
+    // Record the failure (ends in-flight without looking fresh) and show it as a
+    // failure — never the "done" result. Rethrow so pg-boss can retry.
+    await markGenerationFailed(db, job.guildId, 'faq').catch(() => undefined);
+    if (live) await live.fail(genProgressEmbed({ kind: 'faq', phase: 'failed' }));
+    throw err;
+  }
+  if (live) {
+    const note = stoppedOnQuota
+      ? 'Stopped early — monthly AI credits used up. Top up or wait for the reset on the 1st (UTC).'
+      : undefined;
+    await renderFaq(job.guildId, live, note).catch(() => undefined);
   }
 }

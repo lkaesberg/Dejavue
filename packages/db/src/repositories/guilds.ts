@@ -239,8 +239,16 @@ export async function swapLastTier(
 
 export type GenFeature = 'cluster' | 'faq';
 
+/** One feature's stored run timestamps (epoch ms). `failed` is set by the worker when
+ *  an attempt throws; `finished` only on success. */
+export interface GenRun {
+  started?: number;
+  finished?: number;
+  failed?: number;
+}
+
 export interface GenStatus {
-  /** A run was requested and the worker hasn't reported finishing it yet. */
+  /** A run was requested and the worker hasn't reported finishing (or failing) it yet. */
   inFlight: boolean;
   /** A run finished recently enough that a re-run should just show the result. */
   fresh: boolean;
@@ -255,39 +263,82 @@ export function generationStatus(
   opts: { throttleMs: number; maxRunMs: number },
   now = Date.now(),
 ): GenStatus {
-  const run = cfg?.genRuns?.[feature] ?? {};
+  const run: GenRun = cfg?.genRuns?.[feature] ?? {};
   const started = run.started;
   const finished = run.finished;
+  const failed = run.failed;
   const inFlight =
     typeof started === 'number' &&
     (typeof finished !== 'number' || started > finished) &&
+    (typeof failed !== 'number' || started > failed) &&
     now - started < opts.maxRunMs;
   const fresh = typeof finished === 'number' && now - finished < opts.throttleMs;
   return { inFlight, fresh, startedAt: started, finishedAt: finished };
 }
 
-async function patchGenRun(
-  db: Database,
-  guildId: string,
-  feature: GenFeature,
-  patch: { started?: number; finished?: number },
-): Promise<void> {
-  const cfg = await getGuildConfig(db, guildId);
-  if (!cfg) return;
-  const runs = { ...(cfg.genRuns ?? {}) };
-  runs[feature] = { ...(runs[feature] ?? {}), ...patch };
+/**
+ * Merge `patch` into ONE feature's entry in a single UPDATE (jsonb `||`), so a cluster
+ * finish and a concurrent faq start can't overwrite each other's key.
+ */
+async function patchGenRun(db: Database, guildId: string, feature: GenFeature, patch: GenRun): Promise<void> {
   await db
     .update(guildConfig)
-    .set({ genRuns: runs, updatedAt: new Date() })
+    .set({
+      genRuns: sql`${guildConfig.genRuns} || jsonb_build_object(${feature}::text, coalesce(${guildConfig.genRuns} -> ${feature}::text, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb)`,
+      updatedAt: new Date(),
+    })
     .where(eq(guildConfig.guildId, guildId));
 }
 
-/** Mark that a generation run was just requested (command-side). */
-export function markGenerationStarted(db: Database, guildId: string, feature: GenFeature): Promise<void> {
+/**
+ * Command-side: start a run only if none is in flight or fresh. Compare-and-set on the
+ * feature's entry as it was read, so two concurrent commands can't both start (and
+ * enqueue) a run — the loser gets false and should show the existing result instead.
+ */
+export async function tryStartGeneration(
+  db: Database,
+  guildId: string,
+  feature: GenFeature,
+  opts: { throttleMs: number; maxRunMs: number },
+  now = Date.now(),
+): Promise<boolean> {
+  const cfg = await getGuildConfig(db, guildId);
+  if (!cfg) return false;
+  const st = generationStatus(cfg, feature, opts, now);
+  if (st.inFlight || st.fresh) return false;
+  const prev = cfg.genRuns?.[feature];
+  const next: GenRun = { started: now, ...(prev?.finished !== undefined ? { finished: prev.finished } : {}) };
+  const rows = await db
+    .update(guildConfig)
+    .set({
+      genRuns: sql`${guildConfig.genRuns} || jsonb_build_object(${feature}::text, ${JSON.stringify(next)}::jsonb)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(guildConfig.guildId, guildId),
+        prev === undefined
+          ? sql`(${guildConfig.genRuns} -> ${feature}::text) is null`
+          : sql`(${guildConfig.genRuns} -> ${feature}::text) = ${JSON.stringify(prev)}::jsonb`,
+      ),
+    )
+    .returning({ guildId: guildConfig.guildId });
+  return rows.length > 0;
+}
+
+/** Worker-side: an attempt (first run or a pg-boss retry) is executing now. Re-arms
+ *  the in-flight window so a retry after a failure shows as running again. */
+export function markGenerationRunning(db: Database, guildId: string, feature: GenFeature): Promise<void> {
   return patchGenRun(db, guildId, feature, { started: Date.now() });
 }
 
 /** Mark that a generation run finished (worker-side, any trigger). */
 export function markGenerationFinished(db: Database, guildId: string, feature: GenFeature): Promise<void> {
   return patchGenRun(db, guildId, feature, { finished: Date.now() });
+}
+
+/** Mark that a generation attempt threw (worker-side): ends in-flight without making
+ *  the result look fresh, so the next command can start a new run. */
+export function markGenerationFailed(db: Database, guildId: string, feature: GenFeature): Promise<void> {
+  return patchGenRun(db, guildId, feature, { failed: Date.now() });
 }
