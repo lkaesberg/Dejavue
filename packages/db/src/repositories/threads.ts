@@ -33,6 +33,9 @@ export const publishableSql = and(
 export async function upsertThread(db: Database, values: NewThread): Promise<Thread> {
   const solved = values.status === 'solved';
   const promote = sql`(excluded.status = 'solved' and ${thread.status} = 'open')`;
+  // Stamped here (ms precision) rather than with now(), so the value matches what
+  // readers hold as a JS Date (claimCanonicalSummary compares it).
+  const now = new Date().toISOString();
   const [row] = await db
     .insert(thread)
     .values(solved && !values.solvedAt ? { ...values, solvedAt: new Date() } : values)
@@ -48,7 +51,7 @@ export async function upsertThread(db: Database, values: NewThread): Promise<Thr
         // that predates solvedAt stamping is repaired too.
         solvedAt: values.solvedAt
           ? sql`case when ${promote} or (${thread.status} = 'solved' and ${thread.solvedAt} is null) then excluded.solved_at else ${thread.solvedAt} end`
-          : sql`case when ${promote} then coalesce(excluded.solved_at, now()) else ${thread.solvedAt} end`,
+          : sql`case when ${promote} then coalesce(excluded.solved_at, ${now}::timestamptz) else ${thread.solvedAt} end`,
         updatedAt: new Date(),
       },
     })
@@ -257,7 +260,11 @@ export async function claimCanonicalSummary(
       and(
         eq(thread.id, threadRowId),
         isNull(thread.canonicalSummary),
-        solvedAt ? eq(thread.solvedAt, solvedAt) : isNull(thread.solvedAt),
+        // JS Dates carry milliseconds, timestamptz microseconds: compare at ms precision
+        // so a solve stamped by the database (now()) still matches what the worker read.
+        solvedAt
+          ? sql`date_trunc('milliseconds', ${thread.solvedAt}) = ${solvedAt.toISOString()}::timestamptz`
+          : isNull(thread.solvedAt),
       ),
     )
     .returning({ id: thread.id });

@@ -37,7 +37,7 @@ describe('thread lifecycle', () => {
     expect(sql).toContain(
       `"status" = case when (excluded.status = 'solved' and "thread"."status" = 'open') then 'solved'::thread_status else "thread"."status" end`,
     );
-    expect(sql).toContain('coalesce(excluded.solved_at, now())');
+    expect(sql).toMatch(/coalesce\(excluded.solved_at, \$\d+::timestamptz\)/);
   });
 
   it('repairs a solved row without solvedAt when the caller knows the solve time', async () => {
@@ -74,7 +74,7 @@ describe('thread lifecycle', () => {
     const at = new Date('2026-01-01T00:00:00Z');
     expect(await claimCanonicalSummary(db, 'row', 's', at)).toBe(false);
     expect(last(queries)).toContain('"thread"."canonical_summary" is null');
-    expect(last(queries)).toContain('"thread"."solved_at" = $');
+    expect(last(queries)).toContain(`date_trunc('milliseconds', "thread"."solved_at") = $`);
     await claimCanonicalSummary(db, 'row', 's', null);
     expect(last(queries)).toContain('"thread"."solved_at" is null');
   });
