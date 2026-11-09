@@ -17,6 +17,7 @@ import {
   type GuildConfig,
   heartbeatBackfillJob,
   getThreadByDiscordId,
+  isPublishable,
   isOptedOut,
   listEmbeddedThreadIdsInChannel,
   markChannelStale,
@@ -37,7 +38,9 @@ import type { BackfillForumJob } from '@dejavue/queue';
 import {
   fetchActiveGuildThreads,
   fetchArchivedPublicThreads,
+  archivedAt,
   fetchChannelInfo,
+  forumSolvedTagId,
   fetchStarterMessage,
   type RawThread,
 } from '../lib/discordRest';
@@ -161,7 +164,6 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
   const cfg = await loadMonitoredConfig(bf);
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model); // the actual active model id for provenance
-  const solvedTagId = cfg?.solvedTagId ?? undefined;
   let limits = await guildLimits(bf.guildId);
   const mode = channelMode(cfg, bf.channelId);
   const processed = new Set(bf.processedThreadIds);
@@ -171,6 +173,7 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
   // "General" bucket. The update also repairs rows written before this ran.
   const info = await fetchChannelInfo(bf.channelId);
   const channelName = info?.name ?? null;
+  const solvedTagId = forumSolvedTagId(info, cfg?.solvedTagId);
   if (channelName) {
     await updateChannelName(db, bf.guildId, bf.channelId, channelName).catch(() => undefined);
   }
@@ -280,12 +283,21 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
           questionBody: starter?.content ?? '',
           opUserId: starter?.author?.id ?? null,
           status: isSolved ? 'solved' : 'open',
+          solvedAt: isSolved ? archivedAt(t) : undefined,
         });
         indexedMessages++;
         // Backfill only has the starter message (no full transcript), so this is the
         // canonical title + question chunk — the same chunk 0 the live job builds.
         const src = { title: t.name, questionBody: starter?.content ?? '' };
-        prepared.push({ t, rowId: row.id, isSolved, src, chunk: buildEmbeddingChunks(src)[0] });
+        // The row's status, not the tag's: an 'open' row is promoted from the tag by
+        // upsertThread, an explicit reopen to 'unsolved' is not overridden.
+        prepared.push({
+          t,
+          rowId: row.id,
+          isSolved: row.status === 'solved',
+          src,
+          chunk: buildEmbeddingChunks(src)[0],
+        });
       } catch (err) {
         failed++;
         log.warn({ err, threadId: t.id }, 'backfill: failed to import thread');
@@ -358,9 +370,10 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
           }
         }
 
-        if (isDup) {
-          // A folded copy never stands alone on the KB.
-          await setPublished(db, bf.guildId, p.t.id, false);
+        if (isDup || (existing && !isPublishable(existing))) {
+          // A folded copy (onto a canonical or by hand) or an opted-out post never
+          // stands alone on the KB.
+          if (isDup || existing?.publishedToKb) await setPublished(db, bf.guildId, p.t.id, false);
         } else if (mode === 'knowledge' || p.isSolved) {
           // Auto-publish everything online. Open questions stay private until solved.
           await setPublished(db, bf.guildId, p.t.id, true);

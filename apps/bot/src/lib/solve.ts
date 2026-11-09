@@ -7,6 +7,7 @@ import {
   getDb,
   getThreadByDiscordId,
   isOptedOut,
+  isPublishable,
   markThreadSolved,
   setPublished,
   setThreadLabels,
@@ -269,9 +270,9 @@ export async function solveThread(
   // nobody reads. Deliberately not enqueued here.
 
   // Everything indexed is auto-published (online). The public site itself is gated by
-  // kbPublishOptIn + the passphrase. Duplicates are never published on their own —
-  // they're folded under the canonical thread.
-  if (!row.doNotPublish && !row.duplicateOfThreadId) {
+  // kbPublishOptIn + the passphrase. Duplicates (folded onto a canonical, or marked by
+  // hand with the duplicate tag) are never published on their own.
+  if (isPublishable(row)) {
     try {
       await setPublished(db, guildId, thread.id, true);
       await enqueueRevalidateKb({ guildId, threadId: thread.id, action: 'publish' });

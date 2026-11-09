@@ -2,6 +2,7 @@ import { and, cosineDistance, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { embedding, type GuildConfig, guildConfig, type Thread, thread } from '../schema';
 import { CHUNK_OVERFETCH } from './search';
+import { publishableSql } from './threads';
 
 /** A public-KB search hit: the same shape for keyword and semantic, plus an optional match %. */
 export interface KbSearchResult {
@@ -76,8 +77,7 @@ export async function getPublishedThreads(
       and(
         eq(thread.guildId, guildId),
         eq(thread.publishedToKb, true),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId), // duplicates are folded under their canonical thread
+        publishableSql, // duplicates are folded under their canonical thread
       ),
     )
     .orderBy(sql`${thread.solvedAt} desc nulls last`)
@@ -97,8 +97,7 @@ export async function getPublishedThread(
         eq(thread.guildId, guildId),
         eq(thread.threadId, discordThreadId),
         eq(thread.publishedToKb, true),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId), // a folded duplicate is not its own page
+        publishableSql, // a folded duplicate is not its own page
       ),
     )
     .limit(1);
@@ -197,8 +196,7 @@ export async function searchPublished(
       and(
         eq(thread.guildId, guildId),
         eq(thread.publishedToKb, true),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId),
+        publishableSql,
         ...(channelId ? [eq(thread.channelId, channelId)] : []),
         sql`${document} @@ ${tsquery}`,
       ),
@@ -248,8 +246,7 @@ export async function searchPublishedSemantic(
         eq(embedding.guildId, guildId),
         eq(embedding.modelId, modelId),
         eq(thread.publishedToKb, true),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId),
+        publishableSql,
         ...(channelId ? [eq(thread.channelId, channelId)] : []),
       ),
     )
@@ -337,8 +334,7 @@ export async function publishExistingInChannel(
         eq(thread.guildId, guildId),
         eq(thread.channelId, channelId),
         eq(thread.publishedToKb, false),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId),
+        publishableSql,
       ),
     );
 
@@ -375,8 +371,7 @@ export async function publishExistingTracked(
         eq(thread.channelId, channelId),
         eq(thread.kind, 'channel'),
         eq(thread.publishedToKb, false),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId),
+        publishableSql,
       ),
     );
   if (rows.length === 0) return 0;
@@ -418,8 +413,7 @@ export async function publishExistingSolved(db: Database, guildId: string): Prom
         eq(thread.guildId, guildId),
         eq(thread.status, 'solved'),
         eq(thread.publishedToKb, false),
-        eq(thread.doNotPublish, false),
-        isNull(thread.duplicateOfThreadId), // never retroactively publish a folded duplicate
+        publishableSql, // never retroactively publish a folded or hand-marked duplicate
       ),
     );
 

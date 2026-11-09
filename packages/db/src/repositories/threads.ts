@@ -2,11 +2,40 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { embedding, thread, type NewThread, type Thread, type TranscriptMessage } from '../schema';
 
-/** Insert or update a thread, keyed by (guildId, discord threadId). */
+/**
+ * Whether a thread may have a standalone KB page: not opted out, and not folded as a
+ * duplicate — neither onto a canonical thread nor by hand (the managed `duplicate`
+ * tag). Every publish path checks this one predicate.
+ */
+export function isPublishable(
+  row: Pick<Thread, 'doNotPublish' | 'duplicateOfThreadId' | 'markedDuplicate'>,
+): boolean {
+  return !row.doNotPublish && !row.duplicateOfThreadId && !row.markedDuplicate;
+}
+
+/** SQL twin of {@link isPublishable}, for bulk publish queries. */
+export const publishableSql = and(
+  eq(thread.doNotPublish, false),
+  isNull(thread.duplicateOfThreadId),
+  eq(thread.markedDuplicate, false),
+);
+
+/**
+ * Insert or update a thread, keyed by (guildId, discord threadId).
+ *
+ * `status: 'solved'` is taken as the caller's authoritative view (the importers read
+ * it from the forum's solved tag): a new row is inserted solved with `solvedAt`
+ * stamped (the caller's value, else now), and an existing 'open' row is promoted to
+ * solved the same way — the tag was applied while we weren't watching. Nothing else
+ * changes status here: 'unsolved' was an explicit reopen, and demotion is left to the
+ * solve/unsolve flows.
+ */
 export async function upsertThread(db: Database, values: NewThread): Promise<Thread> {
+  const solved = values.status === 'solved';
+  const promote = sql`(excluded.status = 'solved' and ${thread.status} = 'open')`;
   const [row] = await db
     .insert(thread)
-    .values(values)
+    .values(solved && !values.solvedAt ? { ...values, solvedAt: new Date() } : values)
     .onConflictDoUpdate({
       target: [thread.guildId, thread.threadId],
       set: {
@@ -14,6 +43,12 @@ export async function upsertThread(db: Database, values: NewThread): Promise<Thr
         questionBody: values.questionBody ?? '',
         opUserId: values.opUserId,
         channelName: values.channelName,
+        status: sql`case when ${promote} then 'solved'::thread_status else ${thread.status} end`,
+        // With an explicit solve time (an import's archive timestamp) a solved row
+        // that predates solvedAt stamping is repaired too.
+        solvedAt: values.solvedAt
+          ? sql`case when ${promote} or (${thread.status} = 'solved' and ${thread.solvedAt} is null) then excluded.solved_at else ${thread.solvedAt} end`
+          : sql`case when ${promote} then coalesce(excluded.solved_at, now()) else ${thread.solvedAt} end`,
         updatedAt: new Date(),
       },
     })
@@ -61,6 +96,8 @@ export async function markThreadSolved(
       acceptedAnswerMessageId: input.answerMessageId ?? null,
       acceptedAnswerText: input.answerText ?? null,
       acceptedAnswerAuthorId: input.answerAuthorId ?? null,
+      // A (re-)solve may carry a different answer: the old summary no longer matches.
+      canonicalSummary: null,
       solvedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -69,15 +106,29 @@ export async function markThreadSolved(
   return row;
 }
 
+/**
+ * Move a thread to a non-solved status (reopen). Solving goes through
+ * markThreadSolved, which records the answer. Leaving 'solved' drops everything that
+ * belonged to the solve — solvedAt, the accepted answer and its AI summary — so a
+ * stale answer is never served for a reopened question or carried into its next solve.
+ */
 export async function setThreadStatus(
   db: Database,
   guildId: string,
   discordThreadId: string,
-  status: Thread['status'],
+  status: Exclude<Thread['status'], 'solved'>,
 ): Promise<void> {
   await db
     .update(thread)
-    .set({ status, updatedAt: new Date(), ...(status !== 'solved' ? { solvedAt: null } : {}) })
+    .set({
+      status,
+      solvedAt: null,
+      acceptedAnswerMessageId: null,
+      acceptedAnswerText: null,
+      acceptedAnswerAuthorId: null,
+      canonicalSummary: null,
+      updatedAt: new Date(),
+    })
     .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)));
 }
 
@@ -182,32 +233,29 @@ export async function getThreadsByRowIds(
     .where(inArray(thread.id, ids));
 }
 
-/** Store the AI-summarized canonical answer (Pro). */
-export async function setCanonicalSummary(
-  db: Database,
-  threadRowId: string,
-  summary: string,
-): Promise<void> {
-  await db
-    .update(thread)
-    .set({ canonicalSummary: summary, updatedAt: new Date() })
-    .where(eq(thread.id, threadRowId));
-}
-
 /**
- * Store the canonical summary only if none exists yet. Returns whether this
- * caller won the claim — concurrent first viewers of a KB page race to
- * generate the same summary, and only the winner should meter the generation.
+ * Store the canonical summary only if none exists yet AND the thread is still in the
+ * solve the summary was generated from (`solvedAt` read before generating; NULL for
+ * rows that were never solved, e.g. knowledge posts). A reopen or re-solve while the
+ * model was running clears the summary and moves solvedAt, so the stale text is
+ * dropped instead of being served for the new answer. Returns whether it was stored.
  */
 export async function claimCanonicalSummary(
   db: Database,
   threadRowId: string,
   summary: string,
+  solvedAt: Date | null,
 ): Promise<boolean> {
   const rows = await db
     .update(thread)
     .set({ canonicalSummary: summary, updatedAt: new Date() })
-    .where(and(eq(thread.id, threadRowId), isNull(thread.canonicalSummary)))
+    .where(
+      and(
+        eq(thread.id, threadRowId),
+        isNull(thread.canonicalSummary),
+        solvedAt ? eq(thread.solvedAt, solvedAt) : isNull(thread.solvedAt),
+      ),
+    )
     .returning({ id: thread.id });
   return rows.length > 0;
 }
@@ -297,6 +345,18 @@ export async function getThreadsMissingEmbeddingInChannel(
     .limit(limit);
 }
 
+/**
+ * Patch for un-folding duplicates whose canonical is being deleted: drop the pointer
+ * and put a solved, otherwise-publishable post straight back on the KB (it was only
+ * unpublished because it was folded). Knowledge-channel posts come back through the
+ * channel publish pass, which knows the channel mode.
+ */
+const unfoldPatch = () => ({
+  duplicateOfThreadId: null,
+  publishedToKb: sql`case when ${thread.status} = 'solved' and ${thread.doNotPublish} = false and ${thread.markedDuplicate} = false then true else ${thread.publishedToKb} end`,
+  updatedAt: new Date(),
+});
+
 // ---------------------------------------------------------------------------
 // Deletion / reconciliation — keep the index in sync with Discord reality.
 // Embeddings cascade (FK onDelete: cascade); generation_event / cluster medoid
@@ -313,7 +373,7 @@ export async function deleteThreadByDiscordId(
   // don't stay hidden under a thread that no longer exists.
   await db
     .update(thread)
-    .set({ duplicateOfThreadId: null, updatedAt: new Date() })
+    .set(unfoldPatch())
     .where(and(eq(thread.guildId, guildId), eq(thread.duplicateOfThreadId, discordThreadId)));
   const rows = await db
     .delete(thread)
@@ -330,7 +390,7 @@ export async function deleteThreadsByChannel(
 ): Promise<number> {
   await db
     .update(thread)
-    .set({ duplicateOfThreadId: null, updatedAt: new Date() })
+    .set(unfoldPatch())
     .where(
       and(
         eq(thread.guildId, guildId),
@@ -353,7 +413,7 @@ export async function deleteThreadsByDiscordIds(
   if (discordThreadIds.length === 0) return 0;
   await db
     .update(thread)
-    .set({ duplicateOfThreadId: null, updatedAt: new Date() })
+    .set(unfoldPatch())
     .where(and(eq(thread.guildId, guildId), inArray(thread.duplicateOfThreadId, discordThreadIds)));
   const rows = await db
     .delete(thread)

@@ -3,10 +3,10 @@ import { buildSummaryContext, summarizeThread } from '@dejavue/ai';
 import { childLogger, getEnv } from '@dejavue/core';
 import {
   checkQuota,
+  claimCanonicalSummary,
   commitGeneration,
   getDb,
   getThreadByRowId,
-  setCanonicalSummary,
 } from '@dejavue/db';
 import type { SummarizeThreadJob } from '@dejavue/queue';
 import { guildCreditBudget } from '../lib/quota';
@@ -50,7 +50,13 @@ export async function handleSummarizeThread(job: SummarizeThreadJob): Promise<vo
   const summary = result.text.trim();
   if (!summary) return;
 
-  await setCanonicalSummary(db, job.threadRowId, summary);
+  // Stored only if the thread is still in the solve we summarized (a reopen or
+  // re-solve meanwhile clears the summary and moves solvedAt) and no summary landed
+  // first. The tokens were spent either way, so the generation is still metered.
+  const stored = row
+    ? await claimCanonicalSummary(db, job.threadRowId, summary, row.solvedAt ?? null)
+    : false;
+  if (!stored) log.info({ threadRowId: job.threadRowId }, 'summary discarded — thread changed meanwhile');
   await commitGeneration(db, {
     guildId: job.guildId,
     feature: 'summary',

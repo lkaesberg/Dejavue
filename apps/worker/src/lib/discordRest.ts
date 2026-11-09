@@ -21,6 +21,16 @@ export interface RawThread {
   applied_tags?: string[];
 }
 
+/**
+ * Best available solve time for a thread imported with the solved tag: solving closes
+ * (archives) a post, so its archive timestamp. Undefined when not archived.
+ */
+export function archivedAt(t: RawThread): Date | undefined {
+  const ts = t.thread_metadata?.archive_timestamp;
+  const d = ts ? new Date(ts) : undefined;
+  return d && !Number.isNaN(d.getTime()) ? d : undefined;
+}
+
 export interface RawBotGuild {
   id: string;
   approximate_member_count?: number;
@@ -100,13 +110,34 @@ export async function channelExists(channelId: string): Promise<boolean | null> 
   }
 }
 
-/** Fetch a channel's basic info (used to keep the denormalized channel name current). */
-export async function fetchChannelInfo(channelId: string): Promise<{ name?: string } | null> {
+export interface ChannelInfo {
+  name?: string;
+  /** Forum channels only: the forum's own tags. */
+  available_tags?: { id: string; name: string }[];
+}
+
+/** Fetch a channel's basic info (name, and a forum's tags). */
+export async function fetchChannelInfo(channelId: string): Promise<ChannelInfo | null> {
   try {
-    return (await rest().get(`/channels/${channelId}`)) as { name?: string };
+    return (await rest().get(`/channels/${channelId}`)) as ChannelInfo;
   } catch {
     return null;
   }
+}
+
+/**
+ * The `solved` tag id of THIS forum. Discord tag ids are per forum, so the guild-wide
+ * guild_config.solvedTagId (overwritten by each forum's setup) is only a fallback for
+ * when the forum itself could not be read.
+ */
+export function forumSolvedTagId(
+  info: ChannelInfo | null,
+  guildFallback: string | null | undefined,
+): string | undefined {
+  if (info?.available_tags) {
+    return info.available_tags.find((t) => t.name.toLowerCase() === 'solved')?.id;
+  }
+  return guildFallback ?? undefined;
 }
 
 /**

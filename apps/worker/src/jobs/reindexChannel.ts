@@ -20,6 +20,7 @@ import {
   claimReindexJob,
   getReindexJob,
   getThreadByDiscordId,
+  isPublishable,
   heartbeatReindexJob,
   type GuildConfig,
   isOptedOut,
@@ -47,7 +48,9 @@ import {
   channelExists,
   fetchActiveGuildThreads,
   fetchArchivedPublicThreads,
+  archivedAt,
   fetchChannelInfo,
+  forumSolvedTagId,
   fetchChannelMessages,
   fetchStarterMessage,
   type RawChannelMessage,
@@ -197,7 +200,6 @@ async function reindexForum(
   const model = cfg?.embeddingModel ?? getEnv().EMBEDDING_MODEL;
   const storedModelId = embeddingModelId(model);
   const canSpend = embedBudgetGate(rj.guildId);
-  const solvedTagId = cfg?.solvedTagId ?? undefined;
   const mode = channelMode(cfg, rj.channelId);
   const limits = await guildLimits(rj.guildId);
 
@@ -206,6 +208,7 @@ async function reindexForum(
   // and a single update repairs rows written before this ran (or after a rename).
   const info = await fetchChannelInfo(rj.channelId);
   const channelName = info?.name ?? null;
+  const solvedTagId = forumSolvedTagId(info, cfg?.solvedTagId);
   if (channelName) {
     await updateChannelName(db, rj.guildId, rj.channelId, channelName).catch(() => undefined);
   }
@@ -266,6 +269,7 @@ async function reindexForum(
         questionBody: starter?.content ?? '',
         opUserId: starter?.author?.id ?? null,
         status: isSolved ? 'solved' : 'open',
+        solvedAt: isSolved ? archivedAt(t) : undefined,
       });
       indexed++;
 
@@ -308,10 +312,13 @@ async function reindexForum(
         }
       }
 
-      if (isDup) {
-        await setPublished(db, rj.guildId, t.id, false);
-      } else if (mode === 'knowledge' || isSolved) {
-        // Auto-publish; open questions stay private until solved.
+      if (isDup || !isPublishable(row)) {
+        // Folded (onto a canonical or by hand) or opted out: never a page of its own.
+        if (isDup || row.publishedToKb) await setPublished(db, rj.guildId, t.id, false);
+      } else if (mode === 'knowledge' || row.status === 'solved') {
+        // Auto-publish; open questions stay private until solved. Status is the row's
+        // (an 'open' row is promoted from the tag by upsertThread; an explicit reopen
+        // to 'unsolved' is not overridden by a stale tag).
         await setPublished(db, rj.guildId, t.id, true);
         await enqueueRevalidateKb({ guildId: rj.guildId, threadId: t.id, action: 'publish' }).catch(
           () => undefined,
@@ -526,7 +533,7 @@ async function reindexTracked(
       status: 'open',
     });
     if (!existing) indexed++;
-    if (!row.doNotPublish && !row.duplicateOfThreadId && !row.publishedToKb) {
+    if (isPublishable(row) && !row.publishedToKb) {
       await setPublished(db, rj.guildId, threadId, true).catch(() => undefined);
       await enqueueRevalidateKb({ guildId: rj.guildId, threadId, action: 'publish' }).catch(() => undefined);
     }
