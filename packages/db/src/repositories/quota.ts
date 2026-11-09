@@ -218,6 +218,14 @@ export async function addTopUpGrant(
 }
 
 /**
+ * Reverse a refunded top-up: whatever is left of that purchase's credits is
+ * forfeited (credits already spent stay spent — the ledger is history).
+ */
+export async function revokeTopUpGrant(db: Executor, id: string): Promise<void> {
+  await db.update(topUpGrant).set({ creditsRemaining: 0 }).where(eq(topUpGrant.id, id));
+}
+
+/**
  * Commit a successful generation in one transaction: record it in the ledger
  * and, for the portion that spilled past the base monthly budget, consume
  * top-up credits (see computeSpill in @dejavue/core for the boundary math).

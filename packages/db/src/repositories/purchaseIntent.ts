@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Database } from '../client';
 import { purchaseIntent } from '../schema';
 
@@ -33,4 +33,28 @@ export async function resolvePurchaseIntent(
     .where(and(eq(purchaseIntent.userId, userId), eq(purchaseIntent.skuId, skuId)))
     .limit(1);
   return row?.guildId;
+}
+
+/**
+ * Drop an intent once it has bridged a purchase (call after the entitlement row is
+ * stored with its guild), so it bridges exactly one purchase: a later purchase of the
+ * same SKU made without clicking our button again must not silently land on whichever
+ * guild was clicked last time. Pass every SKU recorded by the same button (the
+ * top-up ladder records one intent per pack). Only removes intents for the guild that
+ * was used — a newer click for another guild that raced in stays.
+ */
+export async function clearPurchaseIntent(
+  db: Database,
+  intent: { userId: string; skuIds: string[]; guildId: string },
+): Promise<void> {
+  if (intent.skuIds.length === 0) return;
+  await db
+    .delete(purchaseIntent)
+    .where(
+      and(
+        eq(purchaseIntent.userId, intent.userId),
+        inArray(purchaseIntent.skuId, intent.skuIds),
+        eq(purchaseIntent.guildId, intent.guildId),
+      ),
+    );
 }

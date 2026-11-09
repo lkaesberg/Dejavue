@@ -1,34 +1,82 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { deriveTier, type Tier, type TierSkus } from '@dejavue/core';
 import type { Database } from '../client';
 import { entitlement, type Entitlement, type NewEntitlement } from '../schema';
 
-export async function upsertEntitlement(db: Database, row: NewEntitlement): Promise<void> {
-  await db
+/**
+ * Mirror a Discord entitlement. Returns the guild the stored row is bound to.
+ *
+ * A user-owned one-time purchase arrives without a guild_id and is bridged to a
+ * guild once (from the purchase intent); Discord's later UPDATEs for it (e.g. after
+ * consume()) still carry no guild, so an incoming null never erases a stored guild.
+ * `consumed` only ever moves false → true: Discord payloads don't report it, and a
+ * re-sync must not re-arm a purchase we already fulfilled.
+ */
+export async function upsertEntitlement(
+  db: Database,
+  row: NewEntitlement,
+): Promise<string | null> {
+  const [stored] = await db
     .insert(entitlement)
     .values(row)
     .onConflictDoUpdate({
       target: entitlement.id,
       set: {
         skuId: row.skuId,
-        guildId: row.guildId ?? null,
-        userId: row.userId ?? null,
+        guildId: sql`coalesce(excluded.guild_id, ${entitlement.guildId})`,
+        userId: sql`coalesce(excluded.user_id, ${entitlement.userId})`,
         type: row.type ?? 'unknown',
         startsAt: row.startsAt ?? null,
         endsAt: row.endsAt ?? null,
         deleted: row.deleted ?? false,
-        consumed: row.consumed ?? false,
+        consumed: sql`(${entitlement.consumed} or excluded.consumed)`,
         raw: row.raw ?? null,
         updatedAt: new Date(),
       },
-    });
+    })
+    .returning({ guildId: entitlement.guildId });
+  return stored?.guildId ?? row.guildId ?? null;
 }
 
-export async function markEntitlementDeleted(db: Database, id: string): Promise<void> {
-  await db
+/**
+ * Mark an entitlement deleted (refund / removal). Returns the stored row as it was
+ * bound — for user-owned purchases the Discord payload has no guild, the row does —
+ * and whether this call was the one that flipped it (so a refund is reversed once).
+ */
+export async function markEntitlementDeleted(
+  db: Database,
+  id: string,
+): Promise<{ row: Entitlement; flipped: boolean } | undefined> {
+  const [flipped] = await db
     .update(entitlement)
     .set({ deleted: true, updatedAt: new Date() })
-    .where(eq(entitlement.id, id));
+    .where(and(eq(entitlement.id, id), eq(entitlement.deleted, false)))
+    .returning();
+  if (flipped) return { row: flipped, flipped: true };
+  const [existing] = await db.select().from(entitlement).where(eq(entitlement.id, id)).limit(1);
+  return existing ? { row: existing, flipped: false } : undefined;
+}
+
+/** Whether a guild still holds another live (not refunded) entitlement for a SKU. */
+export async function hasOtherLiveEntitlement(
+  db: Database,
+  guildId: string,
+  skuId: string,
+  exceptId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: entitlement.id })
+    .from(entitlement)
+    .where(
+      and(
+        eq(entitlement.guildId, guildId),
+        eq(entitlement.skuId, skuId),
+        eq(entitlement.deleted, false),
+        ne(entitlement.id, exceptId),
+      ),
+    )
+    .limit(1);
+  return !!row;
 }
 
 export async function markEntitlementConsumed(db: Database, id: string): Promise<void> {

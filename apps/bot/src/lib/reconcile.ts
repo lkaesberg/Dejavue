@@ -2,6 +2,7 @@ import type { Client } from 'discord.js';
 import { childLogger } from '@dejavue/core';
 import { getDb, type NewEntitlement, reconcileGuildEntitlements } from '@dejavue/db';
 import { mapEntitlement } from './entitlementMap';
+import { isOneTimeSku, storeAndFulfil } from './oneTimePurchase';
 import { invalidateTier } from './tier';
 import { grantTopUp } from './topUp';
 import { checkTierUpgrade } from './upgrade';
@@ -21,7 +22,14 @@ export async function reconcileAllEntitlements(client: Client): Promise<void> {
     const fetched = await app.entitlements.fetch();
     const byGuild = new Map<string, NewEntitlement[]>();
     for (const ent of fetched.values()) {
-      if (!ent.guildId) continue;
+      if (!ent.guildId) {
+        // User-owned one-time purchase: heal a missed CREATE (bridges from a still
+        // pending intent) or fulfil one ops bound to a guild by hand. Idempotent.
+        if (isOneTimeSku(ent.skuId) && !ent.consumed && !ent.deleted) {
+          await storeAndFulfil(ent).catch((err) => log.warn({ err, id: ent.id }, 'one-time purchase heal failed'));
+        }
+        continue;
+      }
       const rows = byGuild.get(ent.guildId) ?? [];
       rows.push(mapEntitlement(ent));
       byGuild.set(ent.guildId, rows);

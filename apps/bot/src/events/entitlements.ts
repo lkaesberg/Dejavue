@@ -1,11 +1,9 @@
 import { capture } from '@dejavue/analytics';
 import type { Entitlement } from 'discord.js';
-import { childLogger, getEnv, isTopUpSku, notifyAsync, topUpCreditsForSku } from '@dejavue/core';
-import { getDb, markEntitlementDeleted, resolvePurchaseIntent, upsertEntitlement } from '@dejavue/db';
-import { mapEntitlement } from '../lib/entitlementMap';
+import { childLogger, getEnv, notifyAsync, topUpCreditsForSku } from '@dejavue/core';
+import { getDb, markEntitlementDeleted } from '@dejavue/db';
+import { isOneTimeSku, revokeOneTimePurchase, storeAndFulfil } from '../lib/oneTimePurchase';
 import { invalidateTier } from '../lib/tier';
-import { grantCustomDomain } from '../lib/customDomain';
-import { grantTopUp } from '../lib/topUp';
 import { checkTierUpgrade } from '../lib/upgrade';
 
 const log = childLogger({ mod: 'event:entitlement' });
@@ -29,12 +27,6 @@ function whoFields(e: { guildId?: string | null; userId?: string | null }) {
     { name: 'Guild', value: e.guildId ?? '—' },
     { name: 'User', value: e.userId ?? '—' },
   ];
-}
-
-/** SKUs Discord delivers as USER-owned one-time purchases (the entitlement has no guildId). */
-function isOneTimeSku(skuId: string): boolean {
-  const env = getEnv();
-  return isTopUpSku(env, skuId) || skuId === env.SKU_CUSTOM_DOMAIN || skuId === env.SKU_BACKFILL;
 }
 
 /**
@@ -73,31 +65,13 @@ function probe(event: 'CREATE' | 'UPDATE' | 'DELETE', ent: Entitlement): void {
 
 export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
   probe('CREATE', ent);
-  const row = mapEntitlement(ent);
-  // One-time purchases (top-up, custom domain) are USER-owned: Discord sends them
-  // with a user_id and no guild_id. Bridge them to the guild the buyer launched the
-  // purchase from (recorded as a pending intent when we showed the buy button).
-  if (!row.guildId && row.userId && isOneTimeSku(row.skuId)) {
-    const guildId = await resolvePurchaseIntent(getDb(), row.userId, row.skuId);
-    if (guildId) {
-      row.guildId = guildId;
-      log.info({ id: ent.id, skuId: ent.skuId, guildId }, 'bridged user-owned purchase to guild');
-    } else {
-      log.warn(
-        { id: ent.id, skuId: ent.skuId, userId: row.userId },
-        'one-time purchase with no guild intent — cannot resolve target guild',
-      );
-    }
-  }
-  await upsertEntitlement(getDb(), row);
-  await grantTopUp(ent, row.guildId);
-  await grantCustomDomain(ent, row.guildId);
-  if (row.guildId) {
-    invalidateTier(row.guildId);
-    await checkTierUpgrade(row.guildId);
-  }
-  if (row.guildId) {
-    capture('entitlement_created', row.guildId, {
+  // Bridges user-owned one-time purchases to their guild and fulfils them.
+  const guildId = await storeAndFulfil(ent, { alertUnbridged: true });
+  const row = { guildId, userId: ent.userId ?? null, skuId: ent.skuId, type: ent.type };
+  if (guildId) {
+    invalidateTier(guildId);
+    await checkTierUpgrade(guildId);
+    capture('entitlement_created', guildId, {
       sku_id: row.skuId,
       product_label: productLabel(ent.skuId),
     });
@@ -106,20 +80,19 @@ export async function onEntitlementCreate(ent: Entitlement): Promise<void> {
   notifyAsync({
     level: 'success',
     title: `🎉 New ${productLabel(ent.skuId)}`,
-    fields: [...whoFields(row), { name: 'Type', value: row.type ?? 'unknown' }],
+    fields: [...whoFields(row), { name: 'Type', value: String(row.type ?? 'unknown') }],
   });
 }
 
 export async function onEntitlementUpdate(ent: Entitlement): Promise<void> {
   probe('UPDATE', ent);
   // A lapsing subscription arrives as UPDATE with endsTimestamp set — NOT delete.
-  await upsertEntitlement(getDb(), mapEntitlement(ent));
-  if (ent.guildId) {
-    invalidateTier(ent.guildId);
-    await checkTierUpgrade(ent.guildId);
-  }
-  if (ent.guildId) {
-    capture('entitlement_updated', ent.guildId, {
+  // A user-owned purchase keeps the guild it was bridged to (the payload has none).
+  const guildId = await storeAndFulfil(ent);
+  if (guildId) {
+    invalidateTier(guildId);
+    await checkTierUpgrade(guildId);
+    capture('entitlement_updated', guildId, {
       sku_id: ent.skuId,
       product_label: productLabel(ent.skuId),
       // Discord signals a cancellation as an UPDATE that sets an end date, not a delete.
@@ -143,20 +116,26 @@ export async function onEntitlementUpdate(ent: Entitlement): Promise<void> {
 export async function onEntitlementDelete(ent: Entitlement): Promise<void> {
   probe('DELETE', ent);
   // DELETE only fires on refund / manual removal / test-entitlement deletion.
-  await markEntitlementDeleted(getDb(), ent.id);
-  if (ent.guildId) {
-    capture('entitlement_deleted', ent.guildId, {
+  const marked = await markEntitlementDeleted(getDb(), ent.id);
+  // User-owned purchases carry no guild in the payload; the stored row knows it.
+  const guildId = ent.guildId ?? marked?.row.guildId ?? null;
+  if (guildId) {
+    // Reverse what a refunded one-time purchase granted — once, on the flip.
+    if (marked?.flipped && isOneTimeSku(ent.skuId)) {
+      await revokeOneTimePurchase(ent.id, ent.skuId, guildId);
+    }
+    capture('entitlement_deleted', guildId, {
       sku_id: ent.skuId,
       product_label: productLabel(ent.skuId),
     });
-    invalidateTier(ent.guildId);
-    await checkTierUpgrade(ent.guildId); // records the downgrade; never backfills down
+    invalidateTier(guildId);
+    await checkTierUpgrade(guildId); // records the downgrade; never backfills down
   }
   log.info({ id: ent.id }, 'entitlement deleted');
   notifyAsync({
     level: 'error',
     title: `❌ ${productLabel(ent.skuId)} removed`,
     description: 'Refund, manual removal, or test-entitlement deletion.',
-    fields: whoFields(ent),
+    fields: whoFields({ guildId, userId: ent.userId }),
   });
 }
