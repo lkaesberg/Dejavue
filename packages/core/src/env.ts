@@ -71,12 +71,13 @@ const EnvSchema = z.object({
   //   local      → CPU model via Transformers.js (free, no API).
   //   openrouter → OpenAI-compatible embeddings API (e.g. text-embedding-3-large).
   EMBEDDING_PROVIDER: z.enum(['local', 'openrouter']).default('local'),
-  // For local: a known model key (bge-small-en-v1.5 | multilingual-e5-small).
+  // For local: a known model key (embeddinggemma-300m; the 384-d bge-small-en-v1.5 |
+  // multilingual-e5-small only fit the pre-768 schema).
   // For openrouter: the API model id (e.g. openai/text-embedding-3-large).
   EMBEDDING_MODEL: z.string().default('embeddinggemma-300m'),
-  // Output dimension. MUST match the `vector(...)` DB column (currently 384).
+  // Output dimension. MUST match the `vector(...)` DB column (768 since migration 0026).
   // The OpenRouter backend requests this many dimensions (Matryoshka), so a
-  // big model like text-embedding-3-large drops straight into the 384-d column.
+  // big model like text-embedding-3-large drops straight into the 768-d column.
   EMBEDDING_DIM: z.coerce.number().int().positive().default(768),
   // OpenRouter backend: base URL + key. Defaults to OpenRouter using
   // OPENROUTER_API_KEY; point EMBEDDING_BASE_URL at https://api.openai.com/v1

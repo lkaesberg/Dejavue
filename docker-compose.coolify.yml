@@ -59,8 +59,10 @@ x-env: &env
   EMBED_MAX_CHUNKS_PER_THREAD: ${EMBED_MAX_CHUNKS_PER_THREAD:-0}
   EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-64}
   EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
-  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-small-en-v1.5}
-  EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
+  # Same defaults as the app (packages/core/src/env.ts): the vector() columns are 768-d
+  # since migration 0026, so a 384-d model can never be the fallback here.
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-embeddinggemma-300m}
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
 
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4-pro}

@@ -285,7 +285,7 @@ up to each tier's indexed-message limit.
 - **[Postgres](https://www.postgresql.org/) + [pgvector](https://github.com/pgvector/pgvector)** —
   storage and vector search, via [Drizzle ORM](https://orm.drizzle.team/)
 - **[Transformers.js](https://huggingface.co/docs/transformers.js)** — embeddings on CPU, free and
-  local (`bge-small-en-v1.5`)
+  local (`embeddinggemma-300m`)
 - **[OpenRouter](https://openrouter.ai/)** — LLM access for drafts, summaries and FAQs
 - **[pg-boss](https://github.com/timgit/pg-boss)** — Postgres-backed job queue (no Redis)
 - **[Astro](https://astro.build/)** — SSR for the public website and the MCP endpoint
@@ -466,11 +466,12 @@ Embeddings are pluggable via `EMBEDDING_PROVIDER`:
 
 | Provider | `EMBEDDING_MODEL` | Cost | Notes |
 |---|---|---|---|
-| `local` (default) | `bge-small-en-v1.5` / `multilingual-e5-small` | free, on-CPU | downloads a small ONNX model |
+| `local` (default) | `embeddinggemma-300m` | free, on-CPU | downloads an ONNX model (~1.6 GB in RAM, loaded once by the worker) |
 | `openrouter` | `openai/text-embedding-3-large` | per-token API | reuses `OPENROUTER_API_KEY` |
 
-Both produce **384-dim** vectors (`EMBEDDING_DIM`) so they share one `vector(384)` column — switching
-is a config change. On startup the bot re-embeds threads with the new model, and search is scoped to
+Both produce **768-dim** vectors (`EMBEDDING_DIM=768`) so they share one `vector(768)` column — switching
+between them is a config change. (`bge-small-en-v1.5` / `multilingual-e5-small` are 384-dim and only
+fit the pre-768 schema; on a current install they would fail every embedding insert.) On startup the bot re-embeds threads with the new model, and search is scoped to
 the active model id so stale vectors are never mixed in. Point `EMBEDDING_BASE_URL` /
 `EMBEDDING_API_KEY` at `https://api.openai.com/v1` to call OpenAI directly instead of OpenRouter.
 
