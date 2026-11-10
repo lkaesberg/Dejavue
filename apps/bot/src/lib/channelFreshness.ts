@@ -19,7 +19,8 @@ export async function refreshForumFreshness(guildId: string, forumId: string): P
   if (sync.state === 'reindexing') return; // the reindex owns the final state
   // Don't paper over an "index full" warning — capturing one more message doesn't
   // free space; it persists until a rescan or upgrade resolves it.
-  if (sync.state === 'stale' && sync.staleReason === 'cap') return;
+  // Same for 'partial': threads a scan could not index stay missing until a re-scan.
+  if (sync.state === 'stale' && (sync.staleReason === 'cap' || sync.staleReason === 'partial')) return;
   if (await getActiveBackfillJob(db, guildId, forumId)) return; // the import owns it
   const count = await countIndexedMessagesInChannel(db, guildId, forumId);
   await markChannelSynced(db, guildId, forumId, 'forum', null, count);
