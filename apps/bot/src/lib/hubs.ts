@@ -648,7 +648,7 @@ export async function handleHubSelect(interaction: StringSelectMenuInteraction):
     const cfg = await getGuildConfig(db, guildId);
     // Element-level removal: never writes back a stale snapshot of the arrays, so a
     // setup running at the same time keeps its channel. In-flight import/rescan jobs
-    // for this channel stop at their next checkpoint.
+    // for this channel stop before their next thread (and never publish after this).
     await removeMonitoredChannel(db, guildId, value);
     if (cfg?.forumChannelIds.includes(value) && !cfg.trackedChannelIds.includes(value)) {
       await deleteChannelTopic(db, guildId, value).catch(() => undefined);

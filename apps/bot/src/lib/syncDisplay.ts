@@ -24,6 +24,8 @@ export function staleReasonLabel(reason: string | null): string {
     case 'delete':
     case 'edit':
       return 'syncing recent changes';
+    case 'partial':
+      return 'some posts could not be indexed — `/dejavue rescan`';
     default:
       return 'needs a re-scan — `/dejavue rescan`';
   }

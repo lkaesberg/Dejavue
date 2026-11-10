@@ -66,6 +66,18 @@ describe('backfillProgressEmbed', () => {
   it('mentions failed imports in the done state', () => {
     const e = backfillProgressEmbed({ channelLabel: '<#1>', phase: 'done', done: 40, total: 42, failedCount: 2 });
     expect(e.description).toContain('2 could not be imported');
+    // A partial import is not "up to date".
+    expect(e.title).not.toContain('up to date');
+    expect(e.description).not.toContain('indexed automatically');
+  });
+
+  it('flags a re-scan with failed threads as partly indexed', () => {
+    const ok = reindexProgressEmbed({ channelLabel: '<#1>', kind: 'forum', phase: 'done', done: 5 });
+    expect(ok.title).toContain('up to date');
+    const e = reindexProgressEmbed({ channelLabel: '<#1>', kind: 'forum', phase: 'done', done: 3, failedCount: 2 });
+    expect(e.title).not.toContain('up to date');
+    expect(e.description).toContain('2 could not be indexed');
+    expect(e.description).not.toContain('Up to date');
   });
 
   it('explains the cap when the import stopped early', () => {

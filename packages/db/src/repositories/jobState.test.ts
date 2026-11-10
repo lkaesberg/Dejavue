@@ -127,4 +127,17 @@ describe('channel_sync writers', () => {
     expect(queries.at(-1)?.params[0]).toBe('synced');
     expect(queries.at(-1)?.params).not.toContain('cap');
   });
+
+  it('settles a scan with failed threads on stale partial, never synced', async () => {
+    const { db, queries } = recordingDb();
+    await completeReindex(db, 'g', 'c', { indexedMessageCount: 0, lastIndexedMessageId: null, failed: 9 });
+    expect(queries.at(-1)?.params[0]).toBe('stale');
+    expect(queries.at(-1)?.params).toContain('partial');
+    await completeReindex(db, 'g', 'c', { indexedMessageCount: 3, lastIndexedMessageId: null, failed: 0 });
+    expect(queries.at(-1)?.params[0]).toBe('synced');
+    // The cap warning wins over the partial one.
+    await completeReindex(db, 'g', 'c', { indexedMessageCount: 3, lastIndexedMessageId: null, capped: true, failed: 2 });
+    expect(queries.at(-1)?.params).toContain('cap');
+    expect(queries.at(-1)?.params).not.toContain('partial');
+  });
 });

@@ -24,8 +24,8 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 });
 
 /**
- * Embedding dimensionality. Both supported CPU models (bge-small-en-v1.5 and
- * multilingual-e5-small) are 384-dim, so model swaps never touch the schema.
+ * Embedding dimensionality: 768 (embeddinggemma-300m, or text-embedding-3-large asked
+ * for 768 dims). The 384-d bge-small / e5-small models do not fit these columns.
  * Changing this is a destructive migration (reindex + re-embed).
  */
 // Must match the deployed vector() columns AND the active model's output dim.
@@ -437,7 +437,7 @@ export const channelSync = pgTable(
     lastReindexAt: timestamp('last_reindex_at', { withTimezone: true }),
     // Newest message id the last reindex run actually covered (proves "up to date").
     lastReindexThrough: text('last_reindex_through'),
-    // 'gap' | 'edit' | 'delete' | 'cap' — why we last marked it stale.
+    // 'gap' | 'edit' | 'delete' | 'cap' | 'partial' | 'reindex failed' — why we last marked it stale.
     staleReason: text('stale_reason'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

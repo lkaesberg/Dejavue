@@ -151,7 +151,7 @@ class ListingError extends Error {
   }
 }
 
-/** Abort at a checkpoint when the forum was removed from monitoring mid-run. */
+/** Abort (per thread, and at checkpoints) when the forum was removed from monitoring mid-run. */
 async function loadMonitoredConfig(bf: BackfillJob): Promise<GuildConfig | undefined> {
   const cfg = await getGuildConfig(getDb(), bf.guildId);
   if (!isChannelMonitored(cfg, bf.channelId, 'forum')) throw new ChannelUnmonitoredError(bf.channelId);
@@ -218,7 +218,9 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
   );
 
   let processedCount = bf.processed;
-  let failed = bf.failed;
+  // Failures of THIS run only: a failed thread is left out of processedThreadIds, so a
+  // retry re-attempts it instead of skipping it — a prior run's count would double up.
+  let failed = 0;
   let cappedOut = false;
 
   const checkpoint = async (): Promise<void> => {
@@ -257,6 +259,9 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
     }[] = [];
 
     for (const t of todo.slice(w, w + batchSize)) {
+      // A forum removed from the hub mid-run must not gain rows (or KB pages) after the
+      // removal — re-check before every thread, not just at the 25-thread checkpoints.
+      await loadMonitoredConfig(bf);
       if (indexedMessages >= limits.indexCap) {
         // A tier upgrade may have landed mid-run (checkTierUpgrade won't queue a second
         // import while this one is active) — re-read the cap before stopping.
@@ -299,9 +304,9 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
           chunk: buildEmbeddingChunks(src)[0],
         });
       } catch (err) {
+        // Not added to `processed`: a retry of this job re-attempts the thread.
         failed++;
         log.warn({ err, threadId: t.id }, 'backfill: failed to import thread');
-        processed.add(t.id);
       }
     }
 
@@ -329,6 +334,7 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
     }
 
     for (const p of prepared) {
+      let ok = false;
       try {
         const vector = vectorOf.get(p.t.id);
         if (vector && p.chunk) {
@@ -376,6 +382,8 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
           if (isDup || existing?.publishedToKb) await setPublished(db, bf.guildId, p.t.id, false);
         } else if (mode === 'knowledge' || p.isSolved) {
           // Auto-publish everything online. Open questions stay private until solved.
+          // Never publish into a forum that was just removed from the hub.
+          await loadMonitoredConfig(bf);
           await setPublished(db, bf.guildId, p.t.id, true);
           await enqueueRevalidateKb({
             guildId: bf.guildId,
@@ -385,13 +393,27 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
         }
 
         processedCount++;
+        ok = true;
       } catch (err) {
+        if (err instanceof ChannelUnmonitoredError) throw err;
         failed++;
         log.warn({ err, threadId: p.t.id }, 'backfill: failed to import thread');
       }
-      processed.add(p.t.id);
-      if (processedCount % CHECKPOINT_EVERY === 0) await checkpoint();
+      // Only a thread that made it is skipped on a retry; a failed one is re-attempted.
+      if (ok) {
+        processed.add(p.t.id);
+        if (processedCount % CHECKPOINT_EVERY === 0) await checkpoint();
+      }
     }
+  }
+
+  // Nothing this run made it but something failed (e.g. every embedding insert was
+  // refused — a dimension mismatch, the DB or the embed service down): that is a failed
+  // import, not "up to date". Save progress and throw, so the row lands on 'failed', the
+  // channel on stale 'gap', and pg-boss retries the failed threads.
+  if (failed > 0 && processedCount === bf.processed) {
+    await updateBackfillJob(db, bf.id, { processed: processedCount, failed, processedThreadIds: [...processed] });
+    throw new Error(`backfill: all ${failed} attempted threads failed`);
   }
 
   // Re-check before the final writes: a forum removed from the hub mid-run must not get
@@ -423,9 +445,11 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
       const sync = await ensureChannelSync(db, bf.guildId, bf.channelId, 'forum');
       if (sync.state !== 'reindexing') {
         const count = await countIndexedMessagesInChannel(db, bf.guildId, bf.channelId);
+        // Some threads failed → stale 'partial' (a re-scan retries them), not synced.
         await completeReindex(db, bf.guildId, bf.channelId, {
           indexedMessageCount: count,
           lastIndexedMessageId: all.at(-1)?.id ?? null,
+          failed,
         });
       }
     }

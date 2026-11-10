@@ -166,19 +166,26 @@ export async function failReindex(
  * Finalize a completed full scan: synced + watermark proof + fresh counts. A scan that
  * stopped adding new content at the index cap (`capped`) lands on stale 'cap' instead —
  * the channel is NOT fully indexed, and claiming 'synced' would hide the "index full"
- * warning.
+ * warning. Likewise a scan where some threads could not be indexed (`failed` > 0) lands
+ * on stale 'partial', so the hub asks for a re-scan instead of showing "up to date".
  */
 export async function completeReindex(
   db: Database,
   guildId: string,
   channelId: string,
-  opts: { indexedMessageCount: number; lastIndexedMessageId: string | null; capped?: boolean },
+  opts: {
+    indexedMessageCount: number;
+    lastIndexedMessageId: string | null;
+    capped?: boolean;
+    failed?: number;
+  },
 ): Promise<void> {
+  const staleReason = opts.capped ? 'cap' : (opts.failed ?? 0) > 0 ? 'partial' : null;
   await db
     .update(channelSync)
     .set({
-      state: opts.capped ? 'stale' : 'synced',
-      staleReason: opts.capped ? 'cap' : null,
+      state: staleReason ? 'stale' : 'synced',
+      staleReason,
       indexedMessageCount: opts.indexedMessageCount,
       lastReindexAt: new Date(),
       lastReindexThrough: opts.lastIndexedMessageId,

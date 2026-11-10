@@ -37,6 +37,8 @@ export interface ReindexProgressState {
   removed?: number;
   /** Entries not indexed because the index cap was hit. */
   skipped?: number;
+  /** Threads that could not be indexed (the channel is left needing a re-scan). */
+  failedCount?: number;
   error?: string;
   /** Set on the auto-reindex (gap) path so the copy says why it kicked off. */
   auto?: boolean;
@@ -79,6 +81,12 @@ export function reindexProgressEmbed(s: ReindexProgressState): ProgressEmbed {
       if (s.removed && s.removed > 0) parts.push(`Removed ${s.removed.toLocaleString()} deleted.`);
       if (s.skipped && s.skipped > 0) {
         parts.push(`⚠️ ${s.skipped.toLocaleString()} not indexed — index full (upgrade or free space).`);
+      }
+      if (s.failedCount && s.failedCount > 0) {
+        parts.push(
+          `⚠️ ${s.failedCount.toLocaleString()} could not be indexed — run \`/dejavue rescan\` to retry them.`,
+        );
+        return { title: `⚠️ ${s.channelLabel} is partly indexed`, description: parts.join(' '), color: COLOR_FAIL };
       }
       parts.push('Up to date ✅');
       return { title: `✅ ${s.channelLabel} is up to date`, description: parts.join(' '), color: COLOR_DONE };
@@ -154,7 +162,10 @@ export function backfillProgressEmbed(s: BackfillProgressState): ProgressEmbed {
       }
       const parts = [`Imported ${(s.done ?? 0).toLocaleString()} posts.`];
       if (s.failedCount && s.failedCount > 0) {
-        parts.push(`⚠️ ${s.failedCount.toLocaleString()} could not be imported.`);
+        parts.push(
+          `⚠️ ${s.failedCount.toLocaleString()} could not be imported — run \`/dejavue rescan\` to retry them.`,
+        );
+        return { title: `⚠️ ${s.channelLabel} is partly imported`, description: parts.join(' '), color: COLOR_FAIL };
       }
       parts.push('New posts are indexed automatically from now on.');
       return { title: `✅ ${s.channelLabel} is up to date`, description: parts.join(' '), color: COLOR_DONE };

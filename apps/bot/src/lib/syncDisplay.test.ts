@@ -29,6 +29,8 @@ describe('staleReasonLabel', () => {
     expect(staleReasonLabel('edit')).toBe('syncing recent changes');
     expect(staleReasonLabel('delete')).toBe('syncing recent changes');
     expect(staleReasonLabel(null)).toContain('rescan');
+    expect(staleReasonLabel('partial')).toContain('could not be indexed');
+    expect(staleReasonLabel('partial')).toContain('rescan');
   });
 });
 

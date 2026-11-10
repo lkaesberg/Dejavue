@@ -160,7 +160,7 @@ export async function handleReindexChannel(job: ReindexChannelJob): Promise<void
   }
 }
 
-/** Abort at a checkpoint when the channel was removed from monitoring mid-run. */
+/** Abort (per entry, and at checkpoints) when the channel was removed from monitoring mid-run. */
 async function assertStillMonitored(rj: ReindexJob): Promise<void> {
   const cfg = await getGuildConfig(getDb(), rj.guildId);
   if (!isChannelMonitored(cfg, rj.channelId, rj.kind)) throw new ChannelUnmonitoredError(rj.channelId);
@@ -169,7 +169,8 @@ async function assertStillMonitored(rj: ReindexJob): Promise<void> {
 /**
  * Finish a run: running → completed, then settle the channel claim. If the row is no
  * longer running (the sweeper failed it after a long stall), the claim was already
- * released and the channel isn't ours to mark.
+ * released and the channel isn't ours to mark. A run with failed threads settles on
+ * stale 'partial' (see completeReindex), never on synced.
  */
 async function finishReindex(
   rj: ReindexJob,
@@ -186,6 +187,7 @@ async function finishReindex(
     indexedMessageCount: count,
     lastIndexedMessageId: sync.lastIndexedMessageId,
     capped: sync.capped,
+    failed: patch.failed,
   });
   return true;
 }
@@ -243,11 +245,16 @@ async function reindexForum(
   const seen = new Set(all.map((t) => t.id));
   const processed = new Set(rj.processedThreadIds);
   let processedCount = rj.processed;
-  let failedCount = rj.failed;
+  // Failures of THIS run only: a failed thread stays out of processedThreadIds, so a
+  // resumed run (a dead worker's row re-taken) re-attempts it.
+  let failedCount = 0;
   let cappedOut = false;
   let indexed = await countIndexedMessages(db, rj.guildId);
   for (const t of all) {
     if (processed.has(t.id)) continue;
+    // A channel removed from the hub mid-run must not gain rows (or KB pages) after the
+    // removal — re-check before every thread, not just at the 25-thread checkpoints.
+    await assertStillMonitored(rj);
     if (indexed >= limits.indexCap) {
       cappedOut = true;
       break;
@@ -318,7 +325,9 @@ async function reindexForum(
       } else if (mode === 'knowledge' || row.status === 'solved') {
         // Auto-publish; open questions stay private until solved. Status is the row's
         // (an 'open' row is promoted from the tag by upsertThread; an explicit reopen
-        // to 'unsolved' is not overridden by a stale tag).
+        // to 'unsolved' is not overridden by a stale tag). Never publish into a
+        // channel that was just removed from the hub.
+        await assertStillMonitored(rj);
         await setPublished(db, rj.guildId, t.id, true);
         await enqueueRevalidateKb({ guildId: rj.guildId, threadId: t.id, action: 'publish' }).catch(
           () => undefined,
@@ -326,8 +335,10 @@ async function reindexForum(
       }
       processedCount++;
     } catch (err) {
+      if (err instanceof ChannelUnmonitoredError) throw err;
       failedCount++;
       log.warn({ err, threadId: t.id }, 'reindex: failed thread');
+      continue; // not marked processed: a resumed run re-attempts it
     }
     processed.add(t.id);
     if (processedCount % CHECKPOINT_EVERY === 0) {
@@ -341,6 +352,13 @@ async function reindexForum(
         reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'indexing', done: processedCount, total: all.length }),
       );
     }
+  }
+
+  // Nothing this run made it but something failed (e.g. every embedding insert was
+  // refused): a failed re-scan, not "up to date". Throw before the prune, so the handled
+  // failure path fails the row and releases the claim to stale 'reindex failed'.
+  if (failedCount > 0 && processedCount === rj.processed) {
+    throw new Error(`reindex: all ${failedCount} attempted threads failed`);
   }
 
   // 3. PRUNE threads Discord no longer returns (only after the full listing).
@@ -376,9 +394,17 @@ async function reindexForum(
     return;
   }
   await live?.finalize(
-    reindexProgressEmbed({ channelLabel: label, kind: 'forum', phase: 'done', done: processedCount, removed, skipped }),
+    reindexProgressEmbed({
+      channelLabel: label,
+      kind: 'forum',
+      phase: 'done',
+      done: processedCount,
+      removed,
+      skipped,
+      failedCount,
+    }),
   );
-  log.info({ jobId: rj.id, processed: processedCount, removed }, 'forum reindex complete');
+  log.info({ jobId: rj.id, processed: processedCount, failed: failedCount, removed }, 'forum reindex complete');
 }
 
 interface SegMsg extends TranscriptMessage {
@@ -516,6 +542,8 @@ async function reindexTracked(
   ): Promise<void> => {
     builtIds.add(threadId);
     if (transcript.length === 0) return;
+    // Removed from the hub mid-run: stop before writing (or publishing) another entry.
+    await assertStillMonitored(rj);
     const existing = await getThreadByDiscordId(db, rj.guildId, threadId);
     if (!existing && indexed >= limits.indexCap) {
       skippedForCap++;
