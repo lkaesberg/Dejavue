@@ -307,8 +307,17 @@ export async function closeThread(thread: ThreadChannel): Promise<void> {
   }
 }
 
-/** Re-open a thread (unarchive + unlock + unpublish its KB page). */
-export async function unsolveThread(thread: ThreadChannel): Promise<void> {
+/**
+ * Re-open a thread (unarchive + unlock + unpublish its KB page, drop the solve) and
+ * show it as unsolved in Discord. `status` is 'open' when a moderator reopened it by
+ * hand in Discord (the solved tag came off — the same state as a fresh post, so a later
+ * re-applied solved tag is picked up again by a re-scan), 'unsolved' for an explicit
+ * reopen from Dejavue.
+ */
+export async function unsolveThread(
+  thread: ThreadChannel,
+  status: 'open' | 'unsolved' = 'unsolved',
+): Promise<void> {
   const db = getDb();
   try {
     if (thread.archived) await thread.setArchived(false);
@@ -316,7 +325,7 @@ export async function unsolveThread(thread: ThreadChannel): Promise<void> {
   } catch {
     /* best effort */
   }
-  await setThreadStatus(db, thread.guildId, thread.id, 'unsolved');
+  await setThreadStatus(db, thread.guildId, thread.id, status);
   await setPublished(db, thread.guildId, thread.id, false);
   await enqueueRevalidateKb({ guildId: thread.guildId, threadId: thread.id, action: 'unpublish' }).catch(
     () => undefined,
@@ -328,7 +337,11 @@ export async function unsolveThread(thread: ThreadChannel): Promise<void> {
       const tags = new Set(thread.appliedTags);
       if (solvedTagId) tags.delete(solvedTagId);
       if (unsolvedTagId) tags.add(unsolvedTagId);
-      await thread.setAppliedTags([...tags].slice(0, 5));
+      const next = [...tags].slice(0, 5);
+      // Skip a no-op edit (e.g. the moderator already swapped the tags themselves).
+      if (next.length !== thread.appliedTags.length || next.some((t) => !thread.appliedTags.includes(t))) {
+        await thread.setAppliedTags(next);
+      }
     } catch {
       /* best effort */
     }

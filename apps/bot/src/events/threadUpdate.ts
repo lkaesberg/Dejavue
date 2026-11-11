@@ -9,8 +9,8 @@ import {
   setThreadLabels,
 } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
-import { findTagByName, forumParent, threadLabels } from '../lib/forum';
-import { closeThread } from '../lib/solve';
+import { findForumTags, findTagByName, forumParent, threadLabels } from '../lib/forum';
+import { closeThread, unsolveThread } from '../lib/solve';
 import { monitoredForum } from '../lib/tier';
 
 const log = childLogger({ mod: 'event:threadUpdate' });
@@ -25,6 +25,25 @@ function hasDuplicateTag(thread: ThreadChannel): boolean {
   if (!forum) return false;
   const tagId = findTagByName(forum, 'duplicate');
   return tagId != null && thread.appliedTags.includes(tagId);
+}
+
+/**
+ * Did a moderator reopen this solved post by hand? True when the forum's `solved` tag
+ * came off (or `unsolved` went on) in this update and the post no longer carries
+ * `solved`. Needs the removal/addition itself to be visible, so an unrelated tag edit
+ * on a post that was solved without its tag (tag missing at the time) doesn't reopen it.
+ */
+export function reopenedByTags(oldThread: ThreadChannel, newThread: ThreadChannel): boolean {
+  const forum = forumParent(newThread);
+  if (!forum) return false;
+  const { solvedTagId, unsolvedTagId } = findForumTags(forum);
+  if (!solvedTagId) return false;
+  const before = oldThread.appliedTags ?? [];
+  const after = newThread.appliedTags ?? [];
+  if (after.includes(solvedTagId)) return false;
+  const solvedRemoved = before.includes(solvedTagId);
+  const unsolvedAdded = !!unsolvedTagId && after.includes(unsolvedTagId) && !before.includes(unsolvedTagId);
+  return solvedRemoved || unsolvedAdded;
 }
 
 /**
@@ -79,13 +98,22 @@ export async function onThreadUpdate(
       log.debug({ threadId: newThread.id, marked }, 'synced hand-applied duplicate tag');
     }
 
+    // Hand-reopening: a moderator taking the solved tag off (or putting unsolved on) a
+    // solved post. Move it back to open exactly like an unsolve — drop the answer,
+    // unpublish its KB page, unlock + unarchive and show the unsolved tag.
+    const reopened = existing.status === 'solved' && reopenedByTags(oldThread, newThread);
+    if (reopened) {
+      await unsolveThread(newThread, 'open');
+      log.debug({ threadId: newThread.id }, 'synced hand-reopened (solved tag removed) post');
+    }
+
     const after = threadLabels(newThread);
     if (sameLabels(existing.labels, after)) return; // custom labels unchanged
 
     await setThreadLabels(db, guildId, newThread.id, after);
     // SSR reads labels live, so the next page load already reflects this; revalidate
     // anyway so a future CDN/edge cache gets purged.
-    if (existing.publishedToKb) {
+    if (existing.publishedToKb && !reopened) {
       await enqueueRevalidateKb({ guildId, threadId: newThread.id, action: 'publish' }).catch(
         () => undefined,
       );
