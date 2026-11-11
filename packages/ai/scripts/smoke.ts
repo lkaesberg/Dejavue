@@ -1,4 +1,4 @@
-import { embed } from '../src/embeddings';
+import { embed, resolveModel } from '../src/embeddings';
 
 /** Proves the local CPU embedding model works + that semantics are captured. */
 function cosine(a: number[], b: number[]): number {
@@ -25,8 +25,11 @@ console.log(`dim=${q.length}`);
 console.log(`similar:   ${simScore.toFixed(3)}  "${similar}"`);
 console.log(`unrelated: ${unrelScore.toFixed(3)}  "${unrelated}"`);
 
-if (q.length !== 384) {
-  console.error(`✗ expected 384-d vectors, got ${q.length}`);
+// The configured model's dimension (resolveModel already enforces it equals EMBEDDING_DIM,
+// i.e. the vector() column) — not a hard-coded 384 from the pre-768 schema.
+const expectedDim = resolveModel().dim;
+if (q.length !== expectedDim) {
+  console.error(`✗ expected ${expectedDim}-d vectors, got ${q.length}`);
   process.exit(1);
 }
 if (simScore <= unrelScore) {

@@ -1,4 +1,4 @@
-import { embed } from '@dejavue/ai';
+import { embed, embeddingModelId } from '@dejavue/ai';
 import {
   closeDb,
   ensureGuildConfig,
@@ -43,7 +43,9 @@ await setTranscript(db, row.id, [
 ]);
 
 // Embed the thread so semantic search + the MCP server return it.
-const MODEL = 'bge-small-en-v1.5';
+// The deployment's active model: a pinned 384-d 'bge-small-en-v1.5' no longer fits the
+// vector(768) column, and search only matches vectors stored under the active model id.
+const MODEL = embeddingModelId();
 const text =
   'How do I reset my password?\nI forgot my password and cannot log in to my account.\nUse the "Forgot password" link on the login page; a reset email arrives within a minute.';
 const [vector] = await embed([text], { mode: 'passage', model: MODEL });

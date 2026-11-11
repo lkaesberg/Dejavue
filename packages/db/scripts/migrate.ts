@@ -1,4 +1,6 @@
-import 'dotenv/config';
+// Walks up to the repo-root .env: `pnpm db:migrate` runs with cwd = packages/db, where
+// `dotenv/config` found nothing and silently fell back to the localhost default.
+import '@dejavue/core/env-preload';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';

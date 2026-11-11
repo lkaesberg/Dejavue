@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '@dejavue/core/env-preload';
 import { eq } from 'drizzle-orm';
 import { closeDb, getDb } from '../src/client';
 import { thread } from '../src/schema';
@@ -10,7 +10,7 @@ import { EMBEDDING_DIM } from '../src/schema';
 const GUILD = 'verify-guild';
 const MODEL = 'verify-model';
 
-/** Build a normalized 384-d vector with 1s in one half — two orthogonal "topics". */
+/** Build a normalized EMBEDDING_DIM-d vector with 1s in one half — two orthogonal "topics". */
 function vec(half: 'first' | 'second'): number[] {
   const v = new Array<number>(EMBEDDING_DIM).fill(0);
   const start = half === 'first' ? 0 : EMBEDDING_DIM / 2;
@@ -66,7 +66,7 @@ try {
     console.error(`✗ expected ~1.0 similarity for the matching topic, got ${top.score}`);
     process.exitCode = 1;
   } else {
-    console.log('✓ pgvector verified end-to-end: extension + vector(384) + HNSW index + repo query');
+    console.log(`✓ pgvector verified end-to-end: extension + vector(${EMBEDDING_DIM}) + HNSW index + repo query`);
   }
 } catch (err) {
   console.error('✗ verify failed:', err);

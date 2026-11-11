@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '@dejavue/core/env-preload';
 import { embed, embeddingModelId } from '@dejavue/ai';
 import {
   closeDb,
