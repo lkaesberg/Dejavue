@@ -64,9 +64,11 @@ describe.skipIf(!url)('purchase intent bridging on Postgres', () => {
 
   it('two late packs (3h apart) healed concurrently land on the shown guild or stay unbridged', async () => {
     await show('gA', 6 * HOUR);
-    // Healed together by a reconcile pass; serialised on the buyer's intent rows, so
+    // Processed at the same time (e.g. a live CREATE racing an older purchase's heal;
+    // reconcile itself replays oldest first). Serialised on the buyer's intent rows, so
     // whichever commits first is the showing's first purchase and the other is judged
-    // against the purchases committed before it (only earlier purchase times count).
+    // against the purchases committed before it (only earlier purchase times count):
+    // each is credited at most once and only ever to the shown guild.
     const ids = [snowflakeAt(shownAt + HOUR), snowflakeAt(shownAt + 4 * HOUR)];
     const res = await Promise.all([buy(LADDER[0]!, 0, ids[0]), buy(LADDER[1]!, 0, ids[1])]);
     expect(res.every((r) => r.guildId === 'gA' || r.guildId === null)).toBe(true);

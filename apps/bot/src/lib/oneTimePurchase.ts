@@ -43,7 +43,8 @@ export function isOneTimeSku(skuId: string): boolean {
  * entitlement id, so this is safe to repeat.
  *
  * A purchase we cannot bind to any guild is never silently dropped: it is stored
- * unbridged and (with `alertUnbridged`, i.e. on CREATE) raised to ops, who can bind
+ * unbridged and (with `alertUnbridged`, i.e. on CREATE, or on its first sighting from
+ * reconcile / UPDATE) raised to ops, who can bind
  * it by hand; the next reconcile pass then fulfils it. A refunded (deleted)
  * entitlement is stored but never granted.
  */
@@ -61,7 +62,10 @@ export async function storeAndFulfil(
   const userId = row.userId;
   // A refunded (deleted) purchase is never granted, so it must not use up an intent
   // either: that intent belongs to the buyer's next purchase of this SKU.
-  if (!row.guildId && userId && oneTime && !ent.deleted && !(await getEntitlement(db, row.id))?.guildId) {
+  // First sighting (no stored row yet): a CREATE, or a missed CREATE healed by reconcile.
+  const stored = oneTime ? await getEntitlement(db, row.id) : undefined;
+  const firstSighting = oneTime && !stored;
+  if (!row.guildId && userId && oneTime && !ent.deleted && !stored?.guildId) {
     const env = getEnv();
     const res = await bridgeAndStoreEntitlement(
       db,
@@ -78,7 +82,9 @@ export async function storeAndFulfil(
   }
   if (!oneTime || ent.deleted) return guildId;
   if (!guildId) {
-    if (opts.alertUnbridged && !ent.consumed) {
+    // Alert on CREATE, and on the first sighting from any other path (a reconcile-healed
+    // missed CREATE that can't be bridged would otherwise wait silently for ops).
+    if ((opts.alertUnbridged || firstSighting) && !ent.consumed) {
       log.error(
         { id: ent.id, skuId: ent.skuId, userId: row.userId },
         'one-time purchase with no guild intent — cannot resolve target guild',

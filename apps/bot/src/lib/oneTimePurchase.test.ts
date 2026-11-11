@@ -106,6 +106,19 @@ describe('storeAndFulfil', () => {
     );
   });
 
+  it('alerts ops for an unbridged purchase first seen by reconcile, but not on later passes', async () => {
+    db.getEntitlement.mockResolvedValue(undefined);
+    db.bridgeAndStoreEntitlement.mockResolvedValue({ guildId: null });
+    const late = topUp('e1000late', 'sku-topup-1000');
+    expect(await storeAndFulfil(late)).toBeNull();
+    expect(notifyAsync).toHaveBeenCalledTimes(1);
+    // The next hourly pass finds the stored, still unbound row: no repeat alert.
+    db.getEntitlement.mockResolvedValue({ id: 'e1000late', guildId: null });
+    expect(await storeAndFulfil(late)).toBeNull();
+    expect(notifyAsync).toHaveBeenCalledTimes(1);
+    expect(grantTopUp).not.toHaveBeenCalled();
+  });
+
   it('never re-bridges an already-bound top-up', async () => {
     db.getEntitlement.mockResolvedValue({ id: 'e500', guildId: 'gA' });
     db.upsertEntitlement.mockResolvedValue('gA');
