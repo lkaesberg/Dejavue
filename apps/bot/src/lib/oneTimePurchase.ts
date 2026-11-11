@@ -1,13 +1,12 @@
 import type { Entitlement } from 'discord.js';
-import { childLogger, getEnv, isTopUpSku, notifyAsync, topUpTiers } from '@dejavue/core';
+import { childLogger, getEnv, isTopUpSku, notifyAsync } from '@dejavue/core';
 import {
-  clearPurchaseIntent,
+  bridgeAndStoreEntitlement,
   getDb,
   getEntitlement,
   hasOtherLiveEntitlement,
-  resolvePurchaseIntent,
-  resolveTopUpIntent,
   revokeTopUpGrant,
+  TOP_UP_INTENT_TTL_MS,
   updateGuildConfig,
   upsertEntitlement,
 } from '@dejavue/db';
@@ -16,13 +15,6 @@ import { mapEntitlement } from './entitlementMap';
 import { grantTopUp } from './topUp';
 
 const log = childLogger({ mod: 'one-time-purchase' });
-
-/**
- * How long after a ladder click further packs bought from that same ladder message
- * still bridge to its guild (the first pack always does). Covers buying several packs
- * in one sitting; a purchase after this needs a fresh ladder click (or ops binds it).
- */
-export const TOP_UP_INTENT_REUSE_MS = 24 * 60 * 60 * 1000;
 
 /** SKUs Discord delivers as USER-owned one-time purchases (the entitlement has no guildId). */
 export function isOneTimeSku(skuId: string): boolean {
@@ -36,11 +28,15 @@ export function isOneTimeSku(skuId: string): boolean {
  *
  * One-time purchases (top-up, custom domain) are USER-owned: Discord sends them with
  * a user_id and no guild_id. A first sighting is bridged to the guild the buyer
- * launched the purchase from (the pending intent recorded with the buy button). A
- * custom-domain intent is dropped once the row holds that guild so it bridges exactly
- * one purchase; top-up ladder intents stay so every pack bought from the same ladder
- * message bridges (see resolveTopUpIntent). Each entitlement is bridged at most once:
- * only while its stored row is still unbound.
+ * launched the purchase from: the intent recorded per (user, SKU) with the buy button.
+ * Bridging consumes the intent for the purchased SKU only, atomically with storing the
+ * row (bridgeAndStoreEntitlement), so each intent bridges exactly one purchase.
+ * A ladder click records an intent for every top-up pack, valid for
+ * TOP_UP_INTENT_TTL_MS (30 min) after the click: several different packs bought from
+ * one ladder message each bridge, while buying the SAME pack again needs a fresh click
+ * (the second purchase finds no intent and is handled as unbridged, below). A top-up
+ * intent older than 30 minutes is never used. The custom-domain intent has no age
+ * limit. Each entitlement is bridged at most once: only while its stored row is unbound.
  * A redelivered CREATE, an UPDATE or a reconcile pass finds the guild on the stored
  * row instead. Grants are idempotent per entitlement id, so this is safe to repeat.
  *
@@ -56,30 +52,23 @@ export async function storeAndFulfil(
   const db = getDb();
   const row = mapEntitlement(ent);
   const oneTime = isOneTimeSku(row.skuId);
-  let bridged: string | undefined;
+  let guildId: string | null;
   // Bridge only a purchase that isn't bound yet: an UPDATE / redelivery / reconcile of
   // an already-bound one must not consume a newer intent the buyer made for another
   // guild (that would steal the next purchase's binding).
-  const topUp = isTopUpSku(getEnv(), row.skuId);
-  if (!row.guildId && row.userId && oneTime && !(await getEntitlement(db, row.id))?.guildId) {
-    bridged = topUp
-      ? await resolveTopUpIntent(db, {
-          userId: row.userId,
-          skuId: row.skuId,
-          entitlementId: row.id,
-          ladderSkuIds: topUpTiers(getEnv()).map((t) => t.skuId),
-          reuseWindowMs: TOP_UP_INTENT_REUSE_MS,
-        })
-      : await resolvePurchaseIntent(db, row.userId, row.skuId);
-    if (bridged) row.guildId = bridged;
-  }
-  const guildId = await upsertEntitlement(db, row);
-  if (bridged && row.userId && guildId === bridged) {
-    // A custom-domain intent bridges exactly one purchase. Top-up intents stay: the
-    // ladder offers every pack and the buyer may buy more than one from the same
-    // message (resolveTopUpIntent bounds how long a spent one keeps bridging).
-    if (!topUp) await clearPurchaseIntent(db, { userId: row.userId, skuIds: [row.skuId], guildId: bridged });
-    log.info({ id: ent.id, skuId: ent.skuId, guildId }, 'bridged user-owned purchase to guild');
+  const userId = row.userId;
+  if (!row.guildId && userId && oneTime && !(await getEntitlement(db, row.id))?.guildId) {
+    const topUp = isTopUpSku(getEnv(), row.skuId);
+    const res = await bridgeAndStoreEntitlement(
+      db,
+      { ...row, userId },
+      { maxAgeMs: topUp ? TOP_UP_INTENT_TTL_MS : undefined },
+    );
+    guildId = res.guildId;
+    if (res.bridged)
+      log.info({ id: ent.id, skuId: ent.skuId, guildId }, 'bridged user-owned purchase to guild');
+  } else {
+    guildId = await upsertEntitlement(db, row);
   }
   if (!oneTime || ent.deleted) return guildId;
   if (!guildId) {
@@ -92,7 +81,9 @@ export async function storeAndFulfil(
         level: 'error',
         title: '🚨 Unfulfilled one-time purchase',
         description:
-          'Paid purchase with no guild to apply it to (no purchase intent). Resolve by hand: ' +
+          'Paid purchase with no guild to apply it to (no unused purchase intent for this SKU: ' +
+          'never clicked, a top-up click older than 30 min, or the same pack bought twice from one click). ' +
+          'Resolve by hand: ' +
           'set entitlement.guild_id, then the next reconcile grants it.',
         fields: [
           { name: 'Entitlement', value: ent.id },

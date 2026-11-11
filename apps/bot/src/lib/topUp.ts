@@ -35,6 +35,8 @@ export async function grantTopUp(
  * intent for every configured pack (a one-time purchase is user-owned and carries
  * no guildId, so we must remember which guild the user launched it from — whichever
  * pack they pick) and return the pack SKU ids in ascending order for the buttons.
+ * Each pack's intent is valid for TOP_UP_INTENT_TTL_MS (30 min) from this click and
+ * bridges one purchase of that pack; buying a pack again needs another click.
  */
 export async function prepareTopUpSkus(userId: string, guildId: string): Promise<string[]> {
   const tiers = topUpTiers(getEnv());

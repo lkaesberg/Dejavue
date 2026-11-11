@@ -4,7 +4,6 @@ import type { Database } from '../client';
 import * as schema from '../schema';
 import { markEntitlementDeleted, upsertEntitlement } from './entitlements';
 import { swapLastTier } from './guilds';
-import { clearPurchaseIntent } from './purchaseIntent';
 import { revokeTopUpGrant } from './quota';
 
 /** A database that records each statement instead of running it. */
@@ -45,20 +44,10 @@ describe('entitlement mirror', () => {
   it('zeroes the remaining credits of a refunded top-up', async () => {
     const { db, queries } = recordingDb();
     await revokeTopUpGrant(db, 'e1');
-    expect(last(queries)).toMatch(/^update "top_up_grant" set "credits_remaining" = \$1 where "top_up_grant"\."id" = \$2/);
+    expect(last(queries)).toMatch(
+      /^update "top_up_grant" set "credits_remaining" = \$1 where "top_up_grant"\."id" = \$2/,
+    );
     expect(queries.at(-1)?.params).toEqual([0, 'e1']);
-  });
-});
-
-describe('purchase intents', () => {
-  it('clears only the used guild intents for the user', async () => {
-    const { db, queries } = recordingDb();
-    await clearPurchaseIntent(db, { userId: 'u', skuIds: ['a', 'b'], guildId: 'g' });
-    expect(last(queries)).toMatch(/^delete from "purchase_intent" where/);
-    expect(last(queries)).toContain('"purchase_intent"."sku_id" in ($2, $3)');
-    expect(last(queries)).toContain('"purchase_intent"."guild_id" = $4');
-    await clearPurchaseIntent(db, { userId: 'u', skuIds: [], guildId: 'g' });
-    expect(queries).toHaveLength(1);
   });
 });
 

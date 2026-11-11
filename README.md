@@ -273,6 +273,12 @@ nudges and theming cost nothing to serve, so every server gets them.
 2,000 / 5,000 credits (consumable, stacks, never expires). Importing your existing history is free,
 up to each tier's indexed-message limit.
 
+A top-up pack is credited to the server whose credit message you bought it from. Discord sends
+one-time purchases without a server, so the bot remembers, per pack, which server showed you the
+buttons: each different pack bought within 30 minutes of that message is credited there. To buy the
+same pack again, or after 30 minutes, open the message again (for example re-run `/dejavue insights`);
+otherwise the purchase waits for a manual bind before it is credited.
+
 > 💡 **Self-hosting has no tiers.** Set `DEV_FORCE_TIER=max` and every feature is unlocked — you
 > just pay your own OpenRouter bill for the AI parts, or run embeddings on CPU for free.
 

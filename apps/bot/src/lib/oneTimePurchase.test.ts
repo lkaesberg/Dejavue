@@ -2,29 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const db = {
   getEntitlement: vi.fn(),
-  resolvePurchaseIntent: vi.fn(),
-  resolveTopUpIntent: vi.fn(),
+  bridgeAndStoreEntitlement: vi.fn(),
   upsertEntitlement: vi.fn(),
-  clearPurchaseIntent: vi.fn(),
 };
+const notifyAsync = vi.fn();
 
 vi.mock('@dejavue/core', () => ({
   childLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   getEnv: () => ({ SKU_CUSTOM_DOMAIN: 'sku-domain', SKU_BACKFILL: undefined }),
   isTopUpSku: (_env: unknown, sku: string) => sku.startsWith('sku-topup'),
-  notifyAsync: vi.fn(),
-  topUpTiers: () => [
-    { skuId: 'sku-topup-500', credits: 500 },
-    { skuId: 'sku-topup-1000', credits: 1000 },
-  ],
+  notifyAsync: (...a: unknown[]) => notifyAsync(...a),
 }));
 vi.mock('@dejavue/db', () => ({
   getDb: () => ({}),
   getEntitlement: (...a: unknown[]) => db.getEntitlement(...a),
-  resolvePurchaseIntent: (...a: unknown[]) => db.resolvePurchaseIntent(...a),
-  resolveTopUpIntent: (...a: unknown[]) => db.resolveTopUpIntent(...a),
+  bridgeAndStoreEntitlement: (...a: unknown[]) => db.bridgeAndStoreEntitlement(...a),
   upsertEntitlement: (...a: unknown[]) => db.upsertEntitlement(...a),
-  clearPurchaseIntent: (...a: unknown[]) => db.clearPurchaseIntent(...a),
+  TOP_UP_INTENT_TTL_MS: 30 * 60 * 1000,
   hasOtherLiveEntitlement: vi.fn(),
   revokeTopUpGrant: vi.fn(),
   updateGuildConfig: vi.fn(),
@@ -34,7 +28,7 @@ vi.mock('./topUp', () => ({ grantTopUp: vi.fn(async () => undefined) }));
 
 import type { Entitlement } from 'discord.js';
 import { grantCustomDomain } from './customDomain';
-import { storeAndFulfil, TOP_UP_INTENT_REUSE_MS } from './oneTimePurchase';
+import { storeAndFulfil } from './oneTimePurchase';
 import { grantTopUp } from './topUp';
 
 const ent = {
@@ -48,57 +42,76 @@ const ent = {
   endsTimestamp: null,
 } as unknown as Entitlement;
 
+const row = (id: string, skuId: string) => ({ id, skuId, guildId: null, userId: 'u1' });
+const topUp = (id: string, skuId: string) => ({ ...ent, id, skuId }) as unknown as Entitlement;
+
 describe('storeAndFulfil', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('bridges a first sighting from the intent and clears it', async () => {
+  it('bridges a custom-domain purchase from its intent with no age limit', async () => {
     db.getEntitlement.mockResolvedValue(undefined);
-    db.resolvePurchaseIntent.mockResolvedValue('gA');
-    db.upsertEntitlement.mockResolvedValue('gA');
+    db.bridgeAndStoreEntitlement.mockResolvedValue({ guildId: 'gA', bridged: 'gA' });
     expect(await storeAndFulfil(ent)).toBe('gA');
-    expect(db.clearPurchaseIntent).toHaveBeenCalledWith({}, { userId: 'u1', skuIds: ['sku-domain'], guildId: 'gA' });
+    expect(db.bridgeAndStoreEntitlement).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining(row('e1', 'sku-domain')),
+      {
+        maxAgeMs: undefined,
+      },
+    );
+    expect(db.upsertEntitlement).not.toHaveBeenCalled();
     expect(grantCustomDomain).toHaveBeenCalledWith(ent, 'gA');
   });
 
   it('never re-bridges an already-bound purchase to a newer intent for another guild', async () => {
     db.getEntitlement.mockResolvedValue({ id: 'e1', guildId: 'gA' });
-    db.resolvePurchaseIntent.mockResolvedValue('gB');
     db.upsertEntitlement.mockResolvedValue('gA');
     expect(await storeAndFulfil(ent)).toBe('gA');
-    expect(db.resolvePurchaseIntent).not.toHaveBeenCalled();
-    expect(db.clearPurchaseIntent).not.toHaveBeenCalled();
+    expect(db.bridgeAndStoreEntitlement).not.toHaveBeenCalled();
     expect(grantCustomDomain).toHaveBeenCalledWith(ent, 'gA');
   });
 
-  it('bridges every top-up pack bought from one ladder message and keeps the intents', async () => {
+  it('credits two different packs bought from one ladder click, each from its own 30-min intent', async () => {
     db.getEntitlement.mockResolvedValue(undefined);
-    db.resolveTopUpIntent.mockResolvedValue('gA');
-    db.upsertEntitlement.mockResolvedValue('gA');
-    const a = { ...ent, id: 'e500', skuId: 'sku-topup-500' } as unknown as Entitlement;
-    const b = { ...ent, id: 'e1000', skuId: 'sku-topup-1000' } as unknown as Entitlement;
-    expect(await storeAndFulfil(a)).toBe('gA');
-    expect(await storeAndFulfil(b)).toBe('gA');
-    expect(db.resolveTopUpIntent).toHaveBeenLastCalledWith(
+    db.bridgeAndStoreEntitlement.mockResolvedValue({ guildId: 'gA', bridged: 'gA' });
+    const a = topUp('e500', 'sku-topup-500');
+    const b = topUp('e1000', 'sku-topup-1000');
+    expect(await storeAndFulfil(a, { alertUnbridged: true })).toBe('gA');
+    expect(await storeAndFulfil(b, { alertUnbridged: true })).toBe('gA');
+    expect(db.bridgeAndStoreEntitlement).toHaveBeenNthCalledWith(
+      1,
       {},
-      {
-        userId: 'u1',
-        skuId: 'sku-topup-1000',
-        entitlementId: 'e1000',
-        ladderSkuIds: ['sku-topup-500', 'sku-topup-1000'],
-        reuseWindowMs: TOP_UP_INTENT_REUSE_MS,
-      },
+      expect.objectContaining(row('e500', 'sku-topup-500')),
+      { maxAgeMs: 30 * 60 * 1000 },
     );
-    expect(db.resolvePurchaseIntent).not.toHaveBeenCalled();
-    expect(db.clearPurchaseIntent).not.toHaveBeenCalled();
+    expect(db.bridgeAndStoreEntitlement).toHaveBeenNthCalledWith(
+      2,
+      {},
+      expect.objectContaining(row('e1000', 'sku-topup-1000')),
+      { maxAgeMs: 30 * 60 * 1000 },
+    );
     expect(grantTopUp).toHaveBeenCalledWith(a, 'gA');
     expect(grantTopUp).toHaveBeenCalledWith(b, 'gA');
+    expect(notifyAsync).not.toHaveBeenCalled();
+  });
+
+  it('stores a pack with no unused intent unbridged and alerts ops (same pack twice, or expired)', async () => {
+    db.getEntitlement.mockResolvedValue(undefined);
+    db.bridgeAndStoreEntitlement.mockResolvedValue({ guildId: null });
+    const again = topUp('e500b', 'sku-topup-500');
+    expect(await storeAndFulfil(again, { alertUnbridged: true })).toBeNull();
+    expect(grantTopUp).not.toHaveBeenCalled();
+    expect(notifyAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '🚨 Unfulfilled one-time purchase' }),
+    );
   });
 
   it('never re-bridges an already-bound top-up', async () => {
     db.getEntitlement.mockResolvedValue({ id: 'e500', guildId: 'gA' });
     db.upsertEntitlement.mockResolvedValue('gA');
-    const a = { ...ent, id: 'e500', skuId: 'sku-topup-500' } as unknown as Entitlement;
+    const a = topUp('e500', 'sku-topup-500');
     expect(await storeAndFulfil(a)).toBe('gA');
-    expect(db.resolveTopUpIntent).not.toHaveBeenCalled();
+    expect(db.bridgeAndStoreEntitlement).not.toHaveBeenCalled();
+    expect(grantTopUp).toHaveBeenCalledWith(a, 'gA');
   });
 });
