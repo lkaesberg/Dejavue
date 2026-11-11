@@ -1,8 +1,13 @@
 import { drizzle } from 'drizzle-orm/pg-proxy';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Database } from '../client';
 import * as schema from '../schema';
-import { bridgeAndStoreEntitlement, TOP_UP_INTENT_TTL_MS } from './purchaseIntent';
+import {
+  bridgeAndStoreEntitlement,
+  purchaseTimeMs,
+  snowflakeTimeMs,
+  TOP_UP_INTENT_TTL_MS,
+} from './purchaseIntent';
 
 const CLICK = Date.UTC(2026, 10, 1, 12, 0, 0);
 const MIN = 60_000;
@@ -131,5 +136,48 @@ describe('bridgeAndStoreEntitlement', () => {
     m.ents.set('e1', 'gA');
     expect(await buy(m.db, 'e1', 'sku-500', CLICK + MIN)).toEqual({ guildId: 'gA' });
     expect(m.intents.get('u1|sku-500')).toEqual({ guildId: 'gB', updatedAt: CLICK });
+  });
+
+  describe('window measured to the purchase time (entitlement snowflake)', () => {
+    afterEach(() => vi.useRealTimers());
+    /** A Discord snowflake id created at `ms`. */
+    const snowflakeAt = (ms: number) => String((BigInt(ms) - 1_420_070_400_000n) << 22n);
+    const late = (db: Database, id: string, skuId: string) =>
+      bridgeAndStoreEntitlement(
+        db,
+        { id, skuId, userId: 'u1', guildId: null },
+        { maxAgeMs: TOP_UP_INTENT_TTL_MS },
+      );
+
+    it('reads the creation time from a snowflake and falls back to now otherwise', () => {
+      expect(snowflakeTimeMs(snowflakeAt(CLICK))).toBe(CLICK);
+      expect(snowflakeTimeMs('e1')).toBeUndefined();
+      expect(purchaseTimeMs('e1', CLICK)).toBe(CLICK);
+      // A snowflake from the future (clock skew) is clamped to now.
+      expect(purchaseTimeMs(snowflakeAt(CLICK + MIN), CLICK)).toBe(CLICK);
+    });
+
+    it('bridges a pack bought inside the window even when processed much later (missed CREATE healed by reconcile)', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(CLICK + 55 * MIN);
+      const m = memoryDb();
+      m.click('gA');
+      expect(await late(m.db, snowflakeAt(CLICK + 5 * MIN), 'sku-500')).toEqual({
+        guildId: 'gA',
+        bridged: 'gA',
+      });
+    });
+
+    it('does not bridge a pack bought after the window, however soon it is processed', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(CLICK + 31 * MIN);
+      const m = memoryDb();
+      m.click('gA');
+      expect(await late(m.db, snowflakeAt(CLICK + 31 * MIN), 'sku-500')).toEqual({
+        guildId: null,
+        bridged: undefined,
+      });
+      expect(m.intents.has('u1|sku-500')).toBe(true);
+    });
   });
 });

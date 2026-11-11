@@ -37,14 +37,36 @@ export async function recordPurchaseIntent(
  */
 export const TOP_UP_INTENT_TTL_MS = 30 * 60 * 1000;
 
+/** Discord epoch (2015-01-01): snowflake ids carry their creation time from it. */
+const DISCORD_EPOCH_MS = 1_420_070_400_000n;
+
+/** Creation time of a Discord snowflake id, or undefined when the id isn't one. */
+export function snowflakeTimeMs(id: string): number | undefined {
+  if (!/^\d{1,20}$/.test(id)) return undefined;
+  return Number((BigInt(id) >> 22n) + DISCORD_EPOCH_MS);
+}
+
+/**
+ * When the purchase was made: the entitlement id's snowflake time (never later than
+ * `now`), else `now`. The intent window is measured to the PURCHASE, not to when we get
+ * to process it, so a CREATE missed during a deploy / gateway reconnect and healed by
+ * the reconcile pass an hour later still bridges a pack bought inside the window.
+ */
+export function purchaseTimeMs(entitlementId: string, now = Date.now()): number {
+  const t = snowflakeTimeMs(entitlementId);
+  return t === undefined ? now : Math.min(t, now);
+}
+
 /**
  * Atomically bridge a user-owned one-time purchase to a guild and store its entitlement
  * row: consume the buyer's intent for exactly this SKU (DELETE ... RETURNING, so of two
  * purchases racing for one intent only one gets it) and upsert the row with that guild,
  * in one transaction. Intents for other SKUs are untouched.
  *
- * - `maxAgeMs`: only an intent clicked within this long counts (expired ones are left
- *   in place, unused). Omit for no age limit (the custom-domain purchase).
+ * - `maxAgeMs`: only an intent clicked within this long BEFORE THE PURCHASE counts
+ *   (purchase time = the entitlement id's snowflake time, see purchaseTimeMs; `now`
+ *   overrides it in tests). Expired ones are left in place, unused. Omit for no age
+ *   limit (the custom-domain purchase).
  * - Returns the guild the stored row is bound to, and the guild the intent supplied.
  * - If the row turns out to be bound already (a concurrent delivery of the same
  *   entitlement bridged it first, or ops bound it), the stored binding wins and the
@@ -61,7 +83,8 @@ export async function bridgeAndStoreEntitlement(
   return db.transaction(async (tx) => {
     const conds = [eq(purchaseIntent.userId, row.userId), eq(purchaseIntent.skuId, row.skuId)];
     if (opts.maxAgeMs !== undefined) {
-      conds.push(gt(purchaseIntent.updatedAt, new Date((opts.now ?? Date.now()) - opts.maxAgeMs)));
+      const at = opts.now ?? purchaseTimeMs(row.id);
+      conds.push(gt(purchaseIntent.updatedAt, new Date(at - opts.maxAgeMs)));
     }
     const [intent] = await tx
       .delete(purchaseIntent)

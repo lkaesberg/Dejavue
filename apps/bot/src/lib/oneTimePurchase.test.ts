@@ -114,4 +114,18 @@ describe('storeAndFulfil', () => {
     expect(db.bridgeAndStoreEntitlement).not.toHaveBeenCalled();
     expect(grantTopUp).toHaveBeenCalledWith(a, 'gA');
   });
+
+  it('stores a refunded first sighting without using up the buyer intent', async () => {
+    db.getEntitlement.mockResolvedValue(undefined);
+    db.upsertEntitlement.mockResolvedValue(null);
+    const refunded = { ...topUp('e500r', 'sku-topup-500'), deleted: true } as unknown as Entitlement;
+    expect(await storeAndFulfil(refunded, { alertUnbridged: true })).toBeNull();
+    expect(db.bridgeAndStoreEntitlement).not.toHaveBeenCalled();
+    expect(db.upsertEntitlement).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ id: 'e500r', guildId: null }),
+    );
+    expect(grantTopUp).not.toHaveBeenCalled();
+    expect(notifyAsync).not.toHaveBeenCalled();
+  });
 });

@@ -35,7 +35,8 @@ export function isOneTimeSku(skuId: string): boolean {
  * TOP_UP_INTENT_TTL_MS (30 min) after the click: several different packs bought from
  * one ladder message each bridge, while buying the SAME pack again needs a fresh click
  * (the second purchase finds no intent and is handled as unbridged, below). A top-up
- * intent older than 30 minutes is never used. The custom-domain intent has no age
+ * intent is used only for a purchase made within 30 minutes of the click (purchase
+ * time = the entitlement's snowflake, so a late-healed missed CREATE still bridges). The custom-domain intent has no age
  * limit. Each entitlement is bridged at most once: only while its stored row is unbound.
  * A redelivered CREATE, an UPDATE or a reconcile pass finds the guild on the stored
  * row instead. Grants are idempotent per entitlement id, so this is safe to repeat.
@@ -57,7 +58,9 @@ export async function storeAndFulfil(
   // an already-bound one must not consume a newer intent the buyer made for another
   // guild (that would steal the next purchase's binding).
   const userId = row.userId;
-  if (!row.guildId && userId && oneTime && !(await getEntitlement(db, row.id))?.guildId) {
+  // A refunded (deleted) purchase is never granted, so it must not use up an intent
+  // either: that intent belongs to the buyer's next purchase of this SKU.
+  if (!row.guildId && userId && oneTime && !ent.deleted && !(await getEntitlement(db, row.id))?.guildId) {
     const topUp = isTopUpSku(getEnv(), row.skuId);
     const res = await bridgeAndStoreEntitlement(
       db,
@@ -82,7 +85,7 @@ export async function storeAndFulfil(
         title: '🚨 Unfulfilled one-time purchase',
         description:
           'Paid purchase with no guild to apply it to (no unused purchase intent for this SKU: ' +
-          'never clicked, a top-up click older than 30 min, or the same pack bought twice from one click). ' +
+          'never clicked, a top-up bought more than 30 min after the click, or the same pack bought twice from one click). ' +
           'Resolve by hand: ' +
           'set entitlement.guild_id, then the next reconcile grants it.',
         fields: [
