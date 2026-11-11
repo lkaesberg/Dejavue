@@ -26,6 +26,15 @@ const db = vi.hoisted(() => ({
   updateReindexJob: vi.fn(async () => undefined),
   upsertThread: vi.fn(),
   withoutOptedOut: vi.fn(),
+  // The real one locks guild_config FOR SHARE; here it reads the same (mocked) config.
+  whileChannelMonitored: vi.fn(
+    async (_db: unknown, guildId: string, channelId: string, kind: string, fn: (tx: unknown) => unknown) => {
+      // biome-ignore lint/suspicious/noExplicitAny: test double
+      const cfg: any = await (db.getGuildConfig as any)({}, guildId);
+      const ids = kind === 'forum' ? cfg?.forumChannelIds : cfg?.trackedChannelIds;
+      return ids?.includes(channelId) ? fn({}) : undefined;
+    },
+  ),
 }));
 vi.mock('@dejavue/db', () => db);
 vi.mock('@dejavue/queue', () => ({
@@ -137,13 +146,25 @@ describe('handleReindexChannel (forum) outcome', () => {
 
   it('stops before the next thread when the channel is removed from the hub mid-run', async () => {
     let reads = 0;
-    // Monitored for the start, after-listing and first-thread reads; removed after that.
-    db.getGuildConfig.mockImplementation(async () => (++reads <= 3 ? monitored : { ...monitored, forumChannelIds: [] }));
+    // Monitored for the start, after-listing and first-thread (check + upsert) reads; removed after that.
+    db.getGuildConfig.mockImplementation(async () => (++reads <= 4 ? monitored : { ...monitored, forumChannelIds: [] }));
     await handleReindexChannel({ reindexJobId: 'rj1' } as never);
     expect(db.upsertThread).toHaveBeenCalledTimes(1);
     // The first thread's publish re-check already saw the removal.
     expect(db.setPublished).not.toHaveBeenCalled();
     expect(statusCalls('completed')).toHaveLength(0);
+    expect(statusCalls('failed')).toHaveLength(1);
+    expect(db.completeReindex).not.toHaveBeenCalled();
+  });
+
+  it('writes no row when the channel is removed between the per-thread check and the upsert', async () => {
+    let reads = 0;
+    // Start, after-listing and first per-thread check pass; the removal lands while the
+    // starter is fetched, so the atomic upsert sees it.
+    db.getGuildConfig.mockImplementation(async () => (++reads <= 3 ? monitored : { ...monitored, forumChannelIds: [] }));
+    await handleReindexChannel({ reindexJobId: 'rj1' } as never);
+    expect(db.upsertThread).not.toHaveBeenCalled();
+    expect(db.setPublished).not.toHaveBeenCalled();
     expect(statusCalls('failed')).toHaveLength(1);
     expect(db.completeReindex).not.toHaveBeenCalled();
   });

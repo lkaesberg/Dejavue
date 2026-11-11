@@ -36,6 +36,7 @@ import {
   updateChannelName,
   updateReindexJob,
   upsertThread,
+  whileChannelMonitored,
   withoutOptedOut,
 } from '@dejavue/db';
 import {
@@ -166,6 +167,14 @@ async function assertStillMonitored(rj: ReindexJob): Promise<void> {
   if (!isChannelMonitored(cfg, rj.channelId, rj.kind)) throw new ChannelUnmonitoredError(rj.channelId);
 }
 
+/** Publish a row only while the channel is still monitored (atomic with the check). */
+async function publishWhileMonitored(rj: ReindexJob, threadId: string): Promise<void> {
+  const ok = await whileChannelMonitored(getDb(), rj.guildId, rj.channelId, rj.kind, (tx) =>
+    setPublished(tx, rj.guildId, threadId, true).then(() => true),
+  );
+  if (!ok) throw new ChannelUnmonitoredError(rj.channelId);
+}
+
 /**
  * Finish a run: running → completed, then settle the channel claim. If the row is no
  * longer running (the sweeper failed it after a long stall), the claim was already
@@ -267,17 +276,22 @@ async function reindexForum(
         continue;
       }
       const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
-      const row = await upsertThread(db, {
-        guildId: rj.guildId,
-        channelId: rj.channelId,
-        channelName: channelName ?? undefined, // never clobber a known name with null
-        threadId: t.id,
-        title: t.name,
-        questionBody: starter?.content ?? '',
-        opUserId: starter?.author?.id ?? null,
-        status: isSolved ? 'solved' : 'open',
-        solvedAt: isSolved ? archivedAt(t) : undefined,
-      });
+      // Written atomically with the monitoring check: the check above ran before the
+      // starter fetch, so a removal landing in between must still stop this row.
+      const row = await whileChannelMonitored(db, rj.guildId, rj.channelId, rj.kind, (tx) =>
+        upsertThread(tx, {
+          guildId: rj.guildId,
+          channelId: rj.channelId,
+          channelName: channelName ?? undefined, // never clobber a known name with null
+          threadId: t.id,
+          title: t.name,
+          questionBody: starter?.content ?? '',
+          opUserId: starter?.author?.id ?? null,
+          status: isSolved ? 'solved' : 'open',
+          solvedAt: isSolved ? archivedAt(t) : undefined,
+        }),
+      );
+      if (!row) throw new ChannelUnmonitoredError(rj.channelId);
       indexed++;
 
       const src = {
@@ -327,8 +341,7 @@ async function reindexForum(
         // (an 'open' row is promoted from the tag by upsertThread; an explicit reopen
         // to 'unsolved' is not overridden by a stale tag). Never publish into a
         // channel that was just removed from the hub.
-        await assertStillMonitored(rj);
-        await setPublished(db, rj.guildId, t.id, true);
+        await publishWhileMonitored(rj, t.id);
         await enqueueRevalidateKb({ guildId: rj.guildId, threadId: t.id, action: 'publish' }).catch(
           () => undefined,
         );
@@ -549,20 +562,25 @@ async function reindexTracked(
       skippedForCap++;
       return;
     }
-    const row = await upsertThread(db, {
-      guildId: rj.guildId,
-      channelId: rj.channelId,
-      channelName,
-      kind: 'channel',
-      threadId,
-      title,
-      questionBody: transcript[0]?.content ?? '',
-      opUserId,
-      status: 'open',
-    });
+    const row = await whileChannelMonitored(db, rj.guildId, rj.channelId, rj.kind, (tx) =>
+      upsertThread(tx, {
+        guildId: rj.guildId,
+        channelId: rj.channelId,
+        channelName,
+        kind: 'channel',
+        threadId,
+        title,
+        questionBody: transcript[0]?.content ?? '',
+        opUserId,
+        status: 'open',
+      }),
+    );
+    if (!row) throw new ChannelUnmonitoredError(rj.channelId);
     if (!existing) indexed++;
     if (isPublishable(row) && !row.publishedToKb) {
-      await setPublished(db, rj.guildId, threadId, true).catch(() => undefined);
+      await publishWhileMonitored(rj, threadId).catch((err) => {
+        if (err instanceof ChannelUnmonitoredError) throw err; // other failures: best effort, as before
+      });
       await enqueueRevalidateKb({ guildId: rj.guildId, threadId, action: 'publish' }).catch(() => undefined);
     }
     await setTranscript(db, row.id, transcript);

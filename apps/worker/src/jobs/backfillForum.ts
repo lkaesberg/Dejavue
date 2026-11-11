@@ -32,6 +32,7 @@ import {
   updateChannelName,
   upsertEmbedding,
   upsertThread,
+  whileChannelMonitored,
 } from '@dejavue/db';
 import { enqueueRevalidateKb } from '@dejavue/queue';
 import type { BackfillForumJob } from '@dejavue/queue';
@@ -279,17 +280,22 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
           continue;
         }
         const isSolved = solvedTagId ? (t.applied_tags ?? []).includes(solvedTagId) : false;
-        const row = await upsertThread(db, {
-          guildId: bf.guildId,
-          channelId: bf.channelId,
-          channelName: channelName ?? undefined, // never clobber a known name with null
-          threadId: t.id,
-          title: t.name,
-          questionBody: starter?.content ?? '',
-          opUserId: starter?.author?.id ?? null,
-          status: isSolved ? 'solved' : 'open',
-          solvedAt: isSolved ? archivedAt(t) : undefined,
-        });
+        // Written atomically with the monitoring check: the check above ran before the
+        // starter fetch, so a removal landing in between must still stop this row.
+        const row = await whileChannelMonitored(db, bf.guildId, bf.channelId, 'forum', (tx) =>
+          upsertThread(tx, {
+            guildId: bf.guildId,
+            channelId: bf.channelId,
+            channelName: channelName ?? undefined, // never clobber a known name with null
+            threadId: t.id,
+            title: t.name,
+            questionBody: starter?.content ?? '',
+            opUserId: starter?.author?.id ?? null,
+            status: isSolved ? 'solved' : 'open',
+            solvedAt: isSolved ? archivedAt(t) : undefined,
+          }),
+        );
+        if (!row) throw new ChannelUnmonitoredError(bf.channelId);
         indexedMessages++;
         // Backfill only has the starter message (no full transcript), so this is the
         // canonical title + question chunk — the same chunk 0 the live job builds.
@@ -304,6 +310,7 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
           chunk: buildEmbeddingChunks(src)[0],
         });
       } catch (err) {
+        if (err instanceof ChannelUnmonitoredError) throw err;
         // Not added to `processed`: a retry of this job re-attempts the thread.
         failed++;
         log.warn({ err, threadId: t.id }, 'backfill: failed to import thread');
@@ -383,8 +390,10 @@ async function runBackfill(bf: BackfillJob, live: LiveProgress | null, label: st
         } else if (mode === 'knowledge' || p.isSolved) {
           // Auto-publish everything online. Open questions stay private until solved.
           // Never publish into a forum that was just removed from the hub.
-          await loadMonitoredConfig(bf);
-          await setPublished(db, bf.guildId, p.t.id, true);
+          const published = await whileChannelMonitored(db, bf.guildId, bf.channelId, 'forum', (tx) =>
+            setPublished(tx, bf.guildId, p.t.id, true).then(() => true),
+          );
+          if (!published) throw new ChannelUnmonitoredError(bf.channelId);
           await enqueueRevalidateKb({
             guildId: bf.guildId,
             threadId: p.t.id,

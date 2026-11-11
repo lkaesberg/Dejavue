@@ -118,8 +118,9 @@ export async function addTrackedChannel(
 /**
  * Stop monitoring a channel (forum or tracked): drop it from both arrays and its mode,
  * and its guidelines when `dropGuidelines`. A no-op when it isn't monitored. In-flight
- * backfill/reindex jobs notice at their next checkpoint (ChannelUnmonitoredError) and
- * stop without recreating channel_sync.
+ * backfill/reindex jobs notice at their next check (ChannelUnmonitoredError) and stop
+ * without recreating channel_sync; their row writes go through whileChannelMonitored,
+ * so none lands after this commits.
  */
 export async function removeMonitoredChannel(
   db: Database,
@@ -147,6 +148,33 @@ export async function removeMonitoredChannel(
         ),
       ),
     );
+}
+
+/**
+ * Run `fn` only while `channelId` is still monitored (as a forum or tracked channel),
+ * atomically with that check: the guild_config row is held FOR SHARE for the duration,
+ * so removeMonitoredChannel (an UPDATE of that row) waits for `fn` to commit, and a
+ * write that starts after the removal sees it and is skipped. Returns undefined when
+ * the channel is no longer monitored. Keep `fn` to a few quick statements — it holds
+ * the lock — and run them on the `tx` it is given.
+ */
+export async function whileChannelMonitored<T>(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  kind: 'forum' | 'tracked',
+  fn: (tx: Database) => Promise<T>,
+): Promise<T | undefined> {
+  return db.transaction(async (tx) => {
+    const [cfg] = await tx
+      .select({ forum: guildConfig.forumChannelIds, tracked: guildConfig.trackedChannelIds })
+      .from(guildConfig)
+      .where(eq(guildConfig.guildId, guildId))
+      .for('share');
+    const ids = kind === 'forum' ? cfg?.forum : cfg?.tracked;
+    if (!ids?.includes(channelId)) return undefined;
+    return fn(tx as unknown as Database);
+  });
 }
 
 export async function getGuildConfig(
