@@ -35,13 +35,16 @@ export async function grantTopUp(
  * intent for every configured pack (a one-time purchase is user-owned and carries
  * no guildId, so we must remember which guild the user launched it from — whichever
  * pack they pick) and return the pack SKU ids in ascending order for the buttons.
- * Each pack's intent is valid for TOP_UP_INTENT_TTL_MS (30 min) from this click and
- * bridges one purchase of that pack; buying a pack again needs another click.
+ * All packs are stamped with this showing's time. The first pack bought from it bridges
+ * here however late; further packs while in the same buying sitting (TOP_UP_SITTING_MS).
+ * Each pack's intent bridges one purchase of that pack; buying it again needs another
+ * showing.
  */
 export async function prepareTopUpSkus(userId: string, guildId: string): Promise<string[]> {
   const tiers = topUpTiers(getEnv());
+  const shownAt = new Date();
   for (const tier of tiers) {
-    await recordPurchaseIntent(getDb(), { userId, skuId: tier.skuId, guildId });
+    await recordPurchaseIntent(getDb(), { userId, skuId: tier.skuId, guildId }, shownAt);
   }
   return tiers.map((tier) => tier.skuId);
 }

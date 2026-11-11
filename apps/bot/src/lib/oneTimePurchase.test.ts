@@ -11,6 +11,7 @@ vi.mock('@dejavue/core', () => ({
   childLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   getEnv: () => ({ SKU_CUSTOM_DOMAIN: 'sku-domain', SKU_BACKFILL: undefined }),
   isTopUpSku: (_env: unknown, sku: string) => sku.startsWith('sku-topup'),
+  topUpTiers: () => [{ skuId: 'sku-topup-500' }, { skuId: 'sku-topup-1000' }],
   notifyAsync: (...a: unknown[]) => notifyAsync(...a),
 }));
 vi.mock('@dejavue/db', () => ({
@@ -18,7 +19,7 @@ vi.mock('@dejavue/db', () => ({
   getEntitlement: (...a: unknown[]) => db.getEntitlement(...a),
   bridgeAndStoreEntitlement: (...a: unknown[]) => db.bridgeAndStoreEntitlement(...a),
   upsertEntitlement: (...a: unknown[]) => db.upsertEntitlement(...a),
-  TOP_UP_INTENT_TTL_MS: 30 * 60 * 1000,
+  TOP_UP_SITTING_MS: 30 * 60 * 1000,
   hasOtherLiveEntitlement: vi.fn(),
   revokeTopUpGrant: vi.fn(),
   updateGuildConfig: vi.fn(),
@@ -42,6 +43,7 @@ const ent = {
   endsTimestamp: null,
 } as unknown as Entitlement;
 
+const SITTING = { sitting: { skuIds: ['sku-topup-500', 'sku-topup-1000'], windowMs: 30 * 60 * 1000 } };
 const row = (id: string, skuId: string) => ({ id, skuId, guildId: null, userId: 'u1' });
 const topUp = (id: string, skuId: string) => ({ ...ent, id, skuId }) as unknown as Entitlement;
 
@@ -55,9 +57,7 @@ describe('storeAndFulfil', () => {
     expect(db.bridgeAndStoreEntitlement).toHaveBeenCalledWith(
       {},
       expect.objectContaining(row('e1', 'sku-domain')),
-      {
-        maxAgeMs: undefined,
-      },
+      {},
     );
     expect(db.upsertEntitlement).not.toHaveBeenCalled();
     expect(grantCustomDomain).toHaveBeenCalledWith(ent, 'gA');
@@ -71,7 +71,7 @@ describe('storeAndFulfil', () => {
     expect(grantCustomDomain).toHaveBeenCalledWith(ent, 'gA');
   });
 
-  it('credits two different packs bought from one ladder click, each from its own 30-min intent', async () => {
+  it('credits two different packs bought from one ladder showing, judged by the buying sitting', async () => {
     db.getEntitlement.mockResolvedValue(undefined);
     db.bridgeAndStoreEntitlement.mockResolvedValue({ guildId: 'gA', bridged: 'gA' });
     const a = topUp('e500', 'sku-topup-500');
@@ -82,20 +82,20 @@ describe('storeAndFulfil', () => {
       1,
       {},
       expect.objectContaining(row('e500', 'sku-topup-500')),
-      { maxAgeMs: 30 * 60 * 1000 },
+      SITTING,
     );
     expect(db.bridgeAndStoreEntitlement).toHaveBeenNthCalledWith(
       2,
       {},
       expect.objectContaining(row('e1000', 'sku-topup-1000')),
-      { maxAgeMs: 30 * 60 * 1000 },
+      SITTING,
     );
     expect(grantTopUp).toHaveBeenCalledWith(a, 'gA');
     expect(grantTopUp).toHaveBeenCalledWith(b, 'gA');
     expect(notifyAsync).not.toHaveBeenCalled();
   });
 
-  it('stores a pack with no unused intent unbridged and alerts ops (same pack twice, or expired)', async () => {
+  it('stores a pack with no unused intent unbridged and alerts ops (same pack twice, or after the sitting)', async () => {
     db.getEntitlement.mockResolvedValue(undefined);
     db.bridgeAndStoreEntitlement.mockResolvedValue({ guildId: null });
     const again = topUp('e500b', 'sku-topup-500');

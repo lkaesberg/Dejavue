@@ -1,12 +1,12 @@
 import type { Entitlement } from 'discord.js';
-import { childLogger, getEnv, isTopUpSku, notifyAsync } from '@dejavue/core';
+import { childLogger, getEnv, isTopUpSku, notifyAsync, topUpTiers } from '@dejavue/core';
 import {
   bridgeAndStoreEntitlement,
   getDb,
   getEntitlement,
   hasOtherLiveEntitlement,
   revokeTopUpGrant,
-  TOP_UP_INTENT_TTL_MS,
+  TOP_UP_SITTING_MS,
   updateGuildConfig,
   upsertEntitlement,
 } from '@dejavue/db';
@@ -30,16 +30,17 @@ export function isOneTimeSku(skuId: string): boolean {
  * a user_id and no guild_id. A first sighting is bridged to the guild the buyer
  * launched the purchase from: the intent recorded per (user, SKU) with the buy button.
  * Bridging consumes the intent for the purchased SKU only, atomically with storing the
- * row (bridgeAndStoreEntitlement), so each intent bridges exactly one purchase.
- * A ladder click records an intent for every top-up pack, valid for
- * TOP_UP_INTENT_TTL_MS (30 min) after the click: several different packs bought from
- * one ladder message each bridge, while buying the SAME pack again needs a fresh click
- * (the second purchase finds no intent and is handled as unbridged, below). A top-up
- * intent is used only for a purchase made within 30 minutes of the click (purchase
- * time = the entitlement's snowflake, so a late-healed missed CREATE still bridges). The custom-domain intent has no age
- * limit. Each entitlement is bridged at most once: only while its stored row is unbound.
- * A redelivered CREATE, an UPDATE or a reconcile pass finds the guild on the stored
- * row instead. Grants are idempotent per entitlement id, so this is safe to repeat.
+ * row (bridgeAndStoreEntitlement), so each intent bridges at most one purchase.
+ * Showing the top-up ladder records an intent for every pack. The FIRST pack bought
+ * after a showing always bridges to that showing's guild, however late; further packs
+ * bridge while they are in the same buying sitting (within TOP_UP_SITTING_MS, 30 min,
+ * of the showing or of the previous pack bridged from it, whichever is later). Buying
+ * the SAME pack again needs a fresh showing. Times are purchase times (the
+ * entitlement's snowflake), so a late-healed missed CREATE is judged as bought. The
+ * custom-domain intent has no age limit. Each entitlement is bridged at most once:
+ * only while its stored row is unbound. A redelivered CREATE, an UPDATE or a reconcile
+ * pass finds the guild on the stored row instead. Grants are idempotent per
+ * entitlement id, so this is safe to repeat.
  *
  * A purchase we cannot bind to any guild is never silently dropped: it is stored
  * unbridged and (with `alertUnbridged`, i.e. on CREATE) raised to ops, who can bind
@@ -61,11 +62,13 @@ export async function storeAndFulfil(
   // A refunded (deleted) purchase is never granted, so it must not use up an intent
   // either: that intent belongs to the buyer's next purchase of this SKU.
   if (!row.guildId && userId && oneTime && !ent.deleted && !(await getEntitlement(db, row.id))?.guildId) {
-    const topUp = isTopUpSku(getEnv(), row.skuId);
+    const env = getEnv();
     const res = await bridgeAndStoreEntitlement(
       db,
       { ...row, userId },
-      { maxAgeMs: topUp ? TOP_UP_INTENT_TTL_MS : undefined },
+      isTopUpSku(env, row.skuId)
+        ? { sitting: { skuIds: topUpTiers(env).map((t) => t.skuId), windowMs: TOP_UP_SITTING_MS } }
+        : {},
     );
     guildId = res.guildId;
     if (res.bridged)
@@ -85,7 +88,7 @@ export async function storeAndFulfil(
         title: '🚨 Unfulfilled one-time purchase',
         description:
           'Paid purchase with no guild to apply it to (no unused purchase intent for this SKU: ' +
-          'never clicked, a top-up bought more than 30 min after the click, or the same pack bought twice from one click). ' +
+          'never shown, a further top-up bought after its 30-min buying sitting, or the same pack bought twice from one showing). ' +
           'Resolve by hand: ' +
           'set entitlement.guild_id, then the next reconcile grants it.',
         fields: [
