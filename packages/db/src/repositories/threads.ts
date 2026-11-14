@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../client';
 import { embedding, thread, type NewThread, type Thread, type TranscriptMessage } from '../schema';
+import { deleteTranscriptAttachments } from './attachments';
 
 /**
  * Whether a thread may have a standalone KB page: not opted out, and not folded as a
@@ -371,7 +372,8 @@ const unfoldPatch = () => ({
 // ---------------------------------------------------------------------------
 // Deletion / reconciliation — keep the index in sync with Discord reality.
 // Embeddings cascade (FK onDelete: cascade); generation_event / cluster medoid
-// FKs are set null, so deleting a thread never orphans or errors.
+// FKs are set null, so deleting a thread never orphans or errors. Re-hosted
+// attachments have no FK, so each delete removes the ones its transcripts showed.
 // ---------------------------------------------------------------------------
 
 /** Delete a thread (and its embeddings) by discord thread id. Returns rows removed. */
@@ -389,7 +391,8 @@ export async function deleteThreadByDiscordId(
   const rows = await db
     .delete(thread)
     .where(and(eq(thread.guildId, guildId), eq(thread.threadId, discordThreadId)))
-    .returning({ id: thread.id });
+    .returning({ id: thread.id, transcript: thread.transcript });
+  await deleteTranscriptAttachments(db, guildId, rows.map((r) => r.transcript));
   return rows.length;
 }
 
@@ -411,7 +414,8 @@ export async function deleteThreadsByChannel(
   const rows = await db
     .delete(thread)
     .where(and(eq(thread.guildId, guildId), eq(thread.channelId, channelId)))
-    .returning({ id: thread.id });
+    .returning({ id: thread.id, transcript: thread.transcript });
+  await deleteTranscriptAttachments(db, guildId, rows.map((r) => r.transcript));
   return rows.length;
 }
 
@@ -429,7 +433,8 @@ export async function deleteThreadsByDiscordIds(
   const rows = await db
     .delete(thread)
     .where(and(eq(thread.guildId, guildId), inArray(thread.threadId, discordThreadIds)))
-    .returning({ id: thread.id });
+    .returning({ id: thread.id, transcript: thread.transcript });
+  await deleteTranscriptAttachments(db, guildId, rows.map((r) => r.transcript));
   return rows.length;
 }
 

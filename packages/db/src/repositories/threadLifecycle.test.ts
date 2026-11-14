@@ -87,6 +87,32 @@ describe('thread lifecycle', () => {
     );
   });
 
+  it('deleting a thread deletes the re-hosted images only its transcript showed', async () => {
+    const transcript = [
+      {
+        authorId: 'u',
+        content: 'see screenshot',
+        createdAt: '2026-01-01T00:00:00Z',
+        attachments: [{ id: 'att1', name: 'shot.webp', kind: 'image' }],
+      },
+    ];
+    // 1: un-fold update, 2: thread delete returning the transcript, 3: attachment delete
+    const { db, queries } = recordingDb([[], [['row', transcript]]]);
+    await deleteThreadByDiscordId(db, 'g', 't');
+    expect(queries).toHaveLength(3);
+    const { sql, params } = queries[2]!;
+    expect(sql).toContain('delete from "attachment"');
+    expect(sql).toContain('not exists (select 1 from "thread"');
+    expect(params).toEqual(expect.arrayContaining(['g', 'att1']));
+  });
+
+  it('deleting a thread without images touches no attachment', async () => {
+    const transcript = [{ authorId: 'u', content: 'hi', createdAt: '2026-01-01T00:00:00Z' }];
+    const { db, queries } = recordingDb([[], [['row', transcript]]]);
+    await deleteThreadByDiscordId(db, 'g', 't');
+    expect(queries.some((q) => q.sql.includes('"attachment"'))).toBe(false);
+  });
+
   it('never publishes a hand-marked duplicate', async () => {
     expect(isPublishable({ doNotPublish: false, duplicateOfThreadId: null, markedDuplicate: true })).toBe(false);
     expect(isPublishable({ doNotPublish: false, duplicateOfThreadId: 'c', markedDuplicate: false })).toBe(false);
